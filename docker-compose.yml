@@ -1,0 +1,134 @@
+version: "3.9"
+
+# ============================================================
+#  开发环境 Docker Compose 配置
+#  使用卷挂载实现热更新，适合本地调试
+#  启动: docker compose up -d
+# ============================================================
+
+services:
+  # ========================================
+  #  PostgreSQL 16 数据库
+  # ========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: oat_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aoo_user
+      POSTGRES_PASSWORD: aoo_password_2024
+      POSTGRES_DB: aoo_guide_path
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aoo_user -d aoo_guide_path"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  Redis 7 缓存 + 消息队列
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: oat_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  FastAPI 后端（开发模式，热重载）
+  # ========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oat_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    working_dir: /app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  Celery Worker（异步任务处理）
+  # ========================================
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oat_celery_worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    working_dir: /app
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  Vue 前端（开发模式，HMR 热更新）
+  # ========================================
+  frontend:
+    image: node:20-alpine
+    container_name: oat_frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      # Docker 容器内 Vite 代理目标使用服务名（通过内部网络通信）
+      VITE_PROXY_TARGET: http://backend:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - aoo_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  aoo_network:
+    driver: bridge

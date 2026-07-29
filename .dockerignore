@@ -1,0 +1,50 @@
+# Node modules
+node_modules/
+
+# Build output
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv_pkgs/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+
+# Environment files (use Docker env)
+.env
+backend/.env
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Tests (excluded from image)
+tests/
+__tests__/
+*.test.ts
+*.spec.ts
+
+# Documentation (excluded from image)
+docs/
+
+# Data (excluded from image)
+data/
+chroma_db/
+
+# Misc
+.codebuddy/

@@ -1,0 +1,1635 @@
+<script setup lang="ts">
+/**
+ * 我的学习路径 页面
+ *
+ * 区域：
+ *   1. 概览卡片（关键指标 + 认知负荷仪表盘 + 完成进度）
+ *   2. 学习路径展示（复用 LearningPathView：Gantt + 时间轴 + 路径切换）
+ *   3. 每日详情面板（点击甘特图某天展开）
+ *   4. AOO 寻优回放（折叠面板 + ECharts 收敛动画）
+ *   5. 操作按钮行（重新规划 / 导出 / 分享）
+ */
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { useRouter } from 'vue-router'
+import * as echarts from 'echarts'
+import { usePathStore } from '@/stores/path'
+import LearningPathView from '@/components/LearningPathView.vue'
+import type { LearningTask, DailyTaskView } from '@/types'
+import type { AOOConvergenceData } from '@/types/aoo'
+import {
+  NodeIndexOutlined,
+  ThunderboltOutlined,
+  ReloadOutlined,
+  DownloadOutlined,
+  ShareAltOutlined,
+  ClockCircleOutlined,
+  BookOutlined,
+  CalendarOutlined,
+  TrophyOutlined,
+  BarChartOutlined,
+  CaretRightOutlined,
+  CheckCircleOutlined,
+  CloseOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
+  FieldTimeOutlined,
+  DashboardOutlined,
+  RightOutlined,
+  LeftOutlined,
+  ExperimentOutlined,
+  SettingOutlined,
+} from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
+
+// ============================================================
+//   Store & Router
+// ============================================================
+const router = useRouter()
+const pathStore = usePathStore()
+
+// ============================================================
+//   基础 State
+// ============================================================
+const loading = ref(false)
+const regenerating = ref(false)
+
+// ============================================================
+//   任务完成状态（本地管理）
+// ============================================================
+const completedTasks = reactive<Set<string>>(new Set())
+
+function toggleTaskComplete(taskId: string) {
+  if (completedTasks.has(taskId)) {
+    completedTasks.delete(taskId)
+  } else {
+    completedTasks.add(taskId)
+  }
+}
+
+function isTaskCompleted(taskId: string): boolean {
+  return completedTasks.has(taskId)
+}
+
+// ============================================================
+//   概览数据
+// ============================================================
+const hasPath = computed(() => pathStore.hasPath)
+const pathId = computed(() => pathStore.pathId)
+const isGenerating = computed(() => pathStore.isGenerating)
+const generationProgress = computed(() => pathStore.generationProgress)
+const error = computed(() => pathStore.error)
+
+const currentPath = computed(() => pathStore.currentPath)
+const totalDays = computed(() => pathStore.totalDays)
+const totalTasks = computed(() => pathStore.taskCount)
+const totalHours = computed(() => pathStore.estimatedHours)
+const optimizationScore = computed(() => pathStore.optimizationScore)
+const difficultyCurve = computed(() => pathStore.difficultyCurve)
+
+/** 总完成百分比 */
+const completionPercent = computed(() => {
+  if (!currentPath.value) return 0
+  const all = currentPath.value.dailyTasks.flat()
+  if (all.length === 0) return 0
+  const done = all.filter((t: LearningTask) => completedTasks.has(t.id)).length
+  return Math.round((done / all.length) * 100)
+})
+
+/** 认知负荷指数（基于难度曲线均值映射 0-100） */
+const cognitiveLoadIndex = computed(() => {
+  const curve = difficultyCurve.value
+  if (!curve || curve.length === 0) return 0
+  const avg = curve.reduce((s: number, v: number) => s + v, 0) / curve.length
+  return Math.round((avg / 5) * 100)
+})
+
+/** 认知负荷等级 */
+const cognitiveLoadLevel = computed(() => {
+  const v = cognitiveLoadIndex.value
+  if (v < 35) return { label: '较低', color: '#52C41A' }
+  if (v < 65) return { label: '适中', color: '#FA8C16' }
+  return { label: '较高', color: '#FF4D4F' }
+})
+
+/** dailyTaskViews 来自 store */
+const dailyViews = computed(() => pathStore.dailyTaskViews)
+
+/** 当前覆盖的知识点数 */
+const coveredKnowledgePoints = computed(() => {
+  const set = new Set<string>()
+  currentPath.value?.dailyTasks.forEach((day) =>
+    day.forEach((t: LearningTask) => set.add(t.knowledgePoint))
+  )
+  return set.size
+})
+
+/** 日均学习时长（小时） */
+const avgDailyHours = computed(() => {
+  if (totalDays.value === 0) return 0
+  return (totalHours.value / totalDays.value).toFixed(1)
+})
+
+// ============================================================
+//   每日详情
+// ============================================================
+const selectedDayIndex = ref<number | null>(null)
+const selectedDay = computed<DailyTaskView | null>(() => {
+  if (selectedDayIndex.value === null) return null
+  return dailyViews.value.find((d) => d.dayIndex === selectedDayIndex.value) ?? null
+})
+
+function handleTaskClick(task: LearningTask) {
+  selectedDayIndex.value = task.dayIndex
+  // 滚动到详情区
+  nextTick(() => {
+    const el = document.getElementById('daily-detail-panel')
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+function closeDayDetail() {
+  selectedDayIndex.value = null
+}
+
+function goToDay(dir: -1 | 1) {
+  if (selectedDayIndex.value === null) return
+  const next = selectedDayIndex.value + dir
+  if (next >= 1 && next <= totalDays.value) {
+    selectedDayIndex.value = next
+  }
+}
+
+// ============================================================
+//   路径变体切换
+// ============================================================
+const variantLabels = ['当前方案', '速成冲刺', '稳扎稳打', '查漏补缺']
+const variantIcons = [SettingOutlined, ThunderboltOutlined, FieldTimeOutlined, ExperimentOutlined]
+const activeVariantIndex = ref(0)
+
+async function handleVariantChange(pathId: string, index: number) {
+  activeVariantIndex.value = index
+  if (index > 0) {
+    await pathStore.selectAlternativePath(pathId)
+  }
+}
+// 备选路径数
+const alternativeCount = computed(() => pathStore.alternativePaths.length)
+
+// ============================================================
+//   AOO 收敛回放
+// ============================================================
+const convergenceExpanded = ref(false)
+const convergenceChartRef = ref<HTMLDivElement | null>(null)
+const isPlaying = ref(false)
+const currentFrame = ref(0)
+let chartInstance: echarts.ECharts | null = null
+let playTimer: ReturnType<typeof setInterval> | null = null
+let resizeObserver: ResizeObserver | null = null
+
+const convergenceData = computed(() => pathStore.convergenceData)
+const hasConvergence = computed(() => pathStore.hasConvergenceData)
+
+const totalFrames = computed(() => convergenceData.value?.iterations?.length ?? 0)
+
+/** 当前帧标注的数据集 */
+const revealedIterations = computed(() => {
+  const data = convergenceData.value
+  if (!data || !data.iterations) return { x: [] as number[], best: [] as number[], avg: [] as number[] }
+  const end = currentFrame.value || data.iterations.length
+  return {
+    x: data.iterations.slice(0, end),
+    best: (data.bestFitness || []).slice(0, end),
+    avg: (data.avgFitness || []).slice(0, end),
+  }
+})
+
+function initConvergenceChart() {
+  if (!convergenceChartRef.value) return
+  chartInstance = echarts.init(convergenceChartRef.value)
+
+  resizeObserver = new ResizeObserver(() => chartInstance?.resize())
+  resizeObserver.observe(convergenceChartRef.value)
+
+  renderConvergenceChart()
+}
+
+function renderConvergenceChart() {
+  if (!chartInstance || !convergenceData.value) return
+  const cd = convergenceData.value
+  const revealed = revealedIterations.value
+
+  const option: echarts.EChartsOption = {
+    animation: true,
+    animationDuration: 400,
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(10,13,20,0.95)',
+      borderColor: 'rgba(212,163,115,0.20)',
+      textStyle: { color: '#F8FAFC', fontSize: 13 },
+    },
+    legend: {
+      data: ['最优适应度', '平均适应度'],
+      bottom: 0,
+      textStyle: { fontSize: 12, color: '#64748B' },
+    },
+    grid: { top: 20, right: 30, bottom: 40, left: 50 },
+    xAxis: {
+      type: 'value',
+      name: '迭代次数',
+      nameTextStyle: { fontSize: 11, color: '#475569' },
+      min: 0,
+      max: cd.iterations?.length ?? 100,
+      axisLabel: { fontSize: 11, color: '#475569' },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: '适应度',
+      nameTextStyle: { fontSize: 11, color: '#475569' },
+      axisLabel: { fontSize: 11, color: '#475569' },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+      min: (val: { min: number }) => Math.floor(val.min * 0.98),
+      max: (val: { max: number }) => Math.ceil(val.max * 1.02),
+    },
+    series: [
+      {
+        name: '最优适应度',
+        type: 'line',
+        data: revealed.best.map((v, i) => [revealed.x[i], v]),
+        smooth: true,
+        lineStyle: { color: '#D4A373', width: 1.5 },
+        itemStyle: { color: '#D4A373' },
+        symbol: 'none',
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(212,163,115,0.15)' },
+          { offset: 1, color: 'rgba(212,163,115,0.02)' },
+        ])},
+      },
+      {
+        name: '平均适应度',
+        type: 'line',
+        data: revealed.avg.map((v, i) => [revealed.x[i], v]),
+        smooth: true,
+        lineStyle: { color: '#4A6CF7', width: 1.2, type: 'dashed' },
+        itemStyle: { color: '#4A6CF7' },
+        symbol: 'none',
+      },
+    ],
+  }
+
+  chartInstance.setOption(option, true)
+}
+
+watch(currentFrame, () => renderConvergenceChart())
+
+function togglePlay() {
+  if (isPlaying.value) {
+    pausePlayback()
+  } else {
+    startPlayback()
+  }
+}
+
+function startPlayback() {
+  if (currentFrame.value >= totalFrames.value) {
+    currentFrame.value = 0
+  }
+  isPlaying.value = true
+  playTimer = setInterval(() => {
+    if (currentFrame.value < totalFrames.value) {
+      currentFrame.value++
+    } else {
+      pausePlayback()
+    }
+  }, 80)
+}
+
+function pausePlayback() {
+  isPlaying.value = false
+  if (playTimer) {
+    clearInterval(playTimer)
+    playTimer = null
+  }
+}
+
+function resetPlayback() {
+  pausePlayback()
+  currentFrame.value = 0
+}
+
+watch(convergenceExpanded, (val) => {
+  if (val) {
+    nextTick(() => {
+      if (!chartInstance) initConvergenceChart()
+      else {
+        chartInstance.resize()
+        renderConvergenceChart()
+      }
+    })
+  }
+})
+
+// ============================================================
+//   操作按钮
+// ============================================================
+async function handleRegenerate() {
+  regenerating.value = true
+  try {
+    await pathStore.generatePath(currentPath.value?.diagnosisId || '')
+  } catch {
+    message.error('重新生成失败，请稍后重试')
+  } finally {
+    regenerating.value = false
+  }
+}
+
+function handleExport() {
+  message.info('导出功能开发中，即将支持 PDF / 图片导出')
+}
+
+function handleShare() {
+  const url = `${window.location.origin}/share/path/${pathId.value}`
+  navigator.clipboard.writeText(url).then(
+    () => message.success('分享链接已复制到剪贴板'),
+    () => message.warning('复制失败，请手动复制地址栏链接')
+  )
+}
+
+function goToDiagnose() {
+  router.push('/diagnose')
+}
+
+// ============================================================
+//   格式化
+// ============================================================
+function formatDate(iso: string | undefined): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('zh-CN', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+const TASK_TYPE_LABELS: Record<string, string> = {
+  video: '视频', quiz: '测验', reading: '阅读', article: '阅读', project: '项目', exercise: '练习',
+}
+const TASK_TYPE_COLORS: Record<string, string> = {
+  video: '#1890FF', quiz: '#FA8C16', reading: '#52C41A', article: '#52C41A', project: '#722ED1', exercise: '#13C2C2',
+}
+
+// ============================================================
+//   生命周期
+// ============================================================
+onMounted(async () => {
+  loading.value = true
+  try {
+    // 总是从 API 获取最新路径数据，避免持久化过期数据导致渲染异常
+    await pathStore.fetchCurrentPath()
+  } finally {
+    loading.value = false
+  }
+})
+
+onUnmounted(() => {
+  pausePlayback()
+  chartInstance?.dispose()
+  resizeObserver?.disconnect()
+})
+</script>
+
+<template>
+  <div class="path-page">
+
+    <!-- =========================================================
+         1. 页面头部 + 操作按钮
+         ========================================================= -->
+    <div class="page-header">
+      <div class="header-left">
+        <h1 class="page-title">
+          <NodeIndexOutlined class="title-icon" />
+          我的学习路径
+        </h1>
+      </div>
+      <div class="header-right" v-if="hasPath && !isGenerating">
+        <a-button class="action-btn" :loading="regenerating" @click="handleRegenerate">
+          <ReloadOutlined /> 重新规划
+        </a-button>
+        <a-button class="action-btn" @click="handleExport">
+          <DownloadOutlined /> 导出路径
+        </a-button>
+        <a-button class="action-btn" type="primary" ghost @click="handleShare">
+          <ShareAltOutlined /> 分享路径
+        </a-button>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         生成中 / 失败 / 空 / 加载 状态
+         ========================================================= -->
+    <div v-if="isGenerating" class="state-card generating">
+      <div class="generating-inner">
+        <div class="spin-icon"><ThunderboltOutlined /></div>
+        <a-spin size="large" />
+        <h3>AOO 引擎正在优化学习路径</h3>
+        <p>分析知识点图谱 · 评估认知负荷 · 计算最优调度</p>
+        <a-progress
+          :percent="generationProgress"
+          :stroke-color="{ from: '#4F7CFF', to: '#52C41A' }"
+          class="generating-progress"
+        />
+      </div>
+    </div>
+
+    <div v-else-if="error" class="state-card error">
+      <a-result status="error" title="路径生成失败" :sub-title="error">
+        <template #extra>
+          <a-button type="primary" @click="handleRegenerate">
+            <ThunderboltOutlined /> 重新生成
+          </a-button>
+        </template>
+      </a-result>
+    </div>
+
+    <div v-else-if="!hasPath && !loading" class="state-card empty">
+      <a-result title="尚未生成学习路径">
+        <template #icon><NodeIndexOutlined style="color: #9B8A7A; font-size: 64px;" /></template>
+        <template #sub-title>完成认知诊断后，AOO 引擎将为你量身定制专属学习路径</template>
+        <template #extra>
+          <a-button type="primary" size="large" @click="goToDiagnose">前往认知诊断</a-button>
+        </template>
+      </a-result>
+    </div>
+
+    <div v-else-if="loading" class="state-card">
+      <a-spin size="large" tip="加载学习路径..." />
+    </div>
+
+    <!-- =========================================================
+         2. 概览卡片区
+         ========================================================= -->
+    <template v-if="hasPath && !isGenerating">
+      <div class="overview-grid">
+        <!-- 路径信息卡片 -->
+        <div class="overview-card overview-card--info">
+          <div class="overview-card-header">
+            <div class="overview-card-icon" style="background: #EFF3FF; color: #4F7CFF;">
+              <CalendarOutlined />
+            </div>
+            <div>
+              <div class="overview-card-label">当前路径</div>
+              <div class="overview-card-title">AOO 智能推荐方案</div>
+            </div>
+          </div>
+          <div class="overview-card-meta">
+            <span>生成于 {{ formatDate(currentPath?.createdAt) }}</span>
+            <span v-if="currentPath?.metadata?.generationTime">
+              耗时 {{ currentPath.metadata.generationTime.toFixed(1) }}s
+            </span>
+          </div>
+        </div>
+
+        <!-- 总天数 -->
+        <div class="overview-card overview-card--metric">
+          <div class="overview-card-icon" style="background: #E6F4FF; color: #1677FF;">
+            <CalendarOutlined />
+          </div>
+          <div class="overview-metric-value">{{ totalDays }}</div>
+          <div class="overview-metric-label">总天数</div>
+        </div>
+
+        <!-- 总任务数 -->
+        <div class="overview-card overview-card--metric">
+          <div class="overview-card-icon" style="background: #F6FFED; color: #52C41A;">
+            <BookOutlined />
+          </div>
+          <div class="overview-metric-value">{{ totalTasks }}</div>
+          <div class="overview-metric-label">总任务数</div>
+        </div>
+
+        <!-- 总时长 -->
+        <div class="overview-card overview-card--metric">
+          <div class="overview-card-icon" style="background: rgba(251, 191, 36, 0.12); color: #FBBF24;">
+            <ClockCircleOutlined />
+          </div>
+          <div class="overview-metric-value">{{ totalHours }}<span class="metric-unit">h</span></div>
+          <div class="overview-metric-label">预计总时长</div>
+        </div>
+
+        <!-- 认知负荷仪表盘 -->
+        <div class="overview-card overview-card--gauge">
+          <div class="overview-card-icon" style="background: rgba(248, 113, 113, 0.12); color: #F87171;">
+            <DashboardOutlined />
+          </div>
+          <div class="gauge-wrap">
+            <!-- SVG 仪表盘 -->
+            <svg viewBox="0 0 100 60" class="gauge-svg">
+              <!-- 底色弧 -->
+              <path
+                d="M 12 52 A 38 38 0 0 1 88 52"
+                fill="none"
+                stroke="#F0F0F0"
+                stroke-width="10"
+                stroke-linecap="round"
+              />
+              <!-- 值弧 -->
+              <path
+                d="M 12 52 A 38 38 0 0 1 88 52"
+                fill="none"
+                :stroke="cognitiveLoadLevel.color"
+                stroke-width="10"
+                stroke-linecap="round"
+                :stroke-dasharray="`${cognitiveLoadIndex * 1.19} 200`"
+                class="gauge-value-arc"
+              />
+              <!-- 指针 -->
+              <line
+                x1="50" y1="52"
+                :x2="50 + 35 * Math.cos(Math.PI - (cognitiveLoadIndex / 100) * Math.PI)"
+                :y2="52 - 35 * Math.sin(Math.PI - (cognitiveLoadIndex / 100) * Math.PI)"
+                :stroke="cognitiveLoadLevel.color"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+              <circle cx="50" cy="52" r="3" fill="#3D3B39" />
+            </svg>
+            <div class="gauge-value" :style="{ color: cognitiveLoadLevel.color }">
+              {{ cognitiveLoadIndex }}
+            </div>
+          </div>
+          <div class="overview-metric-label">认知负荷 · {{ cognitiveLoadLevel.label }}</div>
+        </div>
+
+        <!-- 完成进度 -->
+        <div class="overview-card overview-card--progress">
+          <div class="overview-card-icon" style="background: #F9F0FF; color: #722ED1;">
+            <TrophyOutlined />
+          </div>
+          <div class="progress-circle-wrap">
+            <!-- SVG 环形进度 -->
+            <svg viewBox="0 0 100 100" class="progress-circle-svg">
+              <circle cx="50" cy="50" r="38" fill="none" stroke="#F0F0F0" stroke-width="8" />
+              <circle
+                cx="50" cy="50" r="38"
+                fill="none"
+                stroke="#722ED1"
+                stroke-width="8"
+                stroke-linecap="round"
+                :stroke-dasharray="`${completionPercent * 2.388} 400`"
+                transform="rotate(-90 50 50)"
+                class="progress-circle-arc"
+              />
+            </svg>
+            <div class="progress-circle-text">
+              <span class="progress-circle-value">{{ completionPercent }}</span>
+              <span class="progress-circle-unit">%</span>
+            </div>
+          </div>
+          <div class="overview-metric-label">路径完成度</div>
+        </div>
+
+        <!-- 覆盖知识点 + 日均 -->
+        <div class="overview-card overview-card--extras">
+          <div class="extra-row">
+            <div class="extra-item">
+              <div class="extra-value">{{ coveredKnowledgePoints }}</div>
+              <div class="extra-label">覆盖知识点</div>
+            </div>
+            <div class="extra-divider" />
+            <div class="extra-item">
+              <div class="extra-value">{{ avgDailyHours }}<span class="metric-unit">h</span></div>
+              <div class="extra-label">日均学习</div>
+            </div>
+            <div class="extra-divider" />
+            <div class="extra-item">
+              <div class="extra-value">{{ optimizationScore }}</div>
+              <div class="extra-label">优化得分</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- =========================================================
+           3. 路径切换 Tabs
+           ========================================================= -->
+      <div class="variant-tabs" v-if="alternativeCount > 0">
+        <button
+          v-for="(label, idx) in variantLabels.slice(0, 1 + alternativeCount)"
+          :key="idx"
+          class="variant-tab"
+          :class="{ 'is-active': activeVariantIndex === idx }"
+          @click="handleVariantChange(
+            idx === 0 ? (currentPath?.id ?? '') : (pathStore.alternativePaths[idx - 1]?.id ?? ''),
+            idx
+          )"
+        >
+          <component :is="variantIcons[idx]" class="variant-tab-icon" />
+          <span>{{ label }}</span>
+          <span v-if="idx === 0" class="variant-tag current">当前</span>
+        </button>
+      </div>
+
+      <!-- =========================================================
+           4. 甘特图 / 时间轴 主视图
+           ========================================================= -->
+      <LearningPathView
+        :key="pathId + activeVariantIndex"
+        :show-stats="false"
+        :show-variants="false"
+        :show-legend="true"
+        :height="'auto'"
+        initial-view="gantt"
+        @task-click="handleTaskClick"
+      />
+
+      <!-- =========================================================
+           5. 每日详情面板
+           ========================================================= -->
+      <div v-if="selectedDay" id="daily-detail-panel" class="daily-detail">
+        <div class="daily-detail-header">
+          <div class="daily-detail-title-row">
+            <button class="daily-nav-btn" @click="goToDay(-1)" :disabled="selectedDay.dayIndex <= 1">
+              <LeftOutlined />
+            </button>
+            <h3 class="daily-detail-title">
+              {{ selectedDay.dayLabel }} · {{ selectedDay.date }}
+            </h3>
+            <button class="daily-nav-btn" @click="goToDay(1)" :disabled="selectedDay.dayIndex >= totalDays">
+              <RightOutlined />
+            </button>
+          </div>
+          <div class="daily-detail-meta">
+            <span><ClockCircleOutlined /> {{ selectedDay.totalMinutes }} 分钟</span>
+            <span><BarChartOutlined /> 难度 {{ selectedDay.difficulty }}</span>
+            <span><CheckCircleOutlined />
+              {{ selectedDay.tasks.filter((t: LearningTask) => completedTasks.has(t.id)).length }}/{{ selectedDay.tasks.length }} 已完成
+            </span>
+          </div>
+          <a-button type="text" size="small" @click="closeDayDetail">
+            <CloseOutlined />
+          </a-button>
+        </div>
+
+        <div class="daily-task-list">
+          <div
+            v-for="task in selectedDay.tasks"
+            :key="task.id"
+            class="daily-task-item"
+            :class="{ 'is-completed': isTaskCompleted(task.id) }"
+          >
+            <div
+              class="daily-task-status"
+              :style="{ borderColor: TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF' }"
+              @click="toggleTaskComplete(task.id)"
+            >
+              <CheckCircleOutlined v-if="isTaskCompleted(task.id)" />
+            </div>
+            <div class="daily-task-body">
+              <div class="daily-task-header">
+                <span class="daily-task-name">{{ task.title }}</span>
+                <span
+                  class="daily-task-type"
+                  :style="{ background: (TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF') + '1a', color: TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF' }"
+                >
+                  {{ TASK_TYPE_LABELS[task.resources?.[0]?.type] || '任务' }}
+                </span>
+              </div>
+              <p class="daily-task-desc" v-if="task.description">{{ task.description }}</p>
+              <div class="daily-task-footer">
+                <span class="daily-task-kp">{{ task.knowledgePoint }}</span>
+                <span class="daily-task-time">
+                  <ClockCircleOutlined /> {{ task.estimatedMinutes }} 分钟
+                </span>
+              </div>
+              <!-- 学习资源 -->
+              <div class="daily-task-resources" v-if="task.resources?.length">
+                <a
+                  v-for="res in task.resources"
+                  :key="res.title"
+                  class="resource-link"
+                  :href="res.url || '#'"
+                  target="_blank"
+                >
+                  <CaretRightOutlined /> {{ res.title }}
+                </a>
+              </div>
+            </div>
+            <a-button
+              type="primary"
+              size="small"
+              class="daily-task-action"
+              :ghost="isTaskCompleted(task.id)"
+              @click="toggleTaskComplete(task.id)"
+            >
+              {{ isTaskCompleted(task.id) ? '已完成' : '开始学习' }}
+            </a-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- =========================================================
+           6. AOO 寻优过程回放
+           ========================================================= -->
+      <div class="convergence-section" v-if="hasConvergence">
+        <a-collapse :activeKey="convergenceExpanded ? ['1'] : []" :bordered="false">
+          <a-collapse-panel key="1">
+            <template #header>
+              <div class="convergence-header">
+                <PlayCircleOutlined class="convergence-header-icon" />
+                <span>AOO 寻优过程回放</span>
+                <span class="convergence-header-badge" v-if="convergenceData?.metadata">
+                  {{ convergenceData.metadata.populationSize }} 个体 · {{ convergenceData.metadata.convergenceRate?.toFixed(1) }}% 收敛率
+                </span>
+              </div>
+            </template>
+
+            <div class="convergence-body">
+              <!-- 回放控制栏 -->
+              <div class="convergence-controls">
+                <a-button
+                  :type="isPlaying ? 'default' : 'primary'"
+                  size="small"
+                  @click="togglePlay"
+                >
+                  <PauseCircleOutlined v-if="isPlaying" />
+                  <PlayCircleOutlined v-else />
+                  {{ isPlaying ? '暂停' : '播放' }}
+                </a-button>
+                <a-button size="small" @click="resetPlayback">
+                  <ReloadOutlined /> 重置
+                </a-button>
+                <span class="convergence-frame-info">
+                  迭代 {{ currentFrame }} / {{ totalFrames }}
+                </span>
+                <a-slider
+                  v-model:value="currentFrame"
+                  :min="0"
+                  :max="totalFrames"
+                  :step="1"
+                  class="convergence-slider"
+                  :tooltip="{ formatter: (v: number) => `迭代 ${v}` }"
+                />
+              </div>
+
+              <!-- ECharts 容器 -->
+              <div ref="convergenceChartRef" class="convergence-chart" />
+
+              <!-- 元信息 -->
+              <div class="convergence-meta" v-if="convergenceData?.metadata">
+                <span>算法：{{ convergenceData.metadata.algorithm || 'AOO' }}</span>
+                <span>种群大小：{{ convergenceData.metadata.populationSize }}</span>
+                <span>精英数量：{{ convergenceData.metadata.eliteCount }}</span>
+                <span>总耗时：{{ convergenceData.metadata.totalTimeSeconds?.toFixed(1) }}s</span>
+                <span>收敛代数：{{ convergenceData.metadata.convergenceIteration }}</span>
+              </div>
+            </div>
+          </a-collapse-panel>
+        </a-collapse>
+      </div>
+
+      <!-- 无收敛数据的说明 -->
+      <div v-else-if="currentPath?.metadata?.generationTime" class="convergence-section convergence-section--empty">
+        <div class="convergence-empty">
+          <BarChartOutlined style="font-size: 28px; color: #A8A6A2;" />
+          <span>当前路径不包含 AOO 收敛过程数据</span>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<style scoped lang="less">
+@import '@/assets/styles/variables.less';
+
+// ============================================================
+//   页面容器
+// ============================================================
+.path-page {
+  max-width: var(--content-max-width, clamp(60rem, 80rem, 80rem));
+  margin: 0 auto;
+  padding: 0 0 clamp(1.5rem, 2.5rem, 3rem);
+}
+
+// ============================================================
+//   页面头部
+// ============================================================
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: @spacing-lg;
+  flex-wrap: wrap;
+  gap: @spacing-sm;
+}
+
+.page-title {
+  font-size: @font-size-2xl;
+  font-weight: @font-weight-heavy;
+  color: @gray-50;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title-icon {
+  color: @brand-oat-300;
+  font-size: 26px;
+}
+
+.header-right {
+  display: flex;
+  gap: @spacing-sm;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  border-radius: @radius-btn;
+  font-weight: @font-weight-medium;
+  font-size: @font-size-sm;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+// ============================================================
+//   状态卡片
+// ============================================================
+.state-card {
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.generating-inner {
+  text-align: center;
+
+  .spin-icon {
+    font-size: 48px;
+    color: @brand-oat-300;
+    margin-bottom: @spacing-md;
+    opacity: 0.6;
+  }
+
+  h3 {
+    font-size: @font-size-lg;
+    color: @gray-50;
+    margin: @spacing-md 0 @spacing-sm;
+  }
+
+  p {
+    font-size: @font-size-sm;
+    color: @gray-400;
+    margin: 0 0 @spacing-lg;
+  }
+}
+
+.generating-progress {
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+// ============================================================
+//   概览卡片网格 — 金属精密风格
+// ============================================================
+.overview-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1.3fr 1.3fr;
+  grid-template-rows: auto auto;
+  gap: @spacing-md;
+  margin-bottom: @spacing-lg;
+}
+
+.overview-card {
+  .metal-card();
+  padding: 16px 18px;
+  .metal-card-hover();
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 32px;
+    height: 24px;
+    background: linear-gradient(135deg, transparent 40%, rgba(212,163,115,0.06) 100%);
+    pointer-events: none;
+  }
+}
+
+// ── 信息卡片（跨整行） ──
+.overview-card--info {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+
+  &::after { display: none; }
+}
+
+.overview-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.overview-card-label {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.overview-card-title {
+  font-size: @font-size-md;
+  font-weight: @font-weight-bold;
+  color: @gray-50;
+}
+
+.overview-card-meta {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  display: flex;
+  gap: @spacing-md;
+  font-family: @font-family-mono;
+}
+
+// ── 度量卡片 ──
+.overview-card--metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.overview-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: @radius-btn;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.overview-metric-value {
+  .spring-number();
+  font-size: 28px;
+  font-weight: @font-weight-heavy;
+  color: @brand-oat-300;
+  line-height: 1.1;
+  font-family: @font-family-mono;
+}
+
+.metric-unit {
+  font-size: 13px;
+  font-weight: @font-weight-medium;
+  color: @gray-400;
+  margin-left: 2px;
+}
+
+.overview-metric-label {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+// ── 仪表盘卡片 ──
+.overview-card--gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gauge-wrap {
+  position: relative;
+  width: 90px;
+  height: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.gauge-svg {
+  width: 100%;
+  height: 55px;
+
+  path:first-child { stroke: rgba(255,255,255,0.06); }
+}
+
+.gauge-value-arc {
+  transition: stroke-dasharray 1s ease;
+}
+
+.gauge-value {
+  font-size: 18px;
+  font-weight: @font-weight-heavy;
+  line-height: 1;
+  margin-top: -6px;
+  font-family: @font-family-mono;
+}
+
+// ── 进度环卡片 ──
+.overview-card--progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.progress-circle-wrap {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 4px;
+}
+
+.progress-circle-svg {
+  width: 100%;
+  height: 100%;
+
+  circle:first-child { stroke: rgba(255,255,255,0.06); }
+}
+
+.progress-circle-arc {
+  transition: stroke-dasharray 1.2s ease;
+}
+
+.progress-circle-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  line-height: 1;
+}
+
+.progress-circle-value {
+  font-size: 18px;
+  font-weight: @font-weight-heavy;
+  color: @gray-50;
+  font-family: @font-family-mono;
+}
+
+.progress-circle-unit {
+  font-size: @font-size-xs;
+  color: @gray-400;
+}
+
+// ── 扩展卡片（覆盖知识点 + 日均 + 得分） ──
+.overview-card--extras {
+  grid-column: 1 / -1;
+  padding: 10px 20px;
+
+  &::after { display: none; }
+}
+
+.extra-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.extra-item {
+  text-align: center;
+}
+
+.extra-value {
+  .spring-number();
+  font-size: 22px;
+  font-weight: @font-weight-bold;
+  color: @gray-50;
+  line-height: 1.2;
+  font-family: @font-family-mono;
+}
+
+.extra-label {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.extra-divider {
+  width: 1px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+// ============================================================
+//   路径切换 Tabs — 金属精密
+// ============================================================
+.variant-tabs {
+  display: flex;
+  gap: @spacing-sm;
+  margin-bottom: @spacing-md;
+  flex-wrap: wrap;
+}
+
+.variant-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 18px;
+  border: 1px solid @metal-border;
+  border-radius: @radius-btn;
+  background: @metal-bg;
+  color: @gray-300;
+  font-size: 13px;
+  font-weight: @font-weight-medium;
+  cursor: pointer;
+  transition: all @transition-fast;
+  position: relative;
+  font-family: inherit;
+
+  &:hover {
+    border-color: @metal-border-hover;
+    background: @metal-bg-hover;
+    color: @gray-50;
+  }
+
+  &.is-active {
+    border-color: @brand-oat-300;
+    background: @metal-bg-active;
+    color: @brand-oat-300;
+    box-shadow: @shadow-oat-accent;
+  }
+}
+
+.variant-tab-icon { font-size: 15px; }
+
+.variant-tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: @radius-tag;
+  font-weight: @font-weight-bold;
+  font-family: @font-family-mono;
+
+  &.current {
+    background: @brand-oat-300;
+    color: @gray-900;
+  }
+}
+
+// ============================================================
+//   每日详情面板 — 精密紧凑
+// ============================================================
+.daily-detail {
+  margin-top: @spacing-lg;
+  .metal-card();
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.daily-detail-header {
+  display: flex;
+  align-items: center;
+  gap: @spacing-md;
+  padding: 14px 18px;
+  border-bottom: 1px solid @metal-border;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.daily-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+  flex: 1;
+}
+
+.daily-nav-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid @metal-border;
+  border-radius: @radius-btn;
+  background: @metal-bg;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: @gray-300;
+  font-size: 11px;
+  transition: all @transition-fast;
+
+  &:hover:not(:disabled) {
+    border-color: @brand-oat-300;
+    color: @brand-oat-300;
+  }
+
+  &:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+  }
+}
+
+.daily-detail-title {
+  font-size: @font-size-md;
+  font-weight: @font-weight-bold;
+  color: @gray-50;
+  margin: 0;
+}
+
+.daily-detail-meta {
+  display: flex;
+  gap: @spacing-md;
+  font-size: @font-size-xs;
+  color: @gray-400;
+  font-family: @font-family-mono;
+
+  span {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+}
+
+.daily-task-list {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-sm;
+  max-height: 440px;
+  overflow-y: auto;
+}
+
+.daily-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: @radius-card;
+  border: 1px solid @metal-border;
+  background: rgba(255, 255, 255, 0.015);
+  transition: all @transition-fast;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  &.is-completed {
+    background: rgba(46, 204, 113, 0.04);
+    border-color: rgba(46, 204, 113, 0.10);
+
+    .daily-task-name {
+      text-decoration: line-through;
+      color: @gray-400;
+    }
+  }
+}
+
+.daily-task-status {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all @transition-fast;
+  color: transparent;
+  font-size: 12px;
+  margin-top: 2px;
+
+  .is-completed & {
+    color: @color-success;
+  }
+}
+
+.daily-task-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.daily-task-header {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+  margin-bottom: 3px;
+}
+
+.daily-task-name {
+  font-size: @font-size-md;
+  font-weight: @font-weight-semibold;
+  color: @gray-50;
+}
+
+.daily-task-type {
+  font-size: @font-size-xs;
+  padding: 1px 7px;
+  border-radius: @radius-tag;
+  font-weight: @font-weight-medium;
+  white-space: nowrap;
+}
+
+.daily-task-desc {
+  font-size: @font-size-sm;
+  color: @gray-400;
+  margin: 0 0 6px 0;
+  line-height: @line-height-base;
+}
+
+.daily-task-footer {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+  font-size: @font-size-xs;
+}
+
+.daily-task-kp {
+  color: @brand-oat-300;
+  background: rgba(212, 163, 115, 0.08);
+  padding: 1px 7px;
+  border-radius: @radius-tag;
+  font-weight: @font-weight-medium;
+  font-family: @font-family-mono;
+}
+
+.daily-task-time {
+  color: @gray-400;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.daily-task-resources {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.resource-link {
+  font-size: @font-size-xs;
+  color: @brand-cyan-400;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  background: rgba(0, 212, 255, 0.06);
+  border-radius: @radius-tag;
+  transition: background @transition-fast;
+
+  &:hover { background: rgba(0, 212, 255, 0.12); }
+}
+
+.daily-task-action {
+  flex-shrink: 0;
+  margin-top: 2px;
+  border-radius: @radius-btn;
+  font-weight: @font-weight-medium;
+  font-size: @font-size-xs;
+}
+
+// ============================================================
+//   AOO 收敛回放 — 精密控制面板
+// ============================================================
+.convergence-section {
+  margin-top: @spacing-lg;
+  border-radius: @radius-card;
+  overflow: hidden;
+  .metal-card();
+
+  :deep(.ant-collapse) {
+    border: none;
+    background: transparent;
+  }
+
+  :deep(.ant-collapse-item) {
+    border: none;
+  }
+
+  :deep(.ant-collapse-header) {
+    padding: 14px 18px;
+    font-weight: @font-weight-semibold;
+    color: @gray-50;
+    font-size: @font-size-md;
+  }
+
+  :deep(.ant-collapse-content-box) {
+    padding: 0 18px 18px;
+  }
+}
+
+.convergence-section--empty {
+  padding: 0;
+  border: 1px dashed @metal-border;
+}
+
+.convergence-empty {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+  padding: 20px 18px;
+  color: @gray-400;
+  font-size: @font-size-sm;
+}
+
+.convergence-header {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+}
+
+.convergence-header-icon {
+  color: @brand-blue-400;
+  font-size: 17px;
+}
+
+.convergence-header-badge {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  margin-left: auto;
+  font-weight: @font-weight-normal;
+  font-family: @font-family-mono;
+}
+
+.convergence-body {
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-md;
+}
+
+.convergence-controls {
+  display: flex;
+  align-items: center;
+  gap: @spacing-sm;
+}
+
+.convergence-frame-info {
+  font-size: @font-size-xs;
+  color: @gray-400;
+  white-space: nowrap;
+  font-family: @font-family-mono;
+}
+
+.convergence-slider {
+  flex: 1;
+  min-width: 100px;
+}
+
+.convergence-chart {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  min-height: 240px;
+}
+
+.convergence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @spacing-sm;
+  font-size: @font-size-xs;
+  color: @gray-400;
+
+  span {
+    background: rgba(255, 255, 255, 0.04);
+    padding: 2px 8px;
+    border-radius: @radius-tag;
+    color: @gray-300;
+    font-family: @font-family-mono;
+  }
+}
+
+// ============================================================
+//   响应式
+// ============================================================
+@media (max-width: 1280px) {
+  .path-page {
+    max-width: 100%;
+    padding: 0 @spacing-md 2rem;
+  }
+}
+
+@media (max-width: 1024px) {
+  .overview-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: auto;
+  }
+
+  .overview-card--info { grid-column: 1 / -1; }
+  .overview-card--extras { grid-column: 1 / -1; }
+
+  .convergence-chart {
+    aspect-ratio: 4 / 3;
+    min-height: 260px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: @spacing-sm;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .overview-card--info { grid-column: 1 / -1; }
+  .overview-card--gauge { grid-column: 1 / -1; }
+  .overview-card--progress { grid-column: 1 / -1; }
+  .overview-card--extras { grid-column: 1 / -1; }
+
+  .overview-card--info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: @spacing-sm;
+  }
+
+  .daily-detail-header {
+    flex-wrap: wrap;
+  }
+
+  .daily-detail-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .convergence-controls {
+    flex-wrap: wrap;
+  }
+
+  .convergence-slider {
+    min-width: 100%;
+    order: 10;
+  }
+
+  .variant-tab {
+    padding: 0.375rem 0.75rem;
+    font-size: @font-size-xs;
+    min-height: @touch-target-min;
+  }
+
+  .daily-task-action {
+    font-size: @font-size-xs;
+    padding: 0 10px;
+    min-height: @touch-target-min;
+  }
+
+  .convergence-chart {
+    aspect-ratio: 4 / 3;
+    min-height: 240px;
+  }
+
+  .task-tooltip {
+    left: auto;
+    right: 0;
+    width: 240px;
+  }
+}
+
+@media (max-width: 480px) {
+  .path-page {
+    padding: 0 @spacing-xs 1.5rem;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: @spacing-sm;
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-card--info,
+  .overview-card--gauge,
+  .overview-card--progress,
+  .overview-card--extras,
+  .overview-card--metric {
+    grid-column: 1 / -1;
+  }
+
+  .variant-tab {
+    padding: 0.3125rem 0.5rem;
+    font-size: @font-size-xs;
+  }
+
+  .convergence-chart {
+    aspect-ratio: 1 / 1;
+    min-height: 220px;
+  }
+}
+</style>

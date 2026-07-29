@@ -1,0 +1,119 @@
+version: "3.9"
+
+# ============================================================
+#  生产环境 Docker Compose 配置
+#  启动: docker compose -f docker-compose.prod.yml up -d
+#  停止: docker compose -f docker-compose.prod.yml down
+# ============================================================
+
+services:
+  # ========================================
+  #  PostgreSQL 16 数据库
+  # ========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: oat_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aoo_user
+      POSTGRES_PASSWORD: aoo_password_2024
+      POSTGRES_DB: aoo_guide_path
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aoo_user -d aoo_guide_path"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  Redis 7 缓存 + 消息队列
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: oat_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  FastAPI 后端
+  # ========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oat_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  Celery Worker (异步任务)
+  # ========================================
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oat_celery_worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info --concurrency=4
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - aoo_network
+
+  # ========================================
+  #  前端 (Nginx 静态服务)
+  # ========================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oat_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - aoo_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  aoo_network:
+    driver: bridge

@@ -1,0 +1,248 @@
+// ============================================================
+//   燕麦智导 — 全局设计令牌 (Design Tokens)
+//   风格：未来主义科技风 · 深色主题 · 燕麦金 + 极光蓝
+//   对标：iF / 红点奖 视觉标准
+// ============================================================
+
+// ── 品牌色板 · 燕麦金 (Oat Gold) ─────────────────────────
+@brand-oat-50:  #FAEDCD;
+@brand-oat-100: #F5E0B7;
+@brand-oat-200: #E8CB8F;
+@brand-oat-300: #D4A373;   // ★ 核心主色
+@brand-oat-400: #C08B5C;
+@brand-oat-500: #9B6F45;
+@brand-oat-600: #7D5532;
+
+// ── 品牌色板 · 极光蓝 (Aurora Blue) ──────────────────────
+@brand-blue-50:  #E8EEFF;
+@brand-blue-100: #C5D4FF;
+@brand-blue-200: #9AB5FF;
+@brand-blue-300: #6B93FF;
+@brand-blue-400: #4A6CF7;   // ★ 辅助科技色
+@brand-blue-500: #3B54D4;
+@brand-blue-600: #2A3FB3;
+@brand-blue-700: #1C2C8A;
+
+// ── 品牌色板 · 青蓝 (Cyan) ───────────────────────────────
+@brand-cyan-400: #00D4FF;   // ★ 算法可视化强调色
+@brand-cyan-500: #00B8E6;
+@brand-cyan-600: #0099CC;
+
+// ── 功能色 ────────────────────────────────────────────────
+@color-success: #34D399;
+@color-warning: #FBBF24;
+@color-error:   #F87171;
+@color-info:    @brand-cyan-400;
+
+// ── 中性色（深空灰系） ────────────────────────────────────
+@gray-50:  #F8FAFC;
+@gray-100: #E2E8F0;
+@gray-200: #CBD5E1;
+@gray-300: #94A3B8;   // ★ 次级文字
+@gray-400: #64748B;
+@gray-500: #475569;
+@gray-600: #334155;
+@gray-700: #1E293B;
+@gray-800: #141B2B;   // ★ 深空蓝（次背景）
+@gray-900: #0A0D14;   // ★ 碳黑（主背景）
+
+// ── 金属精密卡片 (Metal Card) Tokens ──────────────────────
+@metal-bg:              rgba(255, 255, 255, 0.02);
+@metal-bg-hover:        rgba(255, 255, 255, 0.05);
+@metal-bg-active:       rgba(212, 163, 115, 0.10);
+@metal-border:          rgba(255, 255, 255, 0.06);
+@metal-border-hover:    rgba(255, 255, 255, 0.12);
+
+// ── 触控目标 ──────────────────────────────────────────────
+@touch-target-min:  44px;
+
+// ── 毛玻璃 · 深色主题 (Dark Glassmorphism) ────────────────
+@glass-bg:            rgba(255, 255, 255, 0.04);
+@glass-bg-hover:      rgba(255, 255, 255, 0.07);
+@glass-bg-active:     rgba(255, 255, 255, 0.10);
+@glass-border:        rgba(255, 255, 255, 0.08);
+@glass-border-hover:  rgba(255, 255, 255, 0.14);
+@glass-blur:          16px;
+@glass-blur-light:    10px;
+@glass-blur-heavy:    24px;
+
+// ── 阴影层级 · 深色主题 ───────────────────────────────────
+@shadow-xs:   0 1px 2px  rgba(0, 0, 0, 0.30);
+@shadow-sm:   0 1px 3px  rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+@shadow-md:   0 4px 12px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+@shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.40), 0 2px 8px rgba(0, 0, 0, 0.25);
+@shadow-xl:   0 16px 48px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.25);
+@shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.30), 0 0 0 1px rgba(255, 255, 255, 0.06);
+@shadow-glass-hover: 0 12px 40px rgba(0, 0, 0, 0.40), 0 0 0 1px rgba(212, 163, 115, 0.15);
+@shadow-oat-glow: 0 0 20px rgba(212, 163, 115, 0.15), 0 0 60px rgba(212, 163, 115, 0.06);
+@shadow-blue-glow: 0 0 20px rgba(74, 108, 247, 0.15), 0 0 60px rgba(74, 108, 247, 0.06);
+@shadow-oat-accent: 0 0 0 1px rgba(212, 163, 115, 0.25), 0 2px 8px rgba(212, 163, 115, 0.12);
+@shadow-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.25);
+@shadow-elevation-2: 0 3px 8px rgba(0, 0, 0, 0.30);
+@shadow-elevation-3: 0 6px 16px rgba(0, 0, 0, 0.35);
+
+// ── 圆角 ──────────────────────────────────────────────────
+@radius-xs:   4px;
+@radius-sm:   8px;
+@radius-btn:  8px;
+@radius-md:   12px;
+@radius-lg:   16px;
+@radius-xl:   20px;
+@radius-2xl:  24px;
+@radius-full: 9999px;
+
+// 扩展圆角 — 组件粒度
+@radius-card:  10px;
+@radius-tag:   4px;
+
+// ── 间距 ──────────────────────────────────────────────────
+@spacing-xs:  4px;
+@spacing-sm:  8px;
+@spacing-md:  16px;
+@spacing-lg:  24px;
+@spacing-xl:  32px;
+@spacing-2xl: 48px;
+@spacing-3xl: 64px;
+@spacing-4xl: 80px;
+
+// ── 排版 ──────────────────────────────────────────────────
+@font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+                    'Helvetica Neue', Arial, sans-serif;
+@font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas,
+                    'Liberation Mono', Menlo, monospace;
+
+@font-size-xs:   12px;
+@font-size-sm:   13px;
+@font-size-base: 14px;
+@font-size-md:   15px;
+@font-size-lg:   18px;
+@font-size-xl:   22px;
+@font-size-2xl:  28px;
+@font-size-3xl:  36px;
+@font-size-4xl:  48px;
+
+@line-height-tight:  1.2;
+@line-height-base:   1.5;
+@line-height-relaxed: 1.7;
+
+@font-weight-normal:  400;
+@font-weight-medium:  500;
+@font-weight-semibold: 600;
+@font-weight-bold:    700;
+@font-weight-heavy:   800;
+
+// ── 过渡动画 ──────────────────────────────────────────────
+@transition-fast:    150ms cubic-bezier(0.4, 0, 0.2, 1);
+@transition-base:    250ms cubic-bezier(0.4, 0, 0.2, 1);
+@transition-slow:    400ms cubic-bezier(0.4, 0, 0.2, 1);
+@transition-spring:  500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+// ── Z-Index 层级 ──────────────────────────────────────────
+@z-dropdown:  1000;
+@z-sticky:    1020;
+@z-fixed:     1030;
+@z-modal-bg:  1040;
+@z-modal:     1050;
+@z-popover:   1060;
+@z-tooltip:   1070;
+
+// ── 布局断点 ──────────────────────────────────────────────
+@screen-xs:  480px;
+@screen-sm:  768px;
+@screen-md:  1024px;
+@screen-lg:  1280px;
+@screen-xl:  1536px;
+@screen-2xl: 1920px;
+
+// ── 侧边栏 ────────────────────────────────────────────────
+@sidebar-width:       240px;
+@sidebar-collapsed:   64px;
+@header-height:       56px;
+@footer-height:       40px;
+
+// ── 混合宏 (Mixins) ───────────────────────────────────────
+
+// 深色毛玻璃卡片
+.glass-card() {
+  background: @glass-bg;
+  backdrop-filter: blur(@glass-blur);
+  -webkit-backdrop-filter: blur(@glass-blur);
+  border: 1px solid @glass-border;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-glass;
+  transition:
+    background @transition-base,
+    box-shadow @transition-base,
+    border-color @transition-base,
+    transform @transition-base;
+}
+
+.glass-card-hover() {
+  &:hover {
+    background: @glass-bg-hover;
+    border-color: @glass-border-hover;
+    box-shadow: @shadow-glass-hover;
+    transform: translateY(-2px);
+  }
+}
+
+// 微上浮动效
+.lift-on-hover(@distance: 2px) {
+  transition: transform @transition-base, box-shadow @transition-base;
+  &:hover {
+    transform: translateY(-@distance);
+    box-shadow: @shadow-lg;
+  }
+}
+
+// 涟漪效果 · 深色版
+.ripple-effect() {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(212,163,115,0.30) 10%, transparent 10%);
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transition: opacity 0.3s, background-size 0.3s;
+    background-size: 0% 0%;
+    pointer-events: none;
+  }
+  &:active::after {
+    background-size: 400% 400%;
+    opacity: 1;
+    transition: background-size 0s;
+  }
+}
+
+// 文本截断
+.ellipsis() {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 金属精密卡片（精密仪器面板风格）
+.metal-card() {
+  background: @metal-bg;
+  border: 1px solid @metal-border;
+  border-radius: @radius-card;
+  box-shadow: @shadow-xs;
+  transition: all @transition-fast;
+}
+
+.metal-card-hover() {
+  &:hover {
+    border-color: @metal-border-hover;
+    background: @metal-bg-hover;
+  }
+}
+
+// 数字弹簧动画（全局），可用于统计数字的动态更新
+.spring-number() {
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}

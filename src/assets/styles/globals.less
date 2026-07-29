@@ -1,0 +1,1010 @@
+// ============================================================
+//   燕麦智导 — 全局样式 (Global Styles)
+//   风格：未来主义科技风 · 深色主题 · 燕麦金 + 极光蓝
+// ============================================================
+
+@import './variables.less';
+
+// ═══════════════════════════════════════════════════════════
+//  1. CSS Custom Properties（供 Ant Design 及组件消费）
+// ═══════════════════════════════════════════════════════════
+
+:root {
+  --brand-oat-300: @brand-oat-300;
+  --brand-oat-400: @brand-oat-400;
+  --brand-oat-500: @brand-oat-500;
+  --brand-blue-400: @brand-blue-400;
+  --brand-blue-500: @brand-blue-500;
+  --brand-cyan-400: @brand-cyan-400;
+  --glass-bg: @glass-bg;
+  --glass-bg-hover: @glass-bg-hover;
+  --glass-border: @glass-border;
+  --glass-blur: @glass-blur;
+  --shadow-xs: @shadow-xs;
+  --shadow-sm: @shadow-sm;
+  --shadow-md: @shadow-md;
+  --shadow-lg: @shadow-lg;
+  --shadow-xl: @shadow-xl;
+  --shadow-glass: @shadow-glass;
+  --radius-xs: @radius-xs;
+  --radius-sm: @radius-sm;
+  --radius-md: @radius-md;
+  --radius-lg: @radius-lg;
+  --radius-xl: @radius-xl;
+  --radius-2xl: @radius-2xl;
+  --spacing-xs: @spacing-xs;
+  --spacing-sm: @spacing-sm;
+  --spacing-md: @spacing-md;
+  --spacing-lg: @spacing-lg;
+  --spacing-xl: @spacing-xl;
+  --spacing-2xl: @spacing-2xl;
+  --transition-fast: @transition-fast;
+  --transition-base: @transition-base;
+  --transition-slow: @transition-slow;
+  --sidebar-width: @sidebar-width;
+  --sidebar-collapsed: @sidebar-collapsed;
+  --header-height: @header-height;
+  --footer-height: @footer-height;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  2. CSS Reset 增强
+// ═══════════════════════════════════════════════════════════
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: @font-family-base;
+  font-size: @font-size-base;
+  line-height: @line-height-base;
+  color: @gray-50;
+  background: #0A0D14;
+  background-attachment: fixed;
+  min-height: 100vh;
+  position: relative;
+
+  // 动态渐变背景层
+  &::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -3;
+    opacity: 0.7;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(212, 163, 115, 0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 80% 60%, rgba(74, 108, 247, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 20% 40%, rgba(0, 212, 255, 0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 60% at 50% 50%, #141B2B 0%, #0F1623 50%, #0A0D14 100%);
+    animation: ambient-shift 20s ease-in-out infinite;
+  }
+
+  // 噪点纹理
+  &::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -2;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 200px 200px;
+  }
+}
+
+// 环境光动画
+@keyframes ambient-shift {
+  0%, 100% {
+    background-position: 0% 0%, 0% 0%, 0% 0%, 0% 0%;
+  }
+  25% {
+    background-position: 2% 3%, -1% -2%, 1% -3%, 0% 0%;
+  }
+  50% {
+    background-position: -1% 1%, 3% -1%, -2% 2%, 0% 0%;
+  }
+  75% {
+    background-position: -2% -1%, 1% 3%, 3% 1%, 0% 0%;
+  }
+}
+
+// 网格点阵层（伪元素不够用，用 body 子级）
+#app {
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+
+  &::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.025;
+    background-image:
+      linear-gradient(rgba(212, 163, 115, 0.15) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(212, 163, 115, 0.15) 1px, transparent 1px);
+    background-size: 48px 48px;
+    animation: grid-pulse 8s ease-in-out infinite;
+  }
+}
+
+@keyframes grid-pulse {
+  0%, 100% { opacity: 0.025; }
+  50% { opacity: 0.04; }
+}
+
+a {
+  color: @brand-blue-400;
+  text-decoration: none;
+  transition: color @transition-fast;
+  &:hover { color: @brand-cyan-400; }
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: @font-weight-bold;
+  line-height: @line-height-tight;
+  color: @gray-50;
+}
+
+h1 { font-size: @font-size-3xl; }
+h2 { font-size: @font-size-2xl; }
+h3 { font-size: @font-size-xl; }
+h4 { font-size: @font-size-lg; }
+h5 { font-size: @font-size-md; }
+h6 { font-size: @font-size-base; }
+
+// ═══════════════════════════════════════════════════════════
+//  3. 自定义滚动条（细条圆角）
+// ═══════════════════════════════════════════════════════════
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  margin-block: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: @radius-full;
+  border: 1px solid transparent;
+  background-clip: content-box;
+  transition: background @transition-fast;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.18);
+    background-clip: content-box;
+  }
+}
+
+// Firefox
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  4. 毛玻璃卡片组件类
+// ═══════════════════════════════════════════════════════════
+
+.glass-card {
+  .glass-card();
+  .glass-card-hover();
+}
+
+.glass-card--static {
+  .glass-card();
+}
+
+.glass-card--light {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+}
+
+.glass-card--heavy {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(@glass-blur-heavy);
+  -webkit-backdrop-filter: blur(@glass-blur-heavy);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: @radius-xl;
+  box-shadow: @shadow-lg;
+}
+
+.glass-card--oat {
+  background: rgba(212, 163, 115, 0.06);
+  backdrop-filter: blur(@glass-blur);
+  -webkit-backdrop-filter: blur(@glass-blur);
+  border: 1px solid rgba(212, 163, 115, 0.12);
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+  transition: all @transition-base;
+  &:hover {
+    border-color: rgba(212, 163, 115, 0.22);
+    background: rgba(212, 163, 115, 0.09);
+    box-shadow: @shadow-oat-glow;
+  }
+}
+
+.glass-card--blue {
+  background: rgba(74, 108, 247, 0.06);
+  backdrop-filter: blur(@glass-blur);
+  -webkit-backdrop-filter: blur(@glass-blur);
+  border: 1px solid rgba(74, 108, 247, 0.12);
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+  &:hover {
+    border-color: rgba(74, 108, 247, 0.22);
+    background: rgba(74, 108, 247, 0.09);
+    box-shadow: @shadow-blue-glow;
+  }
+}
+
+.glass-card--rounded-lg  { border-radius: @radius-lg; }
+.glass-card--rounded-xl  { border-radius: @radius-xl; }
+.glass-card--rounded-2xl { border-radius: @radius-2xl; }
+
+// ═══════════════════════════════════════════════════════════
+//  5. Vue 页面切换过渡动画
+//     <router-view v-slot="{ Component, route }">
+//       <transition name="page-fade" mode="out-in">
+//         <component :is="Component" :key="route.path" />
+//       </transition>
+//     </router-view>
+// ═══════════════════════════════════════════════════════════
+
+// 淡入 + 上浮
+.page-fade-enter-active {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.page-fade-leave-active {
+  transition: all 0.2s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+// 仅淡入（用于模态框等）
+.page-fade-only-enter-active,
+.page-fade-only-leave-active {
+  transition: opacity @transition-base;
+}
+
+.page-fade-only-enter-from,
+.page-fade-only-leave-to {
+  opacity: 0;
+}
+
+// 从右滑入（用于子页面导航）
+.page-slide-enter-active {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.page-slide-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.page-slide-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.page-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+
+// 上浮淡出（用于通知、弹窗）
+.popup-enter-active {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.popup-leave-active {
+  transition: all 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.popup-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+}
+
+.popup-leave-to {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  6. 按钮全局微交互动效
+// ═══════════════════════════════════════════════════════════
+
+// 全局按钮基础过渡
+button,
+.ant-btn,
+a.ant-btn {
+  transition:
+    transform @transition-fast,
+    box-shadow @transition-fast,
+    background-color @transition-fast,
+    border-color @transition-fast !important;
+}
+
+// Hover 上浮
+.ant-btn:not(:disabled):not(.ant-btn-link):hover,
+a.ant-btn:not(.ant-btn-link):hover {
+  transform: translateY(-2px);
+  box-shadow: @shadow-md !important;
+}
+
+// Active 下压 + 涟漪
+.ant-btn:not(:disabled):active,
+a.ant-btn:active {
+  transform: translateY(0) scale(0.98) !important;
+}
+
+// 主要按钮 - 燕麦金强调
+.ant-btn-primary {
+  background: linear-gradient(135deg, @brand-oat-300, @brand-oat-400) !important;
+  border-color: transparent !important;
+  box-shadow: 0 2px 8px rgba(212, 163, 115, 0.3) !important;
+  color: @gray-900 !important;
+  font-weight: @font-weight-semibold !important;
+
+  &:hover {
+    background: linear-gradient(135deg, lighten(@brand-oat-300, 5%), lighten(@brand-oat-400, 5%)) !important;
+    box-shadow: 0 4px 16px rgba(212, 163, 115, 0.45) !important;
+  }
+
+  &:active {
+    box-shadow: 0 1px 4px rgba(212, 163, 115, 0.25) !important;
+  }
+}
+
+// 幽灵按钮适配深色毛玻璃背景
+.ant-btn-background-ghost {
+  border-color: @glass-border;
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  background: rgba(255, 255, 255, 0.04);
+  color: @gray-300;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: @glass-border-hover;
+    color: @gray-50;
+  }
+}
+
+// 文字链接按钮不偏移
+.ant-btn-link,
+a.ant-btn-link {
+  &:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+}
+
+// 自定义涟漪按钮类
+.btn-ripple {
+  .ripple-effect();
+  .lift-on-hover();
+}
+
+// 燕麦风格按钮
+.btn-oat {
+  .ripple-effect();
+  .lift-on-hover();
+  background: linear-gradient(135deg, rgba(212, 163, 115, 0.15), rgba(212, 163, 115, 0.08));
+  border: 1px solid rgba(212, 163, 115, 0.20);
+  border-radius: @radius-md;
+  color: @brand-oat-300;
+  font-weight: @font-weight-medium;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition:
+    background @transition-base,
+    box-shadow @transition-base,
+    transform @transition-base;
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(212, 163, 115, 0.22), rgba(212, 163, 115, 0.12));
+    border-color: rgba(212, 163, 115, 0.35);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  7. Ant Design Vue 4.x 组件覆盖 · 深色主题
+// ═══════════════════════════════════════════════════════════
+
+// 输入框 - 深色毛玻璃
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-picker {
+  background: rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  border-color: rgba(255, 255, 255, 0.10);
+  border-radius: @radius-sm;
+  color: @gray-50 !important;
+  transition: all @transition-fast;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.07) !important;
+  }
+
+  &:focus,
+  &.ant-input-focused,
+  &.ant-picker-focused {
+    border-color: @brand-blue-400;
+    box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.15);
+    background: rgba(255, 255, 255, 0.08) !important;
+  }
+}
+
+// 输入框内的文字和占位符
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder {
+  color: @gray-500 !important;
+}
+
+.ant-input-affix-wrapper .ant-input {
+  background: transparent !important;
+  color: @gray-50 !important;
+}
+
+// 选择器
+.ant-select-selector {
+  background: rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  border-radius: @radius-sm !important;
+  color: @gray-50 !important;
+}
+
+// 下拉面板
+.ant-select-dropdown,
+.ant-dropdown-menu,
+.ant-picker-dropdown .ant-picker-panel-container {
+  background: rgba(20, 27, 43, 0.92) !important;
+  backdrop-filter: blur(@glass-blur-heavy);
+  -webkit-backdrop-filter: blur(@glass-blur-heavy);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: @radius-md;
+  box-shadow: @shadow-xl;
+  overflow: hidden;
+}
+
+// 下拉选项
+.ant-select-item {
+  color: @gray-200 !important;
+  &:hover { background: rgba(255, 255, 255, 0.06) !important; }
+  &.ant-select-item-option-selected {
+    background: rgba(212, 163, 115, 0.12) !important;
+    color: @brand-oat-300 !important;
+  }
+}
+
+// 模态框
+.ant-modal-content {
+  background: rgba(20, 27, 43, 0.90) !important;
+  backdrop-filter: blur(@glass-blur-heavy);
+  -webkit-backdrop-filter: blur(@glass-blur-heavy);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: @radius-xl !important;
+  box-shadow: @shadow-xl;
+}
+
+.ant-modal-header {
+  background: transparent !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+.ant-modal-title {
+  color: @gray-50 !important;
+}
+
+.ant-modal-close {
+  color: @gray-400 !important;
+  &:hover { color: @gray-100 !important; }
+}
+
+// 标签页
+.ant-tabs-nav {
+  &::before { border-color: rgba(255, 255, 255, 0.06) !important; }
+}
+
+.ant-tabs-tab {
+  color: @gray-400 !important;
+  &:hover { color: @gray-100 !important; }
+  &.ant-tabs-tab-active .ant-tabs-tab-btn {
+    color: @brand-oat-300 !important;
+  }
+}
+
+.ant-tabs-ink-bar {
+  background: @brand-oat-300 !important;
+}
+
+// 表格
+.ant-table-wrapper {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: @radius-lg;
+  overflow: hidden;
+}
+
+.ant-table {
+  background: transparent !important;
+  color: @gray-200 !important;
+
+  .ant-table-thead > tr > th {
+    background: rgba(255, 255, 255, 0.05) !important;
+    backdrop-filter: blur(@glass-blur-light);
+    -webkit-backdrop-filter: blur(@glass-blur-light);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: @gray-300 !important;
+  }
+
+  .ant-table-tbody > tr > td {
+    border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+    color: @gray-200 !important;
+  }
+
+  .ant-table-tbody > tr:hover > td {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+}
+
+// 卡片
+.ant-card {
+  border-radius: @radius-lg;
+  border-color: @glass-border;
+  background: @glass-bg;
+  color: @gray-200;
+  transition: box-shadow @transition-base, transform @transition-base;
+
+  &:hover { box-shadow: @shadow-glass-hover; }
+}
+
+.ant-card-head {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  color: @gray-50;
+}
+
+// 菜单
+.ant-menu {
+  background: transparent !important;
+  border-inline-end-color: rgba(255, 255, 255, 0.06) !important;
+
+  .ant-menu-item {
+    color: @gray-400 !important;
+    &:hover { background: rgba(255, 255, 255, 0.04) !important; color: @gray-100 !important; }
+    &-selected {
+      background: rgba(212, 163, 115, 0.12) !important;
+      color: @brand-oat-300 !important;
+      border-radius: @radius-sm;
+    }
+  }
+}
+
+// 消息/通知
+.ant-message-notice-content,
+.ant-notification-notice {
+  background: rgba(20, 27, 43, 0.90) !important;
+  backdrop-filter: blur(@glass-blur-heavy);
+  -webkit-backdrop-filter: blur(@glass-blur-heavy);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: @radius-md;
+  box-shadow: @shadow-xl;
+  color: @gray-100 !important;
+}
+
+// 标签
+.ant-tag {
+  border-radius: @radius-xs;
+  transition: all @transition-fast;
+}
+
+// 分页
+.ant-pagination-item {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  a { color: @gray-300; }
+  &:hover { border-color: @brand-blue-400; a { color: @brand-blue-400; } }
+  &.ant-pagination-item-active {
+    background: @brand-blue-400;
+    border-color: @brand-blue-400;
+    a { color: #fff; }
+  }
+}
+
+// 弹出提示
+.ant-tooltip-inner {
+  border-radius: @radius-sm;
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  background: rgba(20, 27, 43, 0.92);
+  color: @gray-100;
+}
+
+// 折叠面板
+.ant-collapse {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.06);
+  .ant-collapse-item {
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+  }
+  .ant-collapse-header {
+    color: @gray-200 !important;
+  }
+  .ant-collapse-content {
+    background: transparent;
+    color: @gray-300;
+    border-top-color: rgba(255, 255, 255, 0.06);
+  }
+}
+
+// 步骤条
+.ant-steps-item-title {
+  color: @gray-300 !important;
+}
+.ant-steps-item-description {
+  color: @gray-500 !important;
+}
+.ant-steps-item-process .ant-steps-item-title {
+  color: @brand-oat-300 !important;
+}
+
+// 进度条
+.ant-progress-text {
+  color: @gray-300 !important;
+}
+
+// 描述列表
+.ant-descriptions-item-label {
+  color: @gray-400 !important;
+}
+.ant-descriptions-item-content {
+  color: @gray-100 !important;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  8. 文本渐变与装饰效果 · 深色版
+// ═══════════════════════════════════════════════════════════
+
+.text-gradient-blue {
+  background: linear-gradient(135deg, @brand-blue-400, @brand-cyan-400);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-oat {
+  background: linear-gradient(135deg, @brand-oat-200, @brand-oat-400);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-warm {
+  background: linear-gradient(135deg, @brand-oat-300, #FAEDCD);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  9. 粒子动画 · 深色主题（燕麦金 + 青蓝粒子）
+// ═══════════════════════════════════════════════════════════
+
+@keyframes particle-float {
+  0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
+  10%      { opacity: 0.5; }
+  90%      { opacity: 0.5; }
+  100%     { transform: translateY(-100vh) translateX(30px); opacity: 0; }
+}
+
+@keyframes particle-float-alt {
+  0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
+  10%      { opacity: 0.35; }
+  90%      { opacity: 0.35; }
+  100%     { transform: translateY(-100vh) translateX(-30px); opacity: 0; }
+}
+
+.particle-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+
+  .particle {
+    position: absolute;
+    bottom: -10px;
+    border-radius: 50%;
+    opacity: 0;
+
+    &:nth-child(odd) {
+      background: @brand-oat-300;
+      animation: particle-float 8s infinite ease-in;
+    }
+    &:nth-child(even) {
+      background: @brand-cyan-400;
+      animation: particle-float-alt 10s infinite ease-in;
+    }
+  }
+
+  .generate-particle-delays(@n, @i: 1) when (@i =< @n) {
+    .particle:nth-child(@{i}) {
+      left: (mod(@i * 7 + 5, 95) * 1%);
+      width: (mod(@i * 3, 4) + 2px);
+      height: (mod(@i * 3, 4) + 2px);
+      animation-delay: (mod(@i * 1.7, 8) * 1s);
+      animation-duration: (mod(@i * 2.3, 6) + 6s);
+    }
+    .generate-particle-delays(@n, @i + 1);
+  }
+
+  .generate-particle-delays(15);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  10. 扩展工具类
+// ═══════════════════════════════════════════════════════════
+
+// 布局
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.flex-col-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-1 { flex: 1; }
+.flex-wrap { flex-wrap: wrap; }
+.gap-8  { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.gap-24 { gap: 24px; }
+
+// 文本对齐
+.text-left    { text-align: left; }
+.text-center  { text-align: center; }
+.text-right   { text-align: right; }
+
+// 文本颜色
+.text-primary { color: @gray-50; }
+.text-secondary { color: @gray-300; }
+.text-disabled  { color: @gray-500; }
+.text-blue   { color: @brand-blue-400; }
+.text-error  { color: @color-error; }
+.text-success { color: @color-success; }
+.text-warning { color: @color-warning; }
+.text-oat    { color: @brand-oat-300; }
+
+// 文本大小
+.text-xs  { font-size: @font-size-xs; }
+.text-sm  { font-size: @font-size-sm; }
+.text-md  { font-size: @font-size-md; }
+.text-lg  { font-size: @font-size-lg; }
+.text-xl  { font-size: @font-size-xl; }
+.text-2xl { font-size: @font-size-2xl; }
+.text-3xl { font-size: @font-size-3xl; }
+
+// 字体粗细
+.font-normal   { font-weight: @font-weight-normal; }
+.font-medium   { font-weight: @font-weight-medium; }
+.font-semibold { font-weight: @font-weight-semibold; }
+.font-bold     { font-weight: @font-weight-bold; }
+
+// 圆角
+.rounded-sm    { border-radius: @radius-sm; }
+.rounded-md    { border-radius: @radius-md; }
+.rounded-lg    { border-radius: @radius-lg; }
+.rounded-xl    { border-radius: @radius-xl; }
+.rounded-2xl   { border-radius: @radius-2xl; }
+.rounded-full  { border-radius: @radius-full; }
+
+// 间距 - margin
+.m-0  { margin: 0; }
+.mt-0 { margin-top: 0; }
+.mt-8 { margin-top: @spacing-sm; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: @spacing-md; }
+.mt-24 { margin-top: @spacing-lg; }
+.mt-32 { margin-top: @spacing-xl; }
+.mt-48 { margin-top: @spacing-2xl; }
+.mb-8  { margin-bottom: @spacing-sm; }
+.mb-16 { margin-bottom: @spacing-md; }
+.mb-24 { margin-bottom: @spacing-lg; }
+.mb-32 { margin-bottom: @spacing-xl; }
+.ml-8  { margin-left: @spacing-sm; }
+.ml-16 { margin-left: @spacing-md; }
+.mr-8  { margin-right: @spacing-sm; }
+.mr-16 { margin-right: @spacing-md; }
+
+// 间距 - padding
+.p-0  { padding: 0; }
+.p-8  { padding: @spacing-sm; }
+.p-12 { padding: 12px; }
+.p-16 { padding: @spacing-md; }
+.p-24 { padding: @spacing-lg; }
+.p-32 { padding: @spacing-xl; }
+.px-8  { padding-left: @spacing-sm; padding-right: @spacing-sm; }
+.px-16 { padding-left: @spacing-md; padding-right: @spacing-md; }
+.px-24 { padding-left: @spacing-lg; padding-right: @spacing-lg; }
+.py-8  { padding-top: @spacing-sm; padding-bottom: @spacing-sm; }
+.py-16 { padding-top: @spacing-md; padding-bottom: @spacing-md; }
+.py-24 { padding-top: @spacing-lg; padding-bottom: @spacing-lg; }
+
+// 尺寸
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.min-h-screen { min-height: 100vh; }
+
+// 溢出
+.overflow-hidden { overflow: hidden; }
+.overflow-auto   { overflow: auto; }
+
+// 可见性
+.hidden { display: none; }
+.visible { visibility: visible; }
+.invisible { visibility: hidden; }
+
+// 位置
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed    { position: fixed; }
+.sticky   { position: sticky; }
+
+// 悬浮效果
+.cursor-pointer { cursor: pointer; }
+.transition-all {
+  transition: all @transition-base;
+}
+.hover-lift {
+  .lift-on-hover();
+}
+
+// 毛玻璃快速工具
+.glass {
+  background: @glass-bg;
+  backdrop-filter: blur(@glass-blur);
+  -webkit-backdrop-filter: blur(@glass-blur);
+  border: 1px solid @glass-border;
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(@glass-blur-light);
+  -webkit-backdrop-filter: blur(@glass-blur-light);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+// 加载骨架屏
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.10) 37%,
+    rgba(255, 255, 255, 0.04) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite ease-in-out;
+  border-radius: @radius-sm;
+}
+
+// 空状态占位
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-3xl @spacing-lg;
+  color: @gray-500;
+  text-align: center;
+
+  .empty-state__icon {
+    font-size: 48px;
+    margin-bottom: @spacing-md;
+    opacity: 0.4;
+  }
+  .empty-state__title {
+    font-size: @font-size-lg;
+    font-weight: @font-weight-medium;
+    color: @gray-400;
+    margin-bottom: @spacing-sm;
+  }
+  .empty-state__desc {
+    font-size: @font-size-sm;
+    color: @gray-500;
+    max-width: 300px;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  11. 响应式辅助
+// ═══════════════════════════════════════════════════════════
+
+@media (max-width: @screen-sm) {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+@media (min-width: @screen-sm) {
+  .show-mobile {
+    display: none !important;
+  }
+}
+
+// 打印样式
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
