@@ -162,6 +162,8 @@ const totalDiagnoses = ref<number>(0)
 const totalPaths = ref<number>(0)
 
 async function loadStats() {
+  // 教师端不展示「学习统计」，无需请求学生维度概览接口
+  if (userStore.isTeacher) return
   try {
     const data = await dashboardApi.getOverview()
     totalDiagnoses.value = data.totalDiagnoses ?? 0
@@ -210,6 +212,10 @@ function goToRecords(tab: 'diagnosis' | 'path') {
 function handleUserMenuClick({ key }: { key: string }) {
   if (key === 'logout') {
     handleLogout()
+  } else if (key === 'profile') {
+    router.push({ path: '/profile', query: { tab: 'profile' } })
+  } else if (key === 'settings') {
+    router.push({ path: '/profile', query: { tab: 'settings' } })
   }
 }
 
@@ -257,7 +263,7 @@ function handleLogout() {
       <div class="header-user">
         <a-dropdown :trigger="['click']">
           <div class="user-trigger">
-            <a-avatar :size="32" class="user-avatar">
+            <a-avatar :size="32" class="user-avatar" :src="userStore.avatar || ''">
               <template #icon><UserOutlined /></template>
             </a-avatar>
             <span class="user-name">{{ userStore.displayName }}</span>
@@ -338,7 +344,7 @@ function handleLogout() {
               </div>
             </div>
 
-            <div class="sider-section">
+            <div v-if="!userStore.isTeacher" class="sider-section">
               <div class="sider-section-title">学习统计</div>
               <div class="stat-cards">
                 <div class="stat-card" @click="goToRecords('diagnosis')" style="cursor: pointer">

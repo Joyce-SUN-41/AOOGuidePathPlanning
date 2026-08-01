@@ -95,7 +95,7 @@ const PHASE_CONFIG: Record<
   exploration: {
     name: '探索扩散',
     range: [0, 0.3],
-    color: '#FF8C42',
+    color: '#F0A65C',
     gradient: ['#FF6B35', '#FF8C42', '#FFB347', '#FFD700'],
     icon: CompassOutlined,
     description: '风/水/动物传播：种群在全局空间大面积扩散搜索'
@@ -103,7 +103,7 @@ const PHASE_CONFIG: Record<
   rolling: {
     name: '湿敏滚动',
     range: [0.3, 0.7],
-    color: '#4F7CFF',
+    color: '#5B92F5',
     gradient: ['#3366FF', '#4F7CFF', '#6B9FFF', '#7BB8FF'],
     icon: NodeIndexOutlined,
     description: '螺旋逼近：个体沿最优方向滚动，逐步收敛聚合'
@@ -111,7 +111,7 @@ const PHASE_CONFIG: Record<
   ejection: {
     name: '储能弹射',
     range: [0.7, 1.0],
-    color: '#A855F7',
+    color: '#B36BF5',
     gradient: ['#7C3AED', '#A855F7', '#C084FC', '#FF4D4F'],
     icon: RocketOutlined,
     description: '高精度弹射：在最优区域附近进行精细局部搜索'
@@ -157,9 +157,17 @@ let resizeObserver3D: ResizeObserver | null = null
 
 /** 预计算的插值帧数组 */
 let frames: InterpolatedFrame[] = []
-/** 当前帧索引 */
-let frameIndex = 0
-/** 拖尾历史（最近 N 帧的粒子位置） */
+/**
+ * 当前帧索引 —— 必须是响应式的。
+ * 之前是普通 `let`，模板里 `:value="frameIndex"` 绑不到变化，
+ * 进度条滑块会「回弹」，看起来就是抖动。
+ */
+const frameIndex = ref(0)
+/**
+ * 拖尾历史（最近 N 帧的粒子位置）。
+ * 只存位置与相位比，age 在渲染时按「当前帧 - 该帧」现算，
+ * 避免回退/拖拽后残留错误的 age 造成闪烁。
+ */
 let trailBuffer: TrailEntry[][] = []
 
 let rafId: number | null = null
@@ -176,10 +184,15 @@ const currentBestIndex = ref(-1)
 // Computed
 // ═══════════════════════════════════════════
 
-const totalFrames = computed(() => frames.length)
+/** frames 是非响应式数组，用一个计数器显式驱动依赖它的 computed */
+const framesVersion = ref(0)
+const totalFrames = computed(() => {
+  void framesVersion.value
+  return frames.length
+})
 const progressPercent = computed(() => {
   if (totalFrames.value <= 1) return 0
-  return Math.round((frameIndex / (totalFrames.value - 1)) * 100)
+  return (frameIndex.value / (totalFrames.value - 1)) * 100
 })
 const totalIterations = computed(() => props.convergenceData.iterations.at(-1) ?? 0)
 const metadata = computed(() => props.convergenceData.metadata)
@@ -191,33 +204,40 @@ const previousPhase = ref<SeedPhase | null>(null)
 // Warm/Cool Color Interpolation
 // ═══════════════════════════════════════════
 
-/** 根据 phaseRatio (0-1) 计算渐变色：暖色(0) → 冷色(0.5) → 热色(1) */
+/**
+ * 根据 phaseRatio (0-1) 计算粒子颜色。
+ *
+ * 深色背景下的配色策略：
+ *   - 保持中高饱和（70~92%），亮度锁定在 62~72%，
+ *     既能在 #0F1623 深底上跳出来，又不会刺眼过曝；
+ *   - 三段色相彼此拉开（琥珀金 38° → 极光蓝 218° → 品红 322°），
+ *     即使叠加半透明拖尾也能一眼分辨所处阶段。
+ */
 function getPhaseColor(ratio: number): string {
-  // 使用分段 HSL 插值保证视觉连续性
   if (ratio <= 0.15) {
-    // 0% → 15%: 深橙 → 亮橙
+    // 0% → 15%: 暖橙 → 燕麦金
     const t = ratio / 0.15
-    return hslInterp(25, 25, t, 60, 30, 100, 55)
+    return hslInterp(22, 34, t, 88, 85, 64, 68)
   } else if (ratio <= 0.3) {
-    // 15% → 30%: 亮橙 → 金黄
+    // 15% → 30%: 燕麦金 → 明黄
     const t = (ratio - 0.15) / 0.15
-    return hslInterp(30, 30, t, 55, 45, 90, 55)
+    return hslInterp(34, 46, t, 85, 88, 68, 70)
   } else if (ratio <= 0.5) {
-    // 30% → 50%: 金黄 → 蓝色
+    // 30% → 50%: 明黄 → 青蓝（跨中间的青色段，避免出现浑浊的黄绿）
     const t = (ratio - 0.3) / 0.2
-    return hslInterp(45, 225, t, 55, 55, 90, 100)
+    return hslInterp(46, 188, t, 88, 82, 70, 62)
   } else if (ratio <= 0.7) {
-    // 50% → 70%: 蓝 → 青蓝
+    // 50% → 70%: 青蓝 → 极光蓝
     const t = (ratio - 0.5) / 0.2
-    return hslInterp(225, 260, t, 55, 50, 100, 100)
+    return hslInterp(188, 222, t, 82, 88, 62, 68)
   } else if (ratio <= 0.85) {
-    // 70% → 85%: 青蓝 → 紫色
+    // 70% → 85%: 极光蓝 → 紫罗兰
     const t = (ratio - 0.7) / 0.15
-    return hslInterp(260, 285, t, 50, 45, 100, 100)
+    return hslInterp(222, 272, t, 88, 85, 68, 70)
   } else {
-    // 85% → 100%: 紫 → 红紫
+    // 85% → 100%: 紫罗兰 → 品红
     const t = (ratio - 0.85) / 0.15
-    return hslInterp(285, 340, t, 45, 58, 100, 100)
+    return hslInterp(272, 322, t, 85, 88, 70, 68)
   }
 }
 
@@ -236,18 +256,22 @@ function hslInterp(
   return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`
 }
 
-/** 根据年龄计算拖尾点的透明度 (0=最新, MAX_TRAIL_AGE=最旧) */
+/**
+ * 根据年龄计算拖尾点的透明度 (0=最新, MAX_TRAIL_AGE=最旧)。
+ * 深色底上用二次衰减：近端更实、远端更快淡出，轨迹方向感更强。
+ */
 function getTrailOpacity(age: number): number {
   const maxAge = MAX_TRAIL_AGE.value
   if (maxAge <= 0) return 0
-  return Math.max(0, 0.7 * (1 - age / maxAge))
+  const k = 1 - age / maxAge
+  return Math.max(0, 0.85 * k * k)
 }
 
 /** 根据年龄计算拖尾点的大小 */
 function getTrailSize(age: number): number {
   const maxAge = MAX_TRAIL_AGE.value
-  if (maxAge <= 0) return 3
-  return 3 + (5 - 3) * (1 - age / maxAge)
+  if (maxAge <= 0) return 2.5
+  return 2.5 + (6 - 2.5) * (1 - age / maxAge)
 }
 
 // ═══════════════════════════════════════════
@@ -332,7 +356,8 @@ function precomputeFrames(): InterpolatedFrame[] {
 
         if (phase === 'exploration') {
           // ── 探索阶段：大面积扩散（Lévy-like 随机游走） ──
-          const levyNoise = noiseAmplitude * (Math.random() < 0.3 ? 3 : 1)
+          // 必须用确定性 RNG，否则每次重算轨迹都不同 → 拖拽/重播时画面乱跳
+          const levyNoise = noiseAmplitude * (random01() < 0.3 ? 3 : 1)
           x += randomNormal() * levyNoise
           y += randomNormal() * levyNoise
         } else if (phase === 'rolling') {
@@ -359,9 +384,11 @@ function precomputeFrames(): InterpolatedFrame[] {
           const dy = targetBestY - y
           const dist = Math.sqrt(dx * dx + dy * dy)
 
-          if (dist > 0.01 && Math.random() < 0.08) {
-            // 8% 概率弹射跳向最优区域
-            const jumpRatio = 0.3 + random01() * 0.5
+          // 弹射概率随子帧插值进度衰减，避免末段仍在「瞬移」造成观感抖动
+          const ejectChance = 0.06 * (1 - alpha * 0.6)
+          if (dist > 0.01 && random01() < ejectChance) {
+            // 小概率弹射跳向最优区域（幅度同步收敛，越到后期跳得越小）
+            const jumpRatio = (0.25 + random01() * 0.35) * (1 - alpha * 0.5)
             x += dx * jumpRatio
             y += dy * jumpRatio
           } else {
@@ -402,6 +429,8 @@ function initTrailBuffer(frameCount: number): void {
 }
 
 function updateTrailBuffer(idx: number, frame: InterpolatedFrame): void {
+  // 幂等：同一帧已写入则不重复构建，避免拖拽时反复分配对象
+  if (trailBuffer[idx]) return
   const entries: TrailEntry[] = frame.positions.map((pos) => ({
     x: pos[0],
     y: pos[1],
@@ -410,17 +439,21 @@ function updateTrailBuffer(idx: number, frame: InterpolatedFrame): void {
     phaseRatio: frame.phaseRatio
   }))
   trailBuffer[idx] = entries
+  // 注意：不再在此处回写 entry.age。
+  // age 是「相对当前帧」的量，写进共享对象会在拖拽/回退时残留错误值，
+  // 表现为拖尾忽明忽暗的闪烁。改为在 render 时用 (idx - t) 现算。
+}
 
-  // 递增已有条目的年龄
-  const maxAge = MAX_TRAIL_AGE.value
-  const start = Math.max(0, idx - maxAge)
-  for (let i = start; i < idx; i++) {
-    const buf = trailBuffer[i]
-    if (buf) {
-      for (const entry of buf) {
-        entry.age = idx - i
-      }
-    }
+/**
+ * 确保 [idx-maxAge, idx] 区间的拖尾数据都已就绪。
+ * 高速播放跳帧、或进度条拖拽后，中间帧从未写入过 buffer，
+ * 会造成拖尾断裂 → 观感上的「闪断」。
+ */
+function ensureTrailUpTo(idx: number): void {
+  const start = Math.max(0, idx - MAX_TRAIL_AGE.value * 3)
+  for (let t = start; t <= idx; t++) {
+    const f = frames[t]
+    if (f && !trailBuffer[t]) updateTrailBuffer(t, f)
   }
 }
 
@@ -441,7 +474,7 @@ function init2DChart(): void {
 function render2DFrame(frame: InterpolatedFrame): void {
   if (!chart2D) return
 
-  const idx = frameIndex
+  const idx = frameIndex.value
   const maxAge = MAX_TRAIL_AGE.value
 
   // ── 构建拖尾数据 ──
@@ -455,14 +488,18 @@ function render2DFrame(frame: InterpolatedFrame): void {
   for (let t = trailStart; t < idx; t++) {
     const buf = trailBuffer[t]
     if (!buf) continue
+    // age 相对当前帧现算，保证回退/拖拽后拖尾始终正确
+    const age = idx - t
+    if (age <= 0 || age > maxAge) continue
+    const size = getTrailSize(age)
+    const opacity = getTrailOpacity(age)
     for (const entry of buf) {
-      if (entry.age === 0) continue // skip current (rendered separately)
       trailScatterData.push({
         value: [entry.x, entry.y],
-        symbolSize: getTrailSize(entry.age),
+        symbolSize: size,
         itemStyle: {
           color: getPhaseColor(entry.phaseRatio),
-          opacity: getTrailOpacity(entry.age)
+          opacity
         }
       })
     }
@@ -487,13 +524,14 @@ function render2DFrame(frame: InterpolatedFrame): void {
     const color = getPhaseColor(frame.phaseRatio)
     currentScatterData.push({
       value: [x, y],
-      symbolSize: isBest ? 16 : 8,
+      symbolSize: isBest ? 16 : 9,
       itemStyle: {
         color: isBest ? '#FFFFFF' : color,
-        borderColor: isBest ? color : color,
-        borderWidth: isBest ? 3 : 1.5,
-        shadowBlur: isBest ? 12 : 0,
-        shadowColor: isBest ? color : 'transparent'
+        // 深色底上给普通粒子描一圈更亮的同色边，提升小点的辨识度
+        borderColor: color,
+        borderWidth: isBest ? 3 : 1.2,
+        shadowBlur: isBest ? 16 : 6,
+        shadowColor: color
       }
     })
   }
@@ -517,9 +555,9 @@ function render2DFrame(frame: InterpolatedFrame): void {
 
     tooltip: {
       trigger: 'item' as const,
-      backgroundColor: 'rgba(30, 30, 30, 0.88)',
-      borderColor: '#444',
-      textStyle: { color: '#eee', fontSize: 12 },
+      backgroundColor: 'rgba(20, 27, 43, 0.95)',
+      borderColor: 'rgba(148, 163, 184, 0.25)',
+      textStyle: { color: '#E2E8F0', fontSize: 12 },
       formatter: (params: any) => {
         if (!params.value || params.value.length < 2) return ''
         const [x, y] = params.value
@@ -542,8 +580,11 @@ function render2DFrame(frame: InterpolatedFrame): void {
       show: true,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#A8A6A2', fontSize: 10 },
-      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } }
+      axisLabel: { color: '#94A3B8', fontSize: 10 },
+      splitLine: {
+        show: true,
+        lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' as const }
+      }
     },
 
     yAxis: {
@@ -553,8 +594,11 @@ function render2DFrame(frame: InterpolatedFrame): void {
       show: true,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#A8A6A2', fontSize: 10 },
-      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } }
+      axisLabel: { color: '#94A3B8', fontSize: 10 },
+      splitLine: {
+        show: true,
+        lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' as const }
+      }
     },
 
     series: [
@@ -573,11 +617,13 @@ function render2DFrame(frame: InterpolatedFrame): void {
         data: bestTrajectoryData,
         smooth: true,
         symbol: 'none',
+        // 最优轨迹用燕麦金实线，与彩色粒子云区分开，
+        // 深色底上辅以同色辉光，路径走向一目了然
         lineStyle: {
-          color: 'rgba(255, 255, 255, 0.7)',
+          color: '#D4A373',
           width: 2.5,
-          shadowBlur: 6,
-          shadowColor: 'rgba(0,0,0,0.3)'
+          shadowBlur: 10,
+          shadowColor: 'rgba(212, 163, 115, 0.55)'
         },
         zlevel: 1
       },
@@ -592,7 +638,10 @@ function render2DFrame(frame: InterpolatedFrame): void {
     ] as EChartsOption['series']
   }
 
-  chart2D.setOption(option, { notMerge: true, lazyUpdate: false })
+  // 关键：不能用 notMerge:true。
+  // 每帧整体替换 option 会让 ECharts 销毁并重建全部 series/坐标系，
+  // 高频调用时产生肉眼可见的闪烁。合并更新只做增量 diff，稳定得多。
+  chart2D.setOption(option, { notMerge: false, lazyUpdate: false, silent: true })
 }
 
 // ═══════════════════════════════════════════
@@ -674,7 +723,7 @@ function render3DFrame(frame: InterpolatedFrame): void {
     ]
   }
 
-  chart3D.setOption(option, { notMerge: true, lazyUpdate: false })
+  chart3D.setOption(option, { notMerge: false, lazyUpdate: false, silent: true })
 }
 
 // ═══════════════════════════════════════════
@@ -683,8 +732,8 @@ function render3DFrame(frame: InterpolatedFrame): void {
 
 function renderFrame(): void {
   if (frames.length === 0) return
-  const idx = Math.min(frameIndex, frames.length - 1)
-  const frame = frames[idx]!
+  const idx = Math.min(Math.max(frameIndex.value, 0), frames.length - 1)
+  const frame = frames[idx]
   if (!frame) return
 
   // 更新响应式状态
@@ -699,8 +748,8 @@ function renderFrame(): void {
     emit('phaseChange', frame.phase, currentIteration.value)
   }
 
-  // 更新拖尾缓冲
-  updateTrailBuffer(idx, frame)
+  // 补齐拖尾缓冲（含跳帧/拖拽时被略过的中间帧）
+  ensureTrailUpTo(idx)
 
   // 渲染到活跃视图
   if (viewMode.value === '3d') {
@@ -730,15 +779,16 @@ function animationLoop(timestamp: number): void {
   const elapsed = timestamp - lastFrameTimeMs
 
   if (elapsed >= interval) {
-    // 可能跳过多个帧（高速模式下）
-    const framesToAdvance = Math.max(1, Math.floor(elapsed / interval))
+    // 每次最多推进 3 帧：
+    // 之前不限幅，标签页切回来时 elapsed 可能有好几秒，
+    // 会一口气跳过上百帧，画面「瞬移」，正是抖动的主因之一。
+    const framesToAdvance = Math.min(3, Math.max(1, Math.floor(elapsed / interval)))
     lastFrameTimeMs = timestamp - (elapsed % interval)
 
-    const newIndex = Math.min(frameIndex + framesToAdvance, frames.length - 1)
-    frameIndex = newIndex
+    frameIndex.value = Math.min(frameIndex.value + framesToAdvance, frames.length - 1)
     renderFrame()
 
-    if (frameIndex >= frames.length - 1) {
+    if (frameIndex.value >= frames.length - 1) {
       hasCompleted.value = true
       isPlaying.value = false
       emit('playStateChange', false)
@@ -772,7 +822,9 @@ function play(): void {
   if (isPlaying.value || frames.length <= 1) return
   if (hasCompleted.value) {
     hasCompleted.value = false
-    frameIndex = 0
+    frameIndex.value = 0
+    trailBuffer = new Array(frames.length)
+    previousPhase.value = null
     renderFrame()
   }
   isPlaying.value = true
@@ -792,18 +844,33 @@ function togglePlayPause(): void {
   else play()
 }
 
+/**
+ * 跳转到指定帧。
+ * 之前每次 input 事件都 stop + start 一次 RAF 循环，
+ * 拖动过程中反复重建定时基准，导致画面剧烈抖动。
+ * 现在只改索引并重绘，播放状态与 RAF 循环保持不变，
+ * 由 animationLoop 自己从新位置继续。
+ */
 function seekTo(index: number): void {
-  const wasPlaying = isPlaying.value
-  if (wasPlaying) stopAnimation()
-  frameIndex = Math.max(0, Math.min(index, frames.length - 1))
+  if (frames.length === 0) return
+  const target = Math.max(0, Math.min(Math.round(index), frames.length - 1))
+  if (target === frameIndex.value) return
+
+  frameIndex.value = target
+  // 拖到结尾以外的位置时清除「已完成」态，允许继续播放
+  if (target < frames.length - 1) hasCompleted.value = false
+  // 重置计时基准，避免拖拽后第一帧因累积 elapsed 而瞬间跳跃
+  lastFrameTimeMs = performance.now()
   renderFrame()
-  if (wasPlaying) startAnimation()
 }
 
 function replay(): void {
   stopAnimation()
   hasCompleted.value = false
-  frameIndex = 0
+  frameIndex.value = 0
+  // 重放必须清空拖尾，否则会残留上一轮的尾迹
+  trailBuffer = new Array(frames.length)
+  previousPhase.value = null
   renderFrame()
   isPlaying.value = true
   emit('playStateChange', true)
@@ -850,7 +917,8 @@ watch(
     // 预计算插值帧
     frames = precomputeFrames()
     initTrailBuffer(frames.length)
-    frameIndex = 0
+    frameIndex.value = 0
+    framesVersion.value++
     hasCompleted.value = false
     previousPhase.value = null
 
@@ -925,7 +993,7 @@ defineExpose({
   currentSpeed,
   currentIteration,
   currentPhase,
-  currentFrameIndex: computed(() => frameIndex),
+  currentFrameIndex: computed(() => frameIndex.value),
   totalFrames
 })
 </script>
@@ -1093,16 +1161,18 @@ defineExpose({
 
 <style scoped>
 /* ═══════════ Container ═══════════ */
+/* 深色玻璃面板：与站点整体深色未来主义风格保持一致，
+   原先的浅色半透明底会让彩色粒子在深色页面上「发灰」而看不清 */
 .seed-trajectory {
   width: 100%;
-  background: rgba(255, 255, 255, 0.55);
+  background: linear-gradient(180deg, rgba(20, 27, 43, 0.72), rgba(15, 22, 35, 0.82));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.03);
+    0 8px 32px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
 
@@ -1130,12 +1200,12 @@ defineExpose({
 
 .phase-segment--active {
   opacity: 1;
-  background: rgba(79, 124, 255, 0.06);
-  box-shadow: 0 0 0 1px rgba(79, 124, 255, 0.12);
+  background: rgba(212, 163, 115, 0.1);
+  box-shadow: 0 0 0 1px rgba(212, 163, 115, 0.25);
 }
 
 .phase-segment--past {
-  opacity: 0.25;
+  opacity: 0.35;
 }
 
 .phase-segment__icon {
@@ -1146,7 +1216,7 @@ defineExpose({
 }
 
 .phase-segment--active .phase-segment__icon {
-  color: #d4a373;
+  color: #f0c894;
 }
 
 .phase-segment__label {
@@ -1157,22 +1227,22 @@ defineExpose({
 }
 
 .phase-segment--active .phase-segment__label {
-  color: #d4a373;
+  color: #f0c894;
   font-weight: 600;
 }
 
 .phase-connector {
   width: 24px;
   height: 2px;
-  background: #e8e0d8;
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 1px;
   flex-shrink: 0;
   margin: 0 4px;
 }
 
 .phase-connector--past {
-  background: #d6d4d0;
-  opacity: 0.4;
+  background: rgba(212, 163, 115, 0.45);
+  opacity: 0.6;
 }
 
 /* Phase Description */
@@ -1198,7 +1268,7 @@ defineExpose({
 .phase-desc__text {
   margin: 0;
   font-size: 12px;
-  color: #82807c;
+  color: #b6c2d2;
   line-height: 1.4;
 }
 
@@ -1220,7 +1290,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #a8a6a2;
+  color: #94a3b8;
   font-size: 14px;
 }
 
@@ -1231,7 +1301,7 @@ defineExpose({
   justify-content: space-between;
   gap: 16px;
   padding: 12px 20px 10px;
-  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .st-controls__left {
@@ -1248,10 +1318,10 @@ defineExpose({
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid #e8e0d8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
-  color: #5c5a57;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
   cursor: pointer;
   font-size: 14px;
   transition:
@@ -1262,9 +1332,9 @@ defineExpose({
 }
 
 .st-btn:hover:not(:disabled) {
-  background: rgba(79, 124, 255, 0.08);
-  border-color: #b8cbff;
-  color: #4f7cff;
+  background: rgba(74, 108, 247, 0.18);
+  border-color: rgba(122, 152, 255, 0.55);
+  color: #a9c0ff;
 }
 
 .st-btn:active:not(:disabled) {
@@ -1280,13 +1350,15 @@ defineExpose({
   width: 38px;
   height: 38px;
   font-size: 18px;
-  border-color: #4f7cff;
-  color: #4f7cff;
-  background: rgba(79, 124, 255, 0.06);
+  border-color: rgba(122, 152, 255, 0.6);
+  color: #a9c0ff;
+  background: rgba(74, 108, 247, 0.16);
+  box-shadow: 0 0 12px rgba(74, 108, 247, 0.22);
 }
 
 .st-btn--play:hover:not(:disabled) {
-  background: rgba(79, 124, 255, 0.14);
+  background: rgba(74, 108, 247, 0.3);
+  color: #dbe6ff;
 }
 
 /* Progress */
@@ -1300,7 +1372,7 @@ defineExpose({
 
 .st-progress-label {
   font-size: 11px;
-  color: #a8a6a2;
+  color: #94a3b8;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   min-width: 28px;
   text-align: center;
@@ -1313,7 +1385,7 @@ defineExpose({
   height: 5px;
   border-radius: 3px;
   overflow: hidden;
-  background: #f0efec;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .st-progress-phase {
@@ -1341,12 +1413,15 @@ defineExpose({
   top: 0;
   left: 0;
   height: 100%;
+  /* 与 getPhaseColor 的三段配色保持一致：琥珀金 → 极光蓝 → 品红 */
   background: linear-gradient(
     90deg,
-    hsl(30, 90%, 55%),
-    hsl(225, 100%, 55%) 35%,
-    hsl(285, 100%, 60%) 75%,
-    hsl(340, 100%, 58%) 100%
+    hsl(34, 85%, 68%) 0%,
+    hsl(46, 88%, 70%) 20%,
+    hsl(188, 82%, 62%) 45%,
+    hsl(222, 88%, 68%) 65%,
+    hsl(272, 85%, 70%) 85%,
+    hsl(322, 88%, 68%) 100%
   );
   border-radius: 3px;
   pointer-events: none;
@@ -1363,7 +1438,7 @@ defineExpose({
 }
 
 .st-speed-icon {
-  color: #a8a6a2;
+  color: #94a3b8;
   font-size: 14px;
   display: flex;
 }
@@ -1371,7 +1446,8 @@ defineExpose({
 .st-speed-group {
   display: flex;
   gap: 2px;
-  background: #f5f4f2;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 2px;
 }
@@ -1381,7 +1457,7 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807c;
+  color: #94a3b8;
   font-size: 12px;
   font-weight: 500;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
@@ -1392,20 +1468,21 @@ defineExpose({
 }
 
 .st-speed-btn:hover {
-  color: #3d3b39;
-  background: rgba(255, 255, 255, 0.5);
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .st-speed-btn--active {
-  background: #fff;
-  color: #4f7cff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: rgba(74, 108, 247, 0.28);
+  color: #dbe6ff;
+  box-shadow: inset 0 0 0 1px rgba(122, 152, 255, 0.45);
 }
 
 .st-view-toggle {
   display: flex;
   gap: 0;
-  background: #f5f4f2;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 2px;
   margin-left: 4px;
@@ -1419,7 +1496,7 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807c;
+  color: #94a3b8;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1429,14 +1506,14 @@ defineExpose({
 }
 
 .st-view-btn:hover {
-  color: #3d3b39;
-  background: rgba(255, 255, 255, 0.5);
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .st-view-btn--active {
-  background: #fff;
-  color: #4f7cff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: rgba(74, 108, 247, 0.28);
+  color: #dbe6ff;
+  box-shadow: inset 0 0 0 1px rgba(122, 152, 255, 0.45);
 }
 
 /* ═══════════ Legend ═══════════ */
@@ -1454,7 +1531,7 @@ defineExpose({
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: #82807c;
+  color: #b6c2d2;
 }
 
 .legend-swatch {
@@ -1463,17 +1540,18 @@ defineExpose({
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
 }
 
 .st-legend__divider {
   width: 1px;
   height: 12px;
-  background: #e8e0d8;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .st-legend__stat {
   font-size: 11px;
-  color: #a8a6a2;
+  color: #94a3b8;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 

@@ -10,7 +10,7 @@
  *   5. 预警通知(需要关注的学生)
  *   6. 学生详情抽屉(点击行查看)
  */
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, h } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { useUserStore } from '@/stores/user'
@@ -34,7 +34,13 @@ import {
   LineChartOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  UserOutlined
+  UserOutlined,
+  BulbOutlined,
+  HomeOutlined,
+  ApartmentOutlined,
+  FilterOutlined,
+  SearchOutlined,
+  ClearOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
@@ -63,6 +69,38 @@ const students = ref<StudentSummary[]>([])
 const studentsSortField = ref<string>('avgMastery')
 const studentsSortOrder = ref<'asc' | 'desc'>('desc')
 
+// ---------- 工具栏筛选状态 ----------
+const selectedClass = ref<string>('all')
+const selectedMajors = ref<string[]>([])
+const selectedStage = ref<string>('all')
+const searchKeyword = ref<string>('')
+
+const classOptions = [
+  { label: '全部班级', value: 'all' },
+  { label: '计科 2201 班', value: 'cs2201' },
+  { label: '计科 2202 班', value: 'cs2202' },
+  { label: '人工智能 2201 班', value: 'ai2201' },
+  { label: '软工 2201 班', value: 'se2201' }
+]
+
+const majorOptions = [
+  { label: '计算机科学', value: '计算机科学' },
+  { label: '人工智能', value: '人工智能' },
+  { label: '软件工程', value: '软件工程' },
+  { label: '数据科学', value: '数据科学' }
+]
+
+const stageOptions = [
+  { label: '全部阶段', value: 'all' },
+  { label: '大一', value: '大一' },
+  { label: '大二', value: '大二' },
+  { label: '大三', value: '大三' },
+  { label: '大四', value: '大四' }
+]
+
+// ---------- 面包屑导航 ----------
+const breadcrumbLevel = ref<'dashboard' | 'class' | 'student'>('dashboard')
+
 // 薄弱知识点
 const weakKps = ref<WeakKpStat[]>([])
 
@@ -78,50 +116,97 @@ const detailLoading = ref(false)
 const selectedStudent = ref<StudentSummary | null>(null)
 const studentDetail = ref<StudentDetail | null>(null)
 
-// ECharts
-const chartRefs = {
-  loadDist: ref<HTMLDivElement | null>(null),
-  trend: ref<HTMLDivElement | null>(null)
-}
+// ECharts —— 必须用「顶层 ref + 函数式 ref」绑定；
+// `ref="chartRefs.loadDist"` 这类字符串路径在 <script setup> 中无效，
+// 会导致容器永远拿不到 DOM，图表静默不渲染。
+const loadDistEl = ref<HTMLDivElement | null>(null)
+const trendEl = ref<HTMLDivElement | null>(null)
+const weakKpEl = ref<HTMLDivElement | null>(null)
+
 const chartInstances: Record<string, echarts.ECharts | null> = {
   loadDist: null,
-  trend: null
+  trend: null,
+  weakKp: null
 }
 const resizeObservers: ResizeObserver[] = []
 
 // ============================================================
 //   表头配置
 // ============================================================
+/** 掌握度分档 —— 统一色板与文案 */
+function masteryTier(v: number) {
+  const pct = Math.round(v * 100)
+  if (pct >= 80) return { pct, color: '#52C41A', label: '优秀' }
+  if (pct >= 60) return { pct, color: '#4F7CFF', label: '良好' }
+  if (pct >= 40) return { pct, color: '#FA8C16', label: '待提升' }
+  return { pct, color: '#FF4D4F', label: '薄弱' }
+}
+
+/** 认知负荷分档 */
+function loadTier(v: number) {
+  const pct = Math.round(v * 100)
+  if (pct > 70) return { pct, color: '#FF4D4F', label: '偏高' }
+  if (pct > 50) return { pct, color: '#FA8C16', label: '适中' }
+  return { pct, color: '#52C41A', label: '良好' }
+}
+
+/** 相对时间：3天内显示「N天前」，否则显示日期 */
+function relativeDate(dateStr?: string): { text: string; stale: boolean } {
+  if (!dateStr) return { text: '—', stale: true }
+  const d = new Date(dateStr).getTime()
+  if (Number.isNaN(d)) return { text: dateStr, stale: false }
+  const days = Math.floor((Date.now() - d) / 86400000)
+  if (days <= 0) return { text: '今天', stale: false }
+  if (days === 1) return { text: '昨天', stale: false }
+  if (days < 7) return { text: `${days} 天前`, stale: false }
+  return { text: dateStr, stale: days > 14 }
+}
+
 const studentColumns = [
   {
-    title: '姓名',
+    title: '学生',
     dataIndex: 'nickname',
     key: 'nickname',
-    width: 100,
+    width: 190,
     sorter: true,
-    customRender: ({ record }: { record: StudentSummary }) =>
-      h('span', { class: 'student-name-cell' }, [
-        h('span', { class: 'student-avatar-dot' }),
-        record.nickname || record.name
+    customRender: ({ record }: { record: StudentSummary }) => {
+      const display = record.nickname || record.name
+      const tier = masteryTier(record.avgMastery)
+      const anyR = record as StudentSummary & { major?: string; stage?: string }
+      const meta = [anyR.stage, anyR.major].filter(Boolean).join(' · ') || record.subject || '—'
+      return h('div', { class: 'stu-cell' }, [
+        h(
+          'span',
+          { class: 'stu-avatar', style: { background: tier.color + '22', color: tier.color, borderColor: tier.color + '55' } },
+          display.charAt(0)
+        ),
+        h('div', { class: 'stu-meta' }, [
+          h('span', { class: 'stu-name' }, display),
+          h('span', { class: 'stu-sub' }, meta)
+        ])
       ])
+    }
   },
   {
-    title: '平均掌握度',
+    title: '掌握度',
     dataIndex: 'avgMastery',
     key: 'avgMastery',
-    width: 140,
+    width: 190,
     sorter: true,
+    defaultSortOrder: 'descend' as const,
     customRender: ({ text }: { text: number }) => {
-      const pct = Math.round(text * 100)
-      const color =
-        pct >= 80 ? '#52C41A' : pct >= 60 ? '#4F7CFF' : pct >= 40 ? '#FA8C16' : '#FF4D4F'
+      const t = masteryTier(text)
       return h('div', { class: 'mastery-cell' }, [
-        h(
-          'div',
-          { class: 'mastery-bar-bg' },
-          h('div', { class: 'mastery-bar-fill', style: { width: pct + '%', background: color } })
-        ),
-        h('span', { class: 'mastery-pct', style: { color } }, pct + '%')
+        h('div', { class: 'mastery-bar-bg' }, [
+          h('div', {
+            class: 'mastery-bar-fill',
+            style: {
+              width: t.pct + '%',
+              background: `linear-gradient(90deg, ${t.color}99, ${t.color})`
+            }
+          })
+        ]),
+        h('span', { class: 'mastery-pct', style: { color: t.color } }, t.pct + '%')
       ])
     }
   },
@@ -129,19 +214,17 @@ const studentColumns = [
     title: '认知负荷',
     dataIndex: 'cognitiveLoad',
     key: 'cognitiveLoad',
-    width: 120,
+    width: 150,
     sorter: true,
     customRender: ({ text }: { text: number }) => {
-      const pct = Math.round(text * 100)
-      const color = pct > 70 ? '#FF4D4F' : pct > 50 ? '#FA8C16' : '#52C41A'
-      const label = pct > 70 ? '偏高' : pct > 50 ? '适中' : '良好'
+      const t = loadTier(text)
       return h(
         'span',
         {
           class: 'load-tag',
-          style: { color, background: color + '15', borderColor: color + '30' }
+          style: { color: t.color, background: t.color + '18', borderColor: t.color + '40' }
         },
-        label
+        [h('i', { class: 'load-dot', style: { background: t.color } }), `${t.label} ${t.pct}%`]
       )
     }
   },
@@ -149,57 +232,252 @@ const studentColumns = [
     title: '路径完成度',
     dataIndex: 'pathCompletion',
     key: 'pathCompletion',
-    width: 130,
+    width: 170,
     sorter: true,
-    customRender: ({ text }: { text: number }) =>
-      h('div', { class: 'completion-cell' }, [
-        h('a-progress', {
-          percent: text,
-          size: 'small',
-          strokeColor: text >= 80 ? '#52C41A' : '#4F7CFF',
-          'show-info': false,
-          style: { width: '70px' }
-        }),
-        h('span', { class: 'completion-pct' }, Math.round(text) + '%')
+    customRender: ({ text }: { text: number }) => {
+      const pct = Math.round(text ?? 0)
+      const color = pct >= 80 ? '#52C41A' : pct >= 50 ? '#4F7CFF' : '#FA8C16'
+      return h('div', { class: 'completion-cell' }, [
+        h('div', { class: 'completion-track' }, [
+          h('div', { class: 'completion-fill', style: { width: pct + '%', background: color } })
+        ]),
+        h('span', { class: 'completion-pct', style: { color } }, pct + '%')
       ])
+    }
+  },
+  {
+    title: '薄弱点',
+    dataIndex: 'weakPointCount',
+    key: 'weakPointCount',
+    width: 110,
+    align: 'center' as const,
+    sorter: true,
+    customRender: ({ text }: { text: number }) => {
+      const n = text ?? 0
+      const color = n >= 5 ? '#FF4D4F' : n >= 3 ? '#FA8C16' : '#52C41A'
+      return h('span', { class: 'weak-chip', style: { color, borderColor: color + '40', background: color + '15' } }, String(n))
+    }
   },
   {
     title: '最近活跃',
     dataIndex: 'lastActiveDate',
     key: 'lastActiveDate',
-    width: 110,
-    sorter: true
+    width: 130,
+    sorter: true,
+    customRender: ({ text }: { text: string }) => {
+      const r = relativeDate(text)
+      return h('span', { class: r.stale ? 'active-date stale' : 'active-date' }, r.text)
+    }
   },
   {
     title: '操作',
     key: 'action',
-    width: 80,
+    width: 100,
     fixed: 'right' as const,
     customRender: ({ record }: { record: StudentSummary }) =>
-      h('a', { class: 'action-link', onClick: () => openStudentDetail(record) }, '查看详情')
+      h(
+        'a',
+        {
+          class: 'action-link',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            openStudentDetail(record)
+          }
+        },
+        '查看详情'
+      )
+  }
+]
+
+/** 预警学生表格列 */
+const alertColumns = [
+  {
+    title: '学生',
+    dataIndex: 'displayName',
+    key: 'displayName',
+    width: 150,
+    customRender: ({ record }: { record: any }) =>
+      h('div', { class: 'stu-cell' }, [
+        h(
+          'span',
+          {
+            class: 'stu-avatar',
+            style: {
+              background: record.severity === 'danger' ? '#FF4D4F22' : '#FA8C1622',
+              color: record.severity === 'danger' ? '#FF4D4F' : '#FA8C16',
+              borderColor: record.severity === 'danger' ? '#FF4D4F55' : '#FA8C1655'
+            }
+          },
+          String(record.displayName).charAt(0)
+        ),
+        h('span', { class: 'stu-name' }, record.displayName)
+      ])
+  },
+  {
+    title: '预警等级',
+    dataIndex: 'severity',
+    key: 'severity',
+    width: 110,
+    customRender: ({ text }: { text: string }) => {
+      const isDanger = text === 'danger'
+      const color = isDanger ? '#FF4D4F' : '#FA8C16'
+      return h(
+        'span',
+        { class: 'sev-tag', style: { color, background: color + '18', borderColor: color + '40' } },
+        isDanger ? '高危' : '关注'
+      )
+    }
+  },
+  {
+    title: '预警原因',
+    dataIndex: 'reason',
+    key: 'reason',
+    width: 200,
+    customRender: ({ text }: { text: string }) =>
+      h(
+        'span',
+        { class: 'reason-text' },
+        text === 'both'
+          ? '认知负荷偏高且掌握度不足'
+          : text === 'highLoad'
+            ? '认知负荷持续偏高'
+            : '知识点掌握度低于班级均值'
+      )
+  },
+  {
+    title: '掌握度',
+    dataIndex: 'avgMastery',
+    key: 'avgMastery',
+    width: 110,
+    align: 'right' as const,
+    customRender: ({ text }: { text: number }) => {
+      const t = masteryTier(text)
+      return h('span', { style: { color: t.color, fontWeight: 700 } }, t.pct + '%')
+    }
+  },
+  {
+    title: '认知负荷',
+    dataIndex: 'cognitiveLoad',
+    key: 'cognitiveLoad',
+    width: 110,
+    align: 'right' as const,
+    customRender: ({ text }: { text: number }) => {
+      const t = loadTier(text)
+      return h('span', { style: { color: t.color, fontWeight: 700 } }, t.pct + '%')
+    }
+  },
+  {
+    title: '操作',
+    key: 'action',
+    width: 100,
+    align: 'center' as const,
+    customRender: ({ record }: { record: any }) =>
+      h(
+        'a',
+        {
+          class: 'action-link',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            const stu = students.value.find((s) => s.id === record.studentId)
+            if (stu) openStudentDetail(stu)
+            else message.info('该学生详情暂不可用')
+          }
+        },
+        '查看'
+      )
   }
 ]
 
 // ============================================================
 //   Computed
 // ============================================================
+/**
+ * 筛选后的学生列表 —— 班级 / 专业(多选) / 学习阶段 / 关键词
+ * 后端字段可能缺失（className / major / stage），缺失时视为「不参与该维度过滤」，
+ * 保证向后兼容：老数据不会因为新筛选器而被误隐藏。
+ */
+const filteredStudents = computed(() => {
+  return students.value.filter((s) => {
+    const anyS = s as StudentSummary & {
+      classId?: string
+      className?: string
+      major?: string
+      stage?: string
+    }
+
+    if (selectedClass.value !== 'all' && anyS.classId && anyS.classId !== selectedClass.value) {
+      return false
+    }
+    if (selectedMajors.value.length > 0 && anyS.major && !selectedMajors.value.includes(anyS.major)) {
+      return false
+    }
+    if (selectedStage.value !== 'all' && anyS.stage && anyS.stage !== selectedStage.value) {
+      return false
+    }
+    if (searchKeyword.value.trim()) {
+      const kw = searchKeyword.value.trim().toLowerCase()
+      const hit =
+        (s.nickname || '').toLowerCase().includes(kw) || (s.name || '').toLowerCase().includes(kw)
+      if (!hit) return false
+    }
+    return true
+  })
+})
+
+/** 当前筛选条件的签名，用于驱动图表联动刷新 */
+const filterSignature = computed(
+  () =>
+    `${selectedClass.value}|${selectedMajors.value.join(',')}|${selectedStage.value}|${searchKeyword.value}`
+)
+
+const hasActiveFilter = computed(
+  () =>
+    selectedClass.value !== 'all' ||
+    selectedMajors.value.length > 0 ||
+    selectedStage.value !== 'all' ||
+    !!searchKeyword.value.trim()
+)
+
+const currentClassLabel = computed(
+  () => classOptions.find((c) => c.value === selectedClass.value)?.label ?? '全部班级'
+)
+
 const loadDistData = computed(() => {
-  return students.value.map((s) => ({
+  return filteredStudents.value.map((s) => ({
     name: s.nickname || s.name,
     value: Math.round(s.cognitiveLoad * 100),
     color: s.cognitiveLoad > 0.7 ? '#FF4D4F' : s.cognitiveLoad > 0.5 ? '#FA8C16' : '#4F7CFF'
   }))
 })
 
-const highLoadStudents = computed(() => students.value.filter((s) => s.cognitiveLoad > 0.7))
+const highLoadStudents = computed(() =>
+  filteredStudents.value.filter((s) => s.cognitiveLoad > 0.7)
+)
 
-const alertCount = computed(() => alerts.value.length)
+/** 预警学生表格数据 —— danger 优先置顶，其次 warning */
+const alertTableData = computed(() => {
+  const visibleIds = new Set(filteredStudents.value.map((s) => s.id))
+  const severityRank: Record<string, number> = { danger: 0, warning: 1, info: 2 }
+  return alerts.value
+    .filter((a) => visibleIds.size === 0 || visibleIds.has(a.studentId))
+    .map((a) => {
+      const stu = students.value.find((s) => s.id === a.studentId)
+      return {
+        ...a,
+        key: a.studentId,
+        displayName: stu?.nickname || a.nickname || a.name,
+        pathCompletion: stu?.pathCompletion ?? 0
+      }
+    })
+    .sort((x, y) => {
+      const r = (severityRank[x.severity] ?? 9) - (severityRank[y.severity] ?? 9)
+      if (r !== 0) return r
+      return x.avgMastery - y.avgMastery
+    })
+})
+
+const alertCount = computed(() => alertTableData.value.length)
 const weakKpsTop5 = computed(() => weakKps.value.slice(0, 5))
-
-// ============================================================
-//   导入 h 函数（用于表格 customRender）
-// ============================================================
-import { h } from 'vue'
 
 // ============================================================
 //   初始化 & 数据加载
@@ -229,10 +507,13 @@ async function loadOverview() {
 async function loadStudents() {
   tableLoading.value = true
   try {
-    students.value = await teacherApi.getStudents({
+    const res = await teacherApi.getStudents({
       sortBy: studentsSortField.value,
       order: studentsSortOrder.value
     })
+    // 接口成功但返回空数组时同样回退到演示数据，
+    // 否则「认知负荷分布」等依赖学生集合的图表会是一片空白。
+    students.value = Array.isArray(res) && res.length > 0 ? res : getFallbackStudents()
   } catch {
     students.value = getFallbackStudents()
   }
@@ -241,7 +522,8 @@ async function loadStudents() {
 
 async function loadWeakKps() {
   try {
-    weakKps.value = await teacherApi.getWeakKps(5)
+    const res = await teacherApi.getWeakKps(5)
+    weakKps.value = Array.isArray(res) && res.length > 0 ? res : getFallbackWeakKps()
   } catch {
     weakKps.value = getFallbackWeakKps()
   }
@@ -249,7 +531,9 @@ async function loadWeakKps() {
 
 async function loadMasteryTrend() {
   try {
-    masteryTrend.value = await teacherApi.getMasteryTrend(30)
+    const res = await teacherApi.getMasteryTrend(30)
+    // 少于 2 个点无法构成趋势线，视为无效数据
+    masteryTrend.value = Array.isArray(res) && res.length >= 2 ? res : getFallbackTrend()
   } catch {
     masteryTrend.value = getFallbackTrend()
   }
@@ -257,7 +541,8 @@ async function loadMasteryTrend() {
 
 async function loadAlerts() {
   try {
-    alerts.value = await teacherApi.getAlerts()
+    const res = await teacherApi.getAlerts()
+    alerts.value = Array.isArray(res) ? res : []
   } catch {
     alerts.value = getFallbackAlerts()
   }
@@ -269,6 +554,7 @@ async function loadAlerts() {
 async function openStudentDetail(student: StudentSummary) {
   selectedStudent.value = student
   detailDrawerVisible.value = true
+  breadcrumbLevel.value = 'student'
   detailLoading.value = true
   try {
     studentDetail.value = await teacherApi.getStudentDetail(student.id)
@@ -282,6 +568,7 @@ function closeDetail() {
   detailDrawerVisible.value = false
   selectedStudent.value = null
   studentDetail.value = null
+  breadcrumbLevel.value = hasActiveFilter.value ? 'class' : 'dashboard'
 }
 
 // ============================================================
@@ -299,42 +586,53 @@ function handleTableChange(_pagination: unknown, _filters: unknown, sorter: any)
 //   ECharts：认知负荷分布柱状图
 // ============================================================
 function initLoadDistChart() {
-  const el = chartRefs.loadDist.value
-  if (!el) return
+  const el = loadDistEl.value
+  if (!el || el.clientWidth === 0) return
 
-  if (chartInstances['loadDist']) chartInstances['loadDist']!.dispose()
+  if (chartInstances['loadDist']) {
+    chartInstances['loadDist']!.dispose()
+    chartInstances['loadDist'] = null
+  }
   const chart = echarts.init(el)
   chartInstances['loadDist'] = chart
 
   const dataItems = loadDistData.value
 
   chart.setOption({
+    backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.12)',
+      textStyle: { color: '#E2E8F0', fontSize: 12 },
       formatter: (params: any) => {
         const item = params[0]
-        const color = item.data?.color || '#4F7CFF'
+        const color = item.color || '#4F7CFF'
         return `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${color};margin-right:6px;"></span>
-          <b>${item.name}</b><br/>
+          <b style="color:#F8FAFC">${item.name}</b><br/>
           认知负荷：<b style="color:${color}">${item.value}%</b>
-          ${item.value > 70 ? '<br/><span style="color:#FF4D4F">⚠ 超过警戒线</span>' : ''}`
+          ${item.value > 70 ? '<br/><span style="color:#FF4D4F">超过警戒线</span>' : ''}`
       }
     },
-    grid: { top: 20, right: 20, bottom: 50, left: 50 },
+    grid: { top: 24, right: 20, bottom: 62, left: 52, containLabel: false },
     xAxis: {
       type: 'category',
       data: dataItems.map((d) => d.name),
-      axisLabel: { rotate: 30, fontSize: 11, color: '#8c8c8c' },
-      axisTick: { alignWithLabel: true }
+      axisLabel: { rotate: 38, fontSize: 11, color: '#94A3B8', hideOverlap: true },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.15)' } },
+      axisTick: { alignWithLabel: true, lineStyle: { color: 'rgba(255,255,255,0.15)' } }
     },
     yAxis: {
       type: 'value',
-      name: '%',
+      name: '负荷 %',
+      nameLocation: 'middle',
+      nameGap: 38,
+      nameTextStyle: { color: '#CBD5E1', fontSize: 12 },
       min: 0,
       max: 100,
-      axisLabel: { fontSize: 11, color: '#8c8c8c' },
-      splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
+      axisLabel: { fontSize: 11, color: '#94A3B8' },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' } }
     },
     series: [
       {
@@ -342,24 +640,23 @@ function initLoadDistChart() {
         data: dataItems.map((d) => ({
           value: d.value,
           itemStyle: {
-            color: d.color,
-            borderRadius: [6, 6, 0, 0],
-            shadowBlur: 4,
-            shadowColor: d.color + '40',
-            shadowOffsetY: 2
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: d.color },
+              { offset: 1, color: d.color + '55' }
+            ]),
+            borderRadius: [6, 6, 0, 0]
           }
         })),
-        barWidth: Math.max(20, Math.min(36, 280 / dataItems.length)),
-        emphasis: {
-          itemStyle: { shadowBlur: 12, shadowOffsetY: 4 }
-        },
+        barMaxWidth: 36,
+        barMinWidth: 6,
+        emphasis: { itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.4)' } },
         markLine: {
           silent: true,
           symbol: 'none',
           lineStyle: { color: '#FF4D4F', type: 'dashed', width: 2 },
           label: {
             formatter: '警戒线 70%',
-            position: 'end',
+            position: 'insideEndTop',
             fontSize: 11,
             color: '#FF4D4F',
             fontWeight: 600
@@ -374,13 +671,120 @@ function initLoadDistChart() {
 }
 
 // ============================================================
+//   ECharts：共性薄弱知识点水平条形图（按薄弱学生数降序 + 掌握度梯度着色）
+// ============================================================
+function initWeakKpChart() {
+  const el = weakKpEl.value
+  if (!el || el.clientWidth === 0) return
+
+  if (chartInstances['weakKp']) {
+    chartInstances['weakKp']!.dispose()
+    chartInstances['weakKp'] = null
+  }
+  const chart = echarts.init(el)
+  chartInstances['weakKp'] = chart
+
+  // Y 轴自下而上绘制，故按升序排列可使最大值显示在顶部
+  const sorted = [...weakKpsTop5.value].sort((a, b) => a.studentCount - b.studentCount)
+  const names = sorted.map((d) => d.knowledgePoint)
+  const counts = sorted.map((d) => d.studentCount)
+  const masteries = sorted.map((d) => d.avgMastery)
+
+  /** 掌握度梯度着色：越低越红，越高越偏橙/蓝 */
+  const gradeColor = (m: number) => {
+    if (m < 0.35) return '#FF4D4F'
+    if (m < 0.45) return '#FF7A45'
+    if (m < 0.55) return '#FA8C16'
+    if (m < 0.65) return '#FAAD14'
+    return '#4F7CFF'
+  }
+
+  chart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.12)',
+      textStyle: { color: '#E2E8F0', fontSize: 12 },
+      formatter: (params: any) => {
+        const p = params[0]
+        const i = p.dataIndex as number
+        const m = masteries[i] ?? 0
+        const c = gradeColor(m)
+        return `<b style="color:#F8FAFC">${names[i] ?? ''}</b><br/>
+          薄弱学生：<b style="color:${c}">${counts[i] ?? 0} 人</b><br/>
+          平均掌握度：<b style="color:${c}">${Math.round(m * 100)}%</b>`
+      }
+    },
+    grid: { top: 28, right: 56, bottom: 34, left: 8, containLabel: true },
+    xAxis: {
+      type: 'value',
+      name: '薄弱学生数',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: { color: '#CBD5E1', fontSize: 12 },
+      minInterval: 1,
+      axisLabel: { color: '#94A3B8', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' } }
+    },
+    yAxis: {
+      type: 'category',
+      data: names,
+      axisLabel: {
+        color: '#CBD5E1',
+        fontSize: 12,
+        width: 96,
+        overflow: 'truncate'
+      },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.15)' } },
+      axisTick: { show: false }
+    },
+    series: [
+      {
+        type: 'bar',
+        data: counts.map((v, i) => {
+          const c = gradeColor(masteries[i] ?? 0)
+          return {
+            value: v,
+            itemStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                { offset: 0, color: c + '66' },
+                { offset: 1, color: c }
+              ]),
+              borderRadius: [0, 6, 6, 0]
+            }
+          }
+        }),
+        barMaxWidth: 22,
+        label: {
+          show: true,
+          position: 'right',
+          color: '#E2E8F0',
+          fontSize: 11,
+          fontWeight: 600,
+          formatter: (p: any) =>
+            `${p.value}人 · ${Math.round((masteries[p.dataIndex as number] ?? 0) * 100)}%`
+        },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.4)' } }
+      }
+    ]
+  })
+
+  bindResize(chart, el)
+}
+
+// ============================================================
 //   ECharts：全班掌握度趋势图
 // ============================================================
 function initTrendChart() {
-  const el = chartRefs.trend.value
-  if (!el) return
+  const el = trendEl.value
+  if (!el || el.clientWidth === 0) return
 
-  if (chartInstances['trend']) chartInstances['trend']!.dispose()
+  if (chartInstances['trend']) {
+    chartInstances['trend']!.dispose()
+    chartInstances['trend'] = null
+  }
   const chart = echarts.init(el)
   chartInstances['trend'] = chart
 
@@ -389,34 +793,43 @@ function initTrendChart() {
   const counts = masteryTrend.value.map((d) => d.diagnosisCount)
 
   chart.setOption({
+    backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.12)',
+      textStyle: { color: '#E2E8F0', fontSize: 12 },
       formatter: (params: any) => {
         const item = params[0]
         const idx = item.dataIndex
-        return `<b>${masteryTrend.value[idx]?.date ?? ''}</b><br/>
+        return `<b style="color:#F8FAFC">${masteryTrend.value[idx]?.date ?? ''}</b><br/>
           平均掌握度：<b style="color:#4F7CFF">${item.value}%</b><br/>
-          参与诊断人数：${counts[idx]}人`
+          参与诊断人数：${counts[idx] ?? 0} 人`
       }
     },
-    grid: { top: 20, right: 20, bottom: 40, left: 55 },
+    grid: { top: 24, right: 24, bottom: 44, left: 58, containLabel: false },
     xAxis: {
       type: 'category',
+      boundaryGap: false,
       data: dates,
       axisLabel: {
         fontSize: 10,
-        color: '#8c8c8c',
+        color: '#94A3B8',
+        hideOverlap: true,
         interval: Math.max(0, Math.floor(dates.length / 8) - 1)
       },
-      axisLine: { lineStyle: { color: '#e8e8e8' } }
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.15)' } }
     },
     yAxis: {
       type: 'value',
-      name: '%',
+      name: '掌握度 %',
+      nameLocation: 'middle',
+      nameGap: 42,
+      nameTextStyle: { color: '#CBD5E1', fontSize: 12 },
       min: 0,
       max: 100,
-      axisLabel: { fontSize: 11, color: '#8c8c8c' },
-      splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
+      axisLabel: { fontSize: 11, color: '#94A3B8' },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' } }
     },
     series: [
       {
@@ -424,27 +837,29 @@ function initTrendChart() {
         data: values,
         smooth: true,
         symbol: 'circle',
-        symbolSize: 4,
+        symbolSize: 5,
+        showSymbol: dates.length <= 40,
         lineStyle: { color: '#4F7CFF', width: 3 },
         itemStyle: {
           color: '#4F7CFF',
-          borderColor: '#fff',
+          borderColor: '#141B2B',
           borderWidth: 2
         },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(79,124,255,0.20)' },
+            { offset: 0, color: 'rgba(79,124,255,0.28)' },
             { offset: 1, color: 'rgba(79,124,255,0.02)' }
           ])
         },
         markLine: {
           silent: true,
           symbol: 'none',
-          lineStyle: { color: '#FFD700', type: 'dashed', width: 2 },
+          lineStyle: { color: '#D4A373', type: 'dashed', width: 2 },
           label: {
             formatter: '目标 80%',
+            position: 'insideEndTop',
             fontSize: 11,
-            color: '#D4A017',
+            color: '#D4A373',
             fontWeight: 600
           },
           data: [{ yAxis: 80 }]
@@ -456,15 +871,24 @@ function initTrendChart() {
   bindResize(chart, el)
 }
 
-function initAllCharts() {
-  setTimeout(() => {
+/**
+ * 初始化全部图表。
+ * 用 rAF + nextTick 双保险，确保容器已完成布局（clientWidth > 0）后再 init，
+ * 否则 ECharts 会以 0 宽度初始化而看不到任何内容。
+ */
+async function initAllCharts() {
+  await nextTick()
+  requestAnimationFrame(() => {
     initLoadDistChart()
     initTrendChart()
-  }, 100)
+    initWeakKpChart()
+  })
 }
 
 function bindResize(chart: echarts.ECharts, el: HTMLElement) {
-  const observer = new ResizeObserver(() => chart.resize())
+  const observer = new ResizeObserver(() => {
+    if (el.clientWidth > 0) chart.resize()
+  })
   observer.observe(el)
   resizeObservers.push(observer)
 }
@@ -528,6 +952,9 @@ function getFallbackStudents(): StudentSummary[] {
     { name: 'maxue', nickname: '马雪' },
     { name: 'yanglei', nickname: '杨磊' }
   ]
+  const classIds = ['cs2201', 'cs2202', 'ai2201', 'se2201']
+  const majors = ['计算机科学', '人工智能', '软件工程', '数据科学']
+  const stages = ['大一', '大二', '大三', '大四']
   return names.map((n, i) => ({
     id: String(i + 1),
     name: n.name,
@@ -540,7 +967,10 @@ function getFallbackStudents(): StudentSummary[] {
     totalTasks: 36,
     weakPointCount: Math.floor(1 + Math.random() * 6),
     subject: '数学',
-    overallScore: Math.floor(30 + Math.random() * 65)
+    overallScore: Math.floor(30 + Math.random() * 65),
+    classId: classIds[i % classIds.length],
+    major: majors[i % majors.length],
+    stage: stages[i % stages.length]
   }))
 }
 
@@ -708,6 +1138,43 @@ function ratingColorFromLoad(val: number): string {
 }
 
 // ============================================================
+//   筛选联动 —— 任一筛选条件变化时重绘依赖学生集合的图表
+// ============================================================
+watch(filterSignature, () => {
+  nextTick(() => {
+    initLoadDistChart()
+  })
+})
+
+watch(
+  () => weakKps.value,
+  () => {
+    nextTick(() => initWeakKpChart())
+  }
+)
+
+function resetFilters() {
+  selectedClass.value = 'all'
+  selectedMajors.value = []
+  selectedStage.value = 'all'
+  searchKeyword.value = ''
+}
+
+// ============================================================
+//   面包屑导航
+// ============================================================
+function goBreadcrumb(level: 'dashboard' | 'class') {
+  if (level === 'dashboard') {
+    detailDrawerVisible.value = false
+    resetFilters()
+    breadcrumbLevel.value = 'dashboard'
+  } else {
+    detailDrawerVisible.value = false
+    breadcrumbLevel.value = 'class'
+  }
+}
+
+// ============================================================
 //   生命周期
 // ============================================================
 onMounted(async () => {
@@ -724,6 +1191,27 @@ onUnmounted(() => {
     <!-- =============================================================== -->
     <!-- 1. 页面头部 + 班级概览卡片                                          -->
     <!-- =============================================================== -->
+    <!-- 面包屑导航 -->
+    <a-breadcrumb class="dashboard-breadcrumb">
+      <a-breadcrumb-item>
+        <a @click.prevent="goBreadcrumb('dashboard')">
+          <HomeOutlined style="margin-right: 4px" />仪表盘
+        </a>
+      </a-breadcrumb-item>
+      <a-breadcrumb-item v-if="breadcrumbLevel !== 'dashboard' || hasActiveFilter">
+        <a @click.prevent="goBreadcrumb('class')">
+          <ApartmentOutlined style="margin-right: 4px" />{{ currentClassLabel }}
+        </a>
+      </a-breadcrumb-item>
+      <a-breadcrumb-item v-if="breadcrumbLevel === 'student' && selectedStudent">
+        <span class="crumb-current">
+          <UserOutlined style="margin-right: 4px" />{{
+            selectedStudent.nickname || selectedStudent.name
+          }}
+        </span>
+      </a-breadcrumb-item>
+    </a-breadcrumb>
+
     <header class="dashboard-header">
       <div class="header-left">
         <TeamOutlined class="header-icon" />
@@ -737,6 +1225,62 @@ onUnmounted(() => {
         刷新数据
       </a-button>
     </header>
+
+    <!-- =============================================================== -->
+    <!-- 筛选工具栏：班级 / 专业(多选) / 学习阶段 / 关键词                     -->
+    <!-- =============================================================== -->
+    <section class="filter-toolbar">
+      <div class="filter-toolbar-label">
+        <FilterOutlined />
+        <span>数据筛选</span>
+      </div>
+
+      <a-select
+        v-model:value="selectedClass"
+        :options="classOptions"
+        class="filter-select filter-class"
+        placeholder="选择班级"
+        size="middle"
+      />
+
+      <a-select
+        v-model:value="selectedMajors"
+        :options="majorOptions"
+        mode="multiple"
+        class="filter-select filter-major"
+        placeholder="专业筛选（可多选）"
+        :max-tag-count="2"
+        allow-clear
+        size="middle"
+      />
+
+      <a-select
+        v-model:value="selectedStage"
+        :options="stageOptions"
+        class="filter-select filter-stage"
+        placeholder="学习阶段"
+        size="middle"
+      />
+
+      <a-input
+        v-model:value="searchKeyword"
+        class="filter-search"
+        placeholder="搜索学生姓名"
+        allow-clear
+        size="middle"
+      >
+        <template #prefix><SearchOutlined style="color: #94a3b8" /></template>
+      </a-input>
+
+      <a-button v-if="hasActiveFilter" type="text" class="filter-reset" @click="resetFilters">
+        <template #icon><ClearOutlined /></template>
+        重置
+      </a-button>
+
+      <span class="filter-result-count">
+        匹配 <b>{{ filteredStudents.length }}</b> / {{ students.length }} 人
+      </span>
+    </section>
 
     <!-- 概览卡片 -->
     <section class="overview-cards">
@@ -814,21 +1358,26 @@ onUnmounted(() => {
             <UserOutlined style="margin-right: 6px; color: #4f7cff" />
             学生列表
           </h3>
-          <span class="card-count">共 {{ students.length }} 人</span>
+          <span class="card-count">共 {{ filteredStudents.length }} 人</span>
         </div>
         <a-table
-          :dataSource="students"
+          :dataSource="filteredStudents"
           :columns="studentColumns"
           :loading="tableLoading"
           :pagination="{
-            pageSize: 10,
+            pageSize: 8,
             showSizeChanger: true,
             pageSizeOptions: ['8', '10', '15', '20'],
+            size: 'small',
             showTotal: (total: number) => `共 ${total} 人`
           }"
-          :scroll="{ x: 700 }"
+          :scroll="{ x: 1040 }"
           rowKey="id"
           size="middle"
+          :rowClassName="
+            (record: StudentSummary) =>
+              record.cognitiveLoad > 0.7 || record.avgMastery < 0.4 ? 'row-attention' : ''
+          "
           :customRow="
             (record: StudentSummary) => ({
               style: { cursor: 'pointer' },
@@ -837,7 +1386,16 @@ onUnmounted(() => {
           "
           @change="handleTableChange"
           class="student-table"
-        />
+        >
+          <template #emptyText>
+            <a-empty
+              :description="
+                hasActiveFilter ? '当前筛选条件下没有匹配的学生' : '暂无学生数据'
+              "
+              :imageStyle="{ height: '48px' }"
+            />
+          </template>
+        </a-table>
       </div>
 
       <!-- 认知负荷分布图 -->
@@ -851,7 +1409,7 @@ onUnmounted(() => {
             {{ highLoadStudents.length }}人偏高
           </a-tag>
         </div>
-        <div ref="chartRefs.loadDist" class="chart-container"></div>
+        <div :ref="(el) => (loadDistEl = el as HTMLDivElement)" class="chart-container"></div>
       </div>
     </section>
 
@@ -859,40 +1417,27 @@ onUnmounted(() => {
     <!-- 3. 共性薄弱知识点 + 掌握度趋势图                                     -->
     <!-- =============================================================== -->
     <section class="content-row two-col">
-      <!-- 共性薄弱知识点 Top 5 -->
-      <div class="glass-card">
+      <!-- 共性薄弱知识点 Top 5 —— ECharts 水平条形图 -->
+      <div class="glass-card chart-card">
         <div class="card-header">
           <h3 class="card-title">
             <WarningOutlined style="margin-right: 6px; color: #ff4d4f" />
             共性薄弱知识点
           </h3>
-          <span class="card-count">Top 5</span>
+          <span class="card-count">Top 5 · 按薄弱人数降序</span>
         </div>
-        <div class="weak-kp-list">
-          <div v-for="(item, idx) in weakKpsTop5" :key="item.knowledgePoint" class="weak-kp-item">
-            <div class="weak-kp-rank" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</div>
-            <div class="weak-kp-info">
-              <span class="weak-kp-name">{{ item.knowledgePoint }}</span>
-              <span class="weak-kp-students">{{ item.studentCount }}人薄弱</span>
-            </div>
-            <div class="weak-kp-bar-wrap">
-              <div class="weak-kp-bar-bg">
-                <div
-                  class="weak-kp-bar-fill"
-                  :style="{
-                    width: Math.round(item.avgMastery * 100) + '%',
-                    background: item.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16'
-                  }"
-                ></div>
-              </div>
-              <span class="weak-kp-pct">{{ formatPct(item.avgMastery) }}</span>
-            </div>
-          </div>
-          <a-empty
-            v-if="weakKpsTop5.length === 0"
-            description="暂无薄弱知识点数据"
-            :imageStyle="{ height: '48px' }"
-          />
+        <div
+          v-show="weakKpsTop5.length > 0"
+          :ref="(el) => (weakKpEl = el as HTMLDivElement)"
+          class="chart-container"
+        ></div>
+        <a-empty
+          v-if="weakKpsTop5.length === 0"
+          description="暂无薄弱知识点数据"
+          :imageStyle="{ height: '48px' }"
+        />
+        <div v-if="weakKpsTop5.length > 0" class="chart-legend-hint">
+          柱条颜色按平均掌握度梯度着色：越红表示掌握度越低
         </div>
       </div>
 
@@ -905,7 +1450,7 @@ onUnmounted(() => {
           </h3>
           <span class="card-count">近30天</span>
         </div>
-        <div ref="chartRefs.trend" class="chart-container"></div>
+        <div :ref="(el) => (trendEl = el as HTMLDivElement)" class="chart-container"></div>
       </div>
     </section>
 
@@ -920,69 +1465,26 @@ onUnmounted(() => {
         </h3>
         <a-badge :count="alertCount" :number-style="{ backgroundColor: '#FF4D4F' }" />
       </div>
-      <div v-if="alerts.length > 0" class="alerts-grid">
-        <template v-for="alert in alerts" :key="alert.studentId">
-          <div
-            v-if="students.find((s) => s.id === alert.studentId)"
-            class="alert-card"
-            :class="'alert-' + alert.severity"
-            @click="openStudentDetail(students.find((s) => s.id === alert.studentId)!)"
-          >
-            <div class="alert-header">
-              <div class="alert-student">
-                <span class="alert-avatar">
-                  {{
-                    (students.find((s) => s.id === alert.studentId)?.nickname || alert.name).charAt(
-                      0
-                    )
-                  }}
-                </span>
-                <span class="alert-name">{{
-                  students.find((s) => s.id === alert.studentId)?.nickname || alert.name
-                }}</span>
-              </div>
-              <a-tag :color="alert.severity === 'danger' ? 'red' : 'orange'" size="small">
-                {{
-                  alert.reason === 'both'
-                    ? '重点关注'
-                    : alert.reason === 'highLoad'
-                      ? '高负荷'
-                      : '低掌握度'
-                }}
-              </a-tag>
-            </div>
-            <div class="alert-metrics">
-              <div class="alert-metric">
-                <span class="metric-label">掌握度</span>
-                <span
-                  class="metric-value"
-                  :style="{ color: alert.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16' }"
-                >
-                  {{ formatPct(alert.avgMastery) }}
-                </span>
-              </div>
-              <div class="alert-metric">
-                <span class="metric-label">认知负荷</span>
-                <span
-                  class="metric-value"
-                  :style="{ color: alert.cognitiveLoad > 0.7 ? '#FF4D4F' : '#FA8C16' }"
-                >
-                  {{ formatPct(alert.cognitiveLoad) }}
-                </span>
-              </div>
-            </div>
-            <div class="alert-reason">
-              <template v-if="alert.reason === 'both'">
-                ⚠ 认知负荷偏高且掌握度不足，建议重点关注
-              </template>
-              <template v-else-if="alert.reason === 'highLoad'">
-                🔴 认知负荷持续偏高，可能超出承受范围
-              </template>
-              <template v-else> 📉 知识点掌握度低于班级平均水平 </template>
-            </div>
-          </div>
-        </template>
-      </div>
+      <a-table
+        v-if="alertTableData.length > 0"
+        :dataSource="alertTableData"
+        :columns="alertColumns"
+        :pagination="false"
+        :scroll="{ x: 780 }"
+        rowKey="key"
+        size="middle"
+        class="alert-table"
+        :rowClassName="(record: any) => 'alert-row alert-row-' + record.severity"
+        :customRow="
+          (record: any) => ({
+            style: { cursor: 'pointer' },
+            onClick: () => {
+              const stu = students.find((s) => s.id === record.studentId)
+              if (stu) openStudentDetail(stu)
+            }
+          })
+        "
+      />
       <a-empty v-else description="暂无预警，全班学情状态良好" :imageStyle="{ height: '48px' }">
         <template #children>
           <CheckCircleOutlined style="color: #52c41a; font-size: 32px; margin-bottom: 8px" />
@@ -1228,6 +1730,153 @@ onUnmounted(() => {
 }
 
 // ================================================================
+//   Breadcrumb
+// ================================================================
+.dashboard-breadcrumb {
+  margin-bottom: 12px;
+  font-size: 13px;
+
+  :deep(.ant-breadcrumb-separator) {
+    color: rgba(255, 255, 255, 0.28);
+  }
+
+  :deep(a) {
+    color: #94a3b8;
+    transition: color 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+
+    &:hover {
+      color: #d4a373;
+    }
+  }
+
+  .crumb-current {
+    color: #f8fafc;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+// ================================================================
+//   Filter Toolbar
+// ================================================================
+.filter-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  border-radius: @radius-xl;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+
+  .filter-toolbar-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+    padding-right: 6px;
+    margin-right: 2px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+
+    .anticon {
+      color: #d4a373;
+    }
+  }
+
+  .filter-select {
+    &.filter-class {
+      min-width: 160px;
+    }
+    &.filter-major {
+      min-width: 230px;
+      flex: 1 1 230px;
+      max-width: 340px;
+    }
+    &.filter-stage {
+      min-width: 130px;
+    }
+  }
+
+  .filter-search {
+    width: 190px;
+  }
+
+  .filter-reset {
+    color: #94a3b8;
+
+    &:hover {
+      color: #d4a373;
+    }
+  }
+
+  .filter-result-count {
+    margin-left: auto;
+    font-size: 12px;
+    color: #94a3b8;
+    white-space: nowrap;
+
+    b {
+      color: #d4a373;
+      font-size: 14px;
+      font-weight: 700;
+    }
+  }
+
+  // 深色主题下的 antd 控件适配
+  :deep(.ant-select-selector),
+  :deep(.ant-input-affix-wrapper) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: #e2e8f0 !important;
+  }
+
+  :deep(.ant-select-selection-item) {
+    color: #e2e8f0;
+  }
+
+  :deep(.ant-select-multiple .ant-select-selection-item) {
+    background: rgba(212, 163, 115, 0.18);
+    border-color: rgba(212, 163, 115, 0.35);
+    color: #f0d5b8;
+  }
+
+  :deep(.ant-select-selection-placeholder),
+  :deep(.ant-input::placeholder) {
+    color: #64748b;
+  }
+
+  :deep(.ant-input) {
+    background: transparent !important;
+    color: #e2e8f0 !important;
+  }
+
+  :deep(.ant-select-arrow),
+  :deep(.ant-select-clear) {
+    color: #94a3b8;
+    background: transparent;
+  }
+
+  @media (max-width: 900px) {
+    .filter-select,
+    .filter-search {
+      flex: 1 1 100%;
+      max-width: none;
+      width: 100%;
+    }
+    .filter-result-count {
+      margin-left: 0;
+    }
+  }
+}
+
+// ================================================================
 //   Overview Stat Cards
 // ================================================================
 .overview-cards {
@@ -1368,100 +2017,272 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.student-table {
+.student-table,
+.alert-table {
   :deep(.ant-table) {
+    background: transparent;
     font-size: 13px;
 
     .ant-table-thead > tr > th {
       background: rgba(255, 255, 255, 0.04);
       font-weight: 600;
       font-size: 12px;
+      letter-spacing: 0.02em;
       color: #94a3b8;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+
+      &::before {
+        display: none !important;
+      }
     }
 
     .ant-table-tbody > tr > td {
-      padding: 10px 12px;
+      padding: 11px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       color: #e2e8f0;
+      background: transparent;
+      transition: background 0.18s ease;
     }
 
     .ant-table-tbody > tr:hover > td {
-      background: rgba(74, 108, 247, 0.06) !important;
+      background: rgba(74, 108, 247, 0.09) !important;
+    }
+
+    // 需关注学生：左侧金色标识条
+    .ant-table-tbody > tr.row-attention > td:first-child {
+      box-shadow: inset 3px 0 0 rgba(212, 163, 115, 0.75);
+    }
+
+    .ant-table-placeholder > td {
+      background: transparent !important;
+      border-bottom: none;
+    }
+
+    .ant-table-cell-fix-right,
+    .ant-table-cell-fix-left {
+      background: #141b2b !important;
+    }
+  }
+
+  :deep(.ant-table-column-sorter) {
+    color: #64748b;
+  }
+
+  :deep(.ant-pagination) {
+    margin: 14px 0 2px;
+
+    .ant-pagination-item a,
+    .ant-pagination-item-link,
+    .ant-pagination-total-text {
+      color: #94a3b8;
+    }
+
+    .ant-pagination-item {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.1);
+
+      &-active {
+        background: rgba(212, 163, 115, 0.18);
+        border-color: rgba(212, 163, 115, 0.5);
+
+        a {
+          color: #f0d5b8;
+        }
+      }
     }
   }
 }
 
-.student-name-cell {
+// ---------- 学生单元格 ----------
+.stu-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  color: #f8fafc;
+  gap: 10px;
+  min-width: 0;
 
-  .student-avatar-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4f7cff;
+  .stu-avatar {
+    width: 30px;
+    height: 30px;
     flex-shrink: 0;
+    border-radius: 9px;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .stu-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+
+  .stu-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f8fafc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stu-sub {
+    font-size: 11px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
 .mastery-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 
   .mastery-bar-bg {
-    width: 60px;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
+    flex: 1;
+    min-width: 60px;
+    height: 7px;
+    background: rgba(255, 255, 255, 0.09);
+    border-radius: 4px;
     overflow: hidden;
 
     .mastery-bar-fill {
       height: 100%;
-      border-radius: 3px;
-      transition: width 0.3s;
+      border-radius: 4px;
+      transition: width 0.35s ease;
     }
   }
 
   .mastery-pct {
     font-size: 12px;
-    font-weight: 600;
-    min-width: 36px;
+    font-weight: 700;
+    min-width: 38px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 }
 
 .load-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
   border: 1px solid;
+  white-space: nowrap;
+
+  .load-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 }
 
 .completion-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+
+  .completion-track {
+    flex: 1;
+    min-width: 54px;
+    height: 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+
+    .completion-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.35s ease;
+    }
+  }
 
   .completion-pct {
     font-size: 12px;
-    color: #e2e8f0;
-    font-weight: 500;
-    min-width: 34px;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
+}
+
+.weak-chip {
+  display: inline-block;
+  min-width: 26px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.active-date {
+  font-size: 12px;
+  color: #cbd5e1;
+
+  &.stale {
+    color: #64748b;
+  }
+}
+
+.sev-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.reason-text {
+  font-size: 12px;
+  color: #cbd5e1;
 }
 
 .action-link {
   color: #d4a373;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
   &:hover {
     color: #faedcd;
+  }
+}
+
+// ================================================================
+//   Alert Table Row Highlighting
+// ================================================================
+.alert-table {
+  :deep(.ant-table-tbody > tr.alert-row-danger > td) {
+    background: rgba(255, 77, 79, 0.1);
+  }
+  :deep(.ant-table-tbody > tr.alert-row-danger > td:first-child) {
+    box-shadow: inset 3px 0 0 #ff4d4f;
+  }
+  :deep(.ant-table-tbody > tr.alert-row-danger:hover > td) {
+    background: rgba(255, 77, 79, 0.17) !important;
+  }
+
+  :deep(.ant-table-tbody > tr.alert-row-warning > td) {
+    background: rgba(250, 140, 22, 0.09);
+  }
+  :deep(.ant-table-tbody > tr.alert-row-warning > td:first-child) {
+    box-shadow: inset 3px 0 0 #fa8c16;
+  }
+  :deep(.ant-table-tbody > tr.alert-row-warning:hover > td) {
+    background: rgba(250, 140, 22, 0.16) !important;
   }
 }
 
@@ -1470,107 +2291,22 @@ onUnmounted(() => {
 // ================================================================
 .chart-card {
   min-height: 400px;
+  display: flex;
+  flex-direction: column;
 }
 
 .chart-container {
   width: 100%;
+  flex: 1;
   aspect-ratio: 16 / 10;
   min-height: 280px;
 }
 
-// ================================================================
-//   Weak KP List
-// ================================================================
-.weak-kp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.weak-kp-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  .weak-kp-rank {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-
-    &.rank-1 {
-      background: #ff4d4f;
-    }
-    &.rank-2 {
-      background: #ff7a45;
-    }
-    &.rank-3 {
-      background: #fa8c16;
-    }
-    &.rank-4 {
-      background: #ffc53d;
-    }
-    &.rank-5 {
-      background: #ffec3d;
-      color: #0a0d14;
-    }
-  }
-
-  .weak-kp-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-
-    .weak-kp-name {
-      font-size: 13px;
-      font-weight: 500;
-      color: #e2e8f0;
-      .ellipsis();
-    }
-
-    .weak-kp-students {
-      font-size: 11px;
-      color: #ff4d4f;
-    }
-  }
-
-  .weak-kp-bar-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100px;
-    flex-shrink: 0;
-
-    .weak-kp-bar-bg {
-      flex: 1;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
-      overflow: hidden;
-
-      .weak-kp-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.3s;
-      }
-    }
-
-    .weak-kp-pct {
-      font-size: 12px;
-      font-weight: 600;
-      color: #ff4d4f;
-      min-width: 34px;
-      text-align: right;
-    }
-  }
+.chart-legend-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
 }
 
 // ================================================================
@@ -1580,99 +2316,6 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
-.alerts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
-}
-
-.alert-card {
-  padding: 16px;
-  border-radius: @radius-lg;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  border: 1px solid;
-
-  &.alert-danger {
-    background: rgba(248, 113, 113, 0.08);
-    border-color: rgba(248, 113, 113, 0.25);
-    &:hover {
-      box-shadow: 0 2px 12px rgba(248, 113, 113, 0.15);
-      border-color: #f87171;
-    }
-  }
-
-  &.alert-warning {
-    background: rgba(251, 191, 36, 0.08);
-    border-color: rgba(251, 191, 36, 0.25);
-    &:hover {
-      box-shadow: 0 2px 12px rgba(251, 191, 36, 0.15);
-      border-color: #fbbf24;
-    }
-  }
-
-  .alert-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-
-    .alert-student {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-
-      .alert-avatar {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: #4f7cff;
-        color: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      .alert-name {
-        font-weight: 500;
-        font-size: 14px;
-        color: #f8fafc;
-      }
-    }
-  }
-
-  .alert-metrics {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 8px;
-
-    .alert-metric {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-
-      .metric-label {
-        font-size: 11px;
-        color: #94a3b8;
-      }
-
-      .metric-value {
-        font-size: 16px;
-        font-weight: 700;
-      }
-    }
-  }
-
-  .alert-reason {
-    font-size: 12px;
-    color: #94a3b8;
-    line-height: 1.5;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-  }
-}
 
 // ================================================================
 //   Student Detail Drawer

@@ -559,7 +559,7 @@ def classify_mastery_level(value: float) -> str:
 # ── 置信度估计 ─────────────────────────────────────────
 
 def estimate_confidence(n_questions: int, accuracy: float) -> float:
-    """基于答题数量的置信度估计 (Wilson 得分区间简化)"""
+    """基于答题数量的置信度经验估计 (非 Wilson score interval)"""
     if n_questions == 0:
         return 0.1
     # 随着题目数增加，置信度趋近于 1

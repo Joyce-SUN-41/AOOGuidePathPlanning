@@ -9,6 +9,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { ragApi } from '@/api/modules/rag'
+import { trackEvent } from '@/utils/tracking'
 import type { QuickQuestion, RAGQueryResponse } from '@/types/rag'
 
 // ── 子组件 ──
@@ -233,6 +234,13 @@ async function handleSend() {
   startThinkingAnimation()
   scrollToBottom()
 
+  // 埋点：不上报问题原文，仅记录长度与学科，避免敏感信息外泄
+  const _queryStartedAt = Date.now()
+  trackEvent('chat_query', {
+    subject: chatStore.currentSubject ?? '',
+    questionLength: question.length
+  })
+
   try {
     const response: RAGQueryResponse = await ragApi.query({
       question,
@@ -256,6 +264,13 @@ async function handleSend() {
       return
     }
 
+    trackEvent('chat_response', {
+      success: true,
+      durationMs: Date.now() - _queryStartedAt,
+      sourceCount: response.sources?.length ?? 0,
+      tokens: response.token_usage?.total_tokens ?? 0
+    })
+
     startTypewriter(response.answer, () => {
       // 直连大模型回答时不展示"置信度 0%"，仅在有检索来源时回传置信度
       const hasRetrieval = Array.isArray(response.sources) && response.sources.length > 0
@@ -270,6 +285,10 @@ async function handleSend() {
   } catch (err: unknown) {
     stopThinkingAnimation()
     const msg = err instanceof Error ? err.message : '网络异常，请稍后重试'
+    trackEvent('chat_response', {
+      success: false,
+      durationMs: Date.now() - _queryStartedAt
+    })
     chatStore.addErrorMessage(msg)
     chatStore.stopLoading()
   }
@@ -357,6 +376,29 @@ function updateQuickQuestions(subject: string) {
   currentQuickQuestions.value = subjectQuestionsMap[subject] || quickQuestions
 }
 
+// ── 上浮知识粒子样式生成 ──
+function sparkleStyle(n: number): Record<string, string> {
+  const rng = (seed: number) => {
+    const x = Math.sin(n * 99.7 + seed * 13.3) * 10000
+    return x - Math.floor(x)
+  }
+  const left = (rng(1) * 100).toFixed(2)
+  const size = (2 + rng(2) * 3).toFixed(1)
+  const delay = (rng(3) * 14).toFixed(2)
+  const duration = (12 + rng(4) * 12).toFixed(2)
+  const hue = rng(5) > 0.5 ? '#D4A373' : '#4A6CF7'
+  const opacity = (0.15 + rng(6) * 0.35).toFixed(2)
+  return {
+    left: left + '%',
+    width: size + 'px',
+    height: size + 'px',
+    background: hue,
+    opacity,
+    animationDelay: '-' + delay + 's',
+    animationDuration: duration + 's'
+  }
+}
+
 // ── 生命周期 ──
 onMounted(() => {
   updateQuickQuestions(chatStore.currentSubject)
@@ -387,6 +429,18 @@ onBeforeUnmount(() => {
   <div class="chat-view">
     <!-- ========== 粒子连线背景 ========== -->
     <canvas ref="canvasRef" class="particle-canvas" />
+
+    <!-- ========== 丰富化动态背景层 ========== -->
+    <!-- 漂浮光斑层：缓慢游动的大光晕，营造呼吸感 -->
+    <div class="bg-glow bg-glow--1" />
+    <div class="bg-glow bg-glow--2" />
+    <div class="bg-glow bg-glow--3" />
+    <!-- 上浮知识粒子：缓慢上升的微光点 -->
+    <div class="bg-sparkles">
+      <span v-for="n in 18" :key="n" class="sparkle" :style="sparkleStyle(n)" />
+    </div>
+    <!-- 网格点阵：科技感基底 -->
+    <div class="bg-grid" />
 
     <!-- ========== 噪点纹理叠加 ========== -->
 
@@ -547,6 +601,98 @@ onBeforeUnmount(() => {
   height: 100vh;
   z-index: 0;
   pointer-events: none;
+}
+
+/* ============================================================
+   丰富化动态背景层（光斑 / 知识粒子 / 网格点阵）
+   ============================================================ */
+.bg-glow {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  mix-blend-mode: screen;
+}
+.bg-glow--1 {
+  top: -12%;
+  left: -8%;
+  width: 46vw;
+  height: 46vw;
+  background: radial-gradient(circle at 50% 50%, rgba(212, 163, 115, 0.45), transparent 70%);
+  animation: glowDrift1 26s ease-in-out infinite;
+}
+.bg-glow--2 {
+  bottom: -18%;
+  right: -10%;
+  width: 52vw;
+  height: 52vw;
+  background: radial-gradient(circle at 50% 50%, rgba(74, 108, 247, 0.4), transparent 70%);
+  animation: glowDrift2 32s ease-in-out infinite;
+}
+.bg-glow--3 {
+  top: 30%;
+  left: 45%;
+  width: 38vw;
+  height: 38vw;
+  background: radial-gradient(circle at 50% 50%, rgba(0, 212, 255, 0.28), transparent 70%);
+  animation: glowDrift3 38s ease-in-out infinite;
+}
+@keyframes glowDrift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(8vw, 6vh) scale(1.12); }
+}
+@keyframes glowDrift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-7vw, -5vh) scale(1.08); }
+}
+@keyframes glowDrift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-5vw, 7vh) scale(1.15); }
+}
+
+.bg-sparkles {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sparkle {
+  position: absolute;
+  bottom: -20px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px 1px currentColor;
+  animation-name: sparkleRise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes sparkleRise {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% { opacity: 1; }
+  90% { opacity: 0.8; }
+  100% {
+    transform: translateY(-105vh) translateX(20px);
+    opacity: 0;
+  }
+}
+
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 40%, rgba(0, 0, 0, 0.6), transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, rgba(0, 0, 0, 0.6), transparent 75%);
+  opacity: 0.7;
 }
 
 /* ============================================================

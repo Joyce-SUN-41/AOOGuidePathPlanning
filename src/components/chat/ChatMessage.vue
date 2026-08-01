@@ -28,15 +28,67 @@
 
       <!-- AI 回答 -->
       <div v-else class="msg-content ai-content">
-        <div class="markdown-body" v-html="renderedContent" ref="contentRef" />
+        <div
+          ref="contentRef"
+          class="markdown-body"
+          v-html="renderedContent"
+          @mouseover="onContentHover"
+          @mouseout="onContentLeave"
+          @click="onContentClick"
+        />
+
+        <!-- 引用角标 Popover（事件委托驱动，跟随角标定位） -->
+        <a-popover
+          v-model:open="citePopoverOpen"
+          :get-popup-container="getCitePopupContainer"
+          placement="top"
+          trigger="click"
+          overlay-class-name="cite-popover"
+          destroy-tooltip-on-hide
+        >
+          <template #content>
+            <div v-if="activeCiteSource" class="cite-pop">
+              <div class="cite-pop-head">
+                <span class="cite-pop-ref">[{{ activeCiteSource.ref }}]</span>
+                <span class="cite-pop-doc">{{ activeCiteSource.document }}</span>
+              </div>
+              <div class="cite-pop-sub">
+                <span v-if="activeCiteSource.page">第 {{ activeCiteSource.page }} 页</span>
+                <span v-if="activeCiteSource.section">{{ activeCiteSource.section }}</span>
+                <span class="cite-pop-score">
+                  相关度 {{ (activeCiteSource.score * 100).toFixed(0) }}%
+                </span>
+              </div>
+              <p class="cite-pop-text">{{ citeExcerpt }}</p>
+            </div>
+          </template>
+          <span
+            class="cite-anchor"
+            :style="{ left: citeAnchor.x + 'px', top: citeAnchor.y + 'px' }"
+          />
+        </a-popover>
 
         <span v-if="message.isStreaming" class="streaming-cursor">▌</span>
 
         <div v-if="message.confidence !== undefined && !message.isStreaming" class="msg-meta">
-          <span class="confidence-badge" :class="confidenceClass">
-            <CheckCircleOutlined v-if="message.confidence >= 0.7" />
-            <ExclamationCircleOutlined v-else />
-            置信度 {{ (message.confidence * 100).toFixed(0) }}%
+          <span class="confidence-ring" :class="confidenceClass">
+            <a-progress
+              type="circle"
+              :percent="Math.round(message.confidence * 100)"
+              :width="34"
+              :stroke-width="10"
+              :stroke-color="confidenceColor"
+              trail-color="rgba(255,255,255,0.12)"
+            >
+              <template #format="{ percent }">
+                <span class="ring-num">{{ percent }}</span>
+              </template>
+            </a-progress>
+            <span class="ring-label">
+              <CheckCircleOutlined v-if="message.confidence >= 0.7" />
+              <ExclamationCircleOutlined v-else />
+              置信度
+            </span>
           </span>
           <span v-if="message.tokenUsage" class="token-info">
             {{ message.tokenUsage.total_tokens }} tokens
@@ -65,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import {
@@ -77,7 +129,7 @@ import {
 } from '@ant-design/icons-vue'
 import { message as antMessage } from 'ant-design-vue'
 import SourceCard from './SourceCard.vue'
-import type { ChatMessage } from '@/types/rag'
+import type { ChatMessage, RAGSource } from '@/types/rag'
 
 const props = withDefaults(
   defineProps<{
@@ -98,7 +150,7 @@ const renderedContent = computed(() => {
   if (!props.message.content) return ''
   try {
     const raw = marked.parse(props.message.content) as string
-    return DOMPurify.sanitize(raw, {
+    const clean = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
         'h1',
         'h2',
@@ -144,13 +196,118 @@ const renderedContent = computed(() => {
         'id',
         'style',
         'colspan',
-        'rowspan'
+        'rowspan',
+        'data-cite-ref'
       ],
       ALLOW_DATA_ATTR: false
     })
+    return decorateCitations(clean)
   } catch {
     return escapeHtml(props.message.content)
   }
+})
+
+// ============ 引用角标处理 ============
+
+/** ref -> source 映射 */
+const sourceMap = computed(() => {
+  const map = new Map<number, RAGSource>()
+  for (const s of props.message.sources || []) map.set(s.ref, s)
+  return map
+})
+
+/**
+ * 把答案正文中的 [1] [2] 等引用标记替换为可交互的角标 <sup>。
+ * 仅替换 sources 中真实存在的编号，避免误伤 markdown 链接与普通方括号内容。
+ * 使用占位符规避 <a>/<code>/<pre> 内部的文本。
+ */
+function decorateCitations(html: string): string {
+  if (sourceMap.value.size === 0) return html
+
+  // 保护代码块与链接文本，防止其中的 [n] 被替换
+  const guards: string[] = []
+  const guarded = html.replace(/<(pre|code|a)\b[\s\S]*?<\/\1>/gi, (m) => {
+    guards.push(m)
+    return `\u0000GUARD${guards.length - 1}\u0000`
+  })
+
+  const replaced = guarded.replace(/\[(\d{1,2})\]/g, (whole, num: string) => {
+    const ref = Number(num)
+    if (!sourceMap.value.has(ref)) return whole
+    return `<sup class="cite-mark" data-cite-ref="${ref}">${ref}</sup>`
+  })
+
+  return replaced.replace(/\u0000GUARD(\d+)\u0000/g, (_m, i: string) => guards[Number(i)] ?? '')
+}
+
+const contentRef = ref<HTMLElement | null>(null)
+const citePopoverOpen = ref(false)
+const activeCiteRef = ref<number | null>(null)
+const citeAnchor = ref({ x: 0, y: 0 })
+let hoverTimer: ReturnType<typeof setTimeout> | null = null
+
+const activeCiteSource = computed(() =>
+  activeCiteRef.value === null ? null : sourceMap.value.get(activeCiteRef.value) || null
+)
+
+/** 内容摘要，最多 160 字 */
+const citeExcerpt = computed(() => {
+  const text = activeCiteSource.value?.content?.trim() || ''
+  return text.length > 160 ? text.slice(0, 160) + '…' : text
+})
+
+/** 气泡挂载到 markdown 容器内，保证 absolute 锚点定位生效 */
+function getCitePopupContainer(): HTMLElement {
+  return contentRef.value || document.body
+}
+
+function resolveCiteTarget(e: Event): HTMLElement | null {
+  const el = e.target as HTMLElement | null
+  if (!el || !el.dataset) return null
+  return el.dataset['citeRef'] ? el : null
+}
+
+/** 定位角标锚点（相对 markdown 容器） */
+function openCitePopover(el: HTMLElement) {
+  const ref = Number(el.dataset['citeRef'])
+  if (!sourceMap.value.has(ref)) return
+  const host = contentRef.value
+  if (!host) return
+  const hostRect = host.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  citeAnchor.value = {
+    x: rect.left - hostRect.left + rect.width / 2 + host.scrollLeft,
+    y: rect.top - hostRect.top + host.scrollTop
+  }
+  activeCiteRef.value = ref
+  citePopoverOpen.value = true
+}
+
+function onContentHover(e: MouseEvent) {
+  const el = resolveCiteTarget(e)
+  if (!el) return
+  if (hoverTimer) clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => openCitePopover(el), 120)
+}
+
+function onContentLeave(e: MouseEvent) {
+  if (!resolveCiteTarget(e)) return
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+}
+
+/** 点击角标（移动端无 hover）同样打开 */
+function onContentClick(e: MouseEvent) {
+  const el = resolveCiteTarget(e)
+  if (!el) return
+  e.preventDefault()
+  openCitePopover(el)
+}
+
+onBeforeUnmount(() => {
+  if (hoverTimer) clearTimeout(hoverTimer)
 })
 
 function escapeHtml(text: string): string {
@@ -184,6 +341,14 @@ const confidenceClass = computed(() => {
   if (props.message.confidence >= 0.8) return 'confidence-high'
   if (props.message.confidence >= 0.6) return 'confidence-medium'
   return 'confidence-low'
+})
+
+/** 环形进度条描边色，与 confidenceClass 保持一致 */
+const confidenceColor = computed(() => {
+  const c = props.message.confidence ?? 0
+  if (c >= 0.8) return '#34D399'
+  if (c >= 0.6) return '#FBBF24'
+  return '#F87171'
 })
 
 function formatTime(ts: number): string {
@@ -433,30 +598,147 @@ function formatTime(ts: number): string {
   font-size: 12px;
 }
 
-.confidence-badge {
+/* 置信度：环形进度条 + 百分比 */
+.confidence-ring {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-weight: 500;
+  gap: 6px;
+
+  :deep(.ant-progress-circle) {
+    line-height: 1;
+  }
+
+  .ring-num {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .ring-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+  }
 
   &.confidence-high {
-    background: rgba(52, 211, 153, 0.12);
     color: #34d399;
-    border: 1px solid rgba(52, 211, 153, 0.2);
+    .ring-num {
+      color: #34d399;
+    }
   }
 
   &.confidence-medium {
-    background: rgba(251, 191, 36, 0.12);
     color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.2);
+    .ring-num {
+      color: #fbbf24;
+    }
   }
 
   &.confidence-low {
-    background: rgba(248, 113, 113, 0.12);
     color: #f87171;
-    border: 1px solid rgba(248, 113, 113, 0.2);
+    .ring-num {
+      color: #f87171;
+    }
+  }
+}
+
+/* ── 正文引用角标 ── */
+.markdown-body :deep(.cite-mark) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(79, 124, 255, 0.16);
+  border: 1px solid rgba(79, 124, 255, 0.32);
+  color: #7aa2ff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: super;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 0.18s,
+    color 0.18s,
+    transform 0.18s;
+
+  &:hover {
+    background: rgba(79, 124, 255, 0.32);
+    color: #fff;
+    transform: translateY(-1px);
+  }
+}
+
+/* Popover 定位锚点（零尺寸，仅用于锚定气泡） */
+.ai-content {
+  position: relative;
+}
+
+.markdown-body {
+  position: relative;
+}
+
+.cite-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Popover 内容 */
+.cite-pop {
+  max-width: 320px;
+
+  .cite-pop-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+
+  .cite-pop-ref {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(79, 124, 255, 0.18);
+    color: #7aa2ff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .cite-pop-doc {
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 600;
+    word-break: break-all;
+  }
+
+  .cite-pop-sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: #94a3b8;
+    font-size: 11px;
+  }
+
+  .cite-pop-score {
+    color: #7aa2ff;
+    font-weight: 600;
+  }
+
+  .cite-pop-text {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.65;
+    white-space: pre-wrap;
   }
 }
 
@@ -489,6 +771,27 @@ function formatTime(ts: number): string {
     &:hover {
       color: #d4a373;
     }
+  }
+}
+</style>
+
+<!-- Popover 通过 teleport 渲染，样式需非 scoped -->
+<style lang="less">
+.cite-popover {
+  .ant-popover-inner {
+    background: rgba(20, 27, 43, 0.97);
+    border: 1px solid rgba(79, 124, 255, 0.28);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  }
+
+  .ant-popover-inner-content {
+    padding: 10px 12px;
+  }
+
+  .ant-popover-arrow-content::before,
+  .ant-popover-arrow::before {
+    background: rgba(20, 27, 43, 0.97);
   }
 }
 </style>

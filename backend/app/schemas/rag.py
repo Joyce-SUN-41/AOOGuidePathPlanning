@@ -15,6 +15,10 @@ class RAGQueryRequest(BaseModel):
     student_id: Optional[str] = Field(default=None, description="学生 ID（可选）")
     subject: Optional[str] = Field(default=None, description="学科过滤（可选）")
     skip_retrieval: bool = Field(default=False, description="跳过知识库检索，直接使用大模型回答")
+    stream: bool = Field(
+        default=False,
+        description="是否以 SSE (text/event-stream) 流式返回。默认 False 保持整包 JSON 响应",
+    )
 
 
 class RAGSource(BaseModel):

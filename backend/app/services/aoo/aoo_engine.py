@@ -109,6 +109,9 @@ class AOOEngine:
         self._best_position: Optional[np.ndarray] = None
         self._best_fitness: float = -np.inf
         self._best_fitness_history: List[float] = []
+        # 本代中处于"探索态"的个体下标 (探索阶段传播 / 弹射跳跃)
+        # 仅用于可视化着色, 不参与任何寻优计算
+        self._exploring_indices: set = set()
 
         # 预计算 Lévy 飞行参数
         self._levy_sigma_u = self._compute_levy_sigma_u()
@@ -160,6 +163,9 @@ class AOOEngine:
             # ---- 参数计算 (公式 3) ----
             params = self._calculate_parameters(t)
 
+            # 每代开始清空探索态标记 (仅可视化用)
+            self._exploring_indices = set()
+
             # ---- Phase 2: 探索阶段 (公式 4-5) ----
             if self._rng.random() < self._get_exploration_rate(t):
                 self._exploration_phase(params)
@@ -206,16 +212,16 @@ class AOOEngine:
                     conv.diversity[-1], params["c"],
                 )
 
-            # ---- 早停检查 ----
-            if self._check_early_stop(conv, stagnation_counter):
-                logger.info("Early stop triggered at iteration %d", t)
-                break
-
-            # 更新停滞计数
+            # ---- 更新停滞计数 (先于早停判断, 避免一代延迟) ----
             if t > 1 and abs(conv.best_fitness[-1] - conv.best_fitness[-2]) < self.config.early_stop_tolerance:
                 stagnation_counter += 1
             else:
                 stagnation_counter = 0
+
+            # ---- 早停检查 (使用本轮已更新的停滞计数) ----
+            if self._check_early_stop(conv, stagnation_counter):
+                logger.info("Early stop triggered at iteration %d", t)
+                break
 
         t_elapsed = time.perf_counter() - t_start
         logger.info(
@@ -335,6 +341,12 @@ class AOOEngine:
 
         self._population = new_pop
 
+        # 标记本代经历"远距离传播"的个体 (风/水传播) 为探索态
+        # Group 3 (动物传播) 是朝最优解收敛, 不算探索, 故不标记
+        # 仅用于可视化着色, 不影响算法
+        self._exploring_indices.update(int(i) for i in group1)
+        self._exploring_indices.update(int(i) for i in group2)
+
     def explore_phase(self, params: Dict[str, float]) -> None:
         self._exploration_phase(params)
 
@@ -410,6 +422,9 @@ class AOOEngine:
             new_pop[i] = self._best_position + J + c * levy_vec[idx] * self._best_position
 
         self._population = new_pop
+
+        # 弹射跳跃个体同样标记为探索态 (可视化着色用, 不影响算法)
+        self._exploring_indices.update(int(i) for i in below_avg)
 
     def exploit_phase_eject(self, params: Dict[str, float]) -> None:
         self._exploitation_ejection(params)
@@ -491,11 +506,13 @@ class AOOEngine:
             positions_y = (self._rng.rand(N) - 0.5).tolist()
 
         best_idx = int(np.argmax(self._fitness))
-        # 探索率阈值着色
+        # 三态着色: elite (当代最优) > exploring (本代刚经历远距离传播/弹射跳跃) > normal
         colors = []
         for i in range(N):
             if i == best_idx:
                 colors.append("elite")
+            elif i in self._exploring_indices:
+                colors.append("exploring")
             else:
                 colors.append("normal")
 

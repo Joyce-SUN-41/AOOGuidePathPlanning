@@ -29,7 +29,8 @@ import {
   EditOutlined,
   RocketOutlined,
   SlidersOutlined,
-  SafetyOutlined
+  SafetyOutlined,
+  CloseOutlined
 } from '@ant-design/icons-vue'
 
 // ============ Props ============
@@ -71,12 +72,48 @@ const ganttRef = ref<HTMLDivElement | null>(null)
 let chartInstance: echarts.ECharts | null = null
 let resizeObserver: ResizeObserver | null = null
 
-/** 悬停中的任务（Timeline Tooltip） */
+/** 是否窄屏（移动端）。用于甘特图自动降级为时间轴 + Tooltip 转 Bottom Sheet */
+const isMobile = ref(false)
+/** 用户是否手动切换过视图 —— 手动切换后不再自动覆盖用户选择 */
+const userPickedView = ref(false)
+let mobileMql: MediaQueryList | null = null
+
+/** 悬停中的任务（Timeline Tooltip / 移动端 Bottom Sheet） */
 const hoveredTask = ref<LearningTask | null>(null)
+
+/** 手动切换视图（工具栏按钮） */
+function switchView(mode: 'gantt' | 'timeline') {
+  userPickedView.value = true
+  viewMode.value = mode
+}
+
+/** 根据窄屏状态自动切换视图 */
+function applyResponsiveView(matches: boolean) {
+  isMobile.value = matches
+  hoveredTask.value = null
+  if (userPickedView.value) return
+  // 窄屏下甘特图横轴天数过多难以阅读，自动降级为时间轴
+  viewMode.value = matches ? 'timeline' : props.initialView
+}
+
+function onMobileChange(e: MediaQueryListEvent) {
+  applyResponsiveView(e.matches)
+}
 function showTaskTooltip(task: LearningTask) {
+  // 移动端不响应 hover，改由点击触发 Bottom Sheet
+  if (isMobile.value) return
   hoveredTask.value = task
 }
 function hideTaskTooltip() {
+  if (isMobile.value) return
+  hoveredTask.value = null
+}
+/** 移动端：点击任务卡片弹出 Bottom Sheet */
+function toggleTaskSheet(task: LearningTask) {
+  if (!isMobile.value) return
+  hoveredTask.value = hoveredTask.value?.id === task.id ? null : task
+}
+function closeTaskSheet() {
   hoveredTask.value = null
 }
 
@@ -358,7 +395,10 @@ function renderGanttChart(): void {
   const maxDay = tasks.length > 0 ? Math.max(...tasks.map((t) => t.day)) : 1
   const taskNames = tasks.map((t) => `第${t.day}天 · ${t.name}`)
   const rowHeight = 40
-  const chartHeight = Math.max(300, Math.min(tasks.length * rowHeight + 80, 760))
+  // 超过 12 条时启用 dataZoom，画布高度按「可视 12 行」固定，
+  // 保证每行高度稳定在 rowHeight，滚动时不会被压扁
+  const visibleRows = Math.min(tasks.length, 12)
+  const chartHeight = Math.max(300, visibleRows * rowHeight + 80)
 
   // 动态调整容器高度
   if (ganttRef.value) {
@@ -444,6 +484,10 @@ function renderGanttChart(): void {
             {
               type: 'slider' as const,
               yAxisIndex: 0,
+              // 关键：只平移可视窗口，不过滤数据。
+              // 若使用默认的 'filter'，窗口外的数据点会被剔除，
+              // 自定义 series 将拿不到任务而导致条目整片消失。
+              filterMode: 'none' as const,
               start: 0,
               end: Math.min(100, Math.round((12 * 100) / tasks.length)),
               width: 18,
@@ -451,7 +495,19 @@ function renderGanttChart(): void {
               backgroundColor: 'transparent',
               borderColor: 'transparent',
               fillerColor: 'rgba(79,124,255,0.15)',
-              left: 0
+              left: 0,
+              zoomLock: true,
+              brushSelect: false
+            },
+            {
+              type: 'inside' as const,
+              yAxisIndex: 0,
+              filterMode: 'none' as const,
+              start: 0,
+              end: Math.min(100, Math.round((12 * 100) / tasks.length)),
+              zoomOnMouseWheel: false,
+              moveOnMouseWheel: true,
+              moveOnMouseMove: false
             }
           ]
         : [],
@@ -459,16 +515,24 @@ function renderGanttChart(): void {
       {
         type: 'custom',
         renderItem: (_params: any, api: any) => {
-          const dataIndex = (_params as { dataIndex: number }).dataIndex
-          if (dataIndex == null) return null
-          const task = tasks[dataIndex]
+          // 行号来自数据本身（api.value(1)），而非 dataIndex，
+          // 这样 dataZoom 平移时坐标依然能正确映射到当前可视行
+          const rowIdx = Number(api.value(1))
+          if (!Number.isFinite(rowIdx)) return null
+          const task = tasks[rowIdx]
           if (!task) return null
-          const day = task.day
-          const rowIdx = dataIndex
+          const day = Number(api.value(0))
           const config = getTaskConfig(task.taskType)
 
           const [xStart, y] = api.coord([day - 0.46, rowIdx])
           const [xEnd] = api.coord([day + 0.46, rowIdx])
+
+          // 超出绘图区（被 dataZoom 移出视野）的行直接不绘制，
+          // 避免图元溢出到坐标轴与提示条上
+          const grid = api.coordSys as { y: number; height: number } | undefined
+          if (grid && (y < grid.y - 20 || y > grid.y + grid.height + 20)) {
+            return null
+          }
 
           const rectWidth = Math.max(xEnd - xStart - 4, 14)
           const rectHeight = 32
@@ -523,7 +587,7 @@ function renderGanttChart(): void {
                 text,
                 x: rectX + innerPad,
                 y,
-                fill: '#94A3B8',
+                fill: '#E2E8F0',
                 font: '500 11px Inter, PingFang SC, sans-serif',
                 textVerticalAlign: 'middle' as const,
                 textAlign: 'left' as const
@@ -540,10 +604,14 @@ function renderGanttChart(): void {
 
           return { type: 'group', children }
         },
-        data: tasks.map((t) => ({
-          value: [t.day, 0],
+        // value[1] 必须是该任务所在的真实行索引，
+        // 供 renderItem 定位与 yAxis 类目对齐
+        data: tasks.map((t, i) => ({
+          value: [t.day, i],
           name: t.name
         })),
+        encode: { x: 0, y: 1 },
+        clip: true,
         emphasis: {
           scale: false
         }
@@ -581,6 +649,18 @@ async function switchVariant(variantIndex: number) {
 
 // ============ 生命周期 ============
 onMounted(async () => {
+  // 先判定窄屏，避免移动端先渲染甘特图再切换造成闪烁
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    mobileMql = window.matchMedia('(max-width: 768px)')
+    applyResponsiveView(mobileMql.matches)
+    if (typeof mobileMql.addEventListener === 'function') {
+      mobileMql.addEventListener('change', onMobileChange)
+    } else {
+      // Safari < 14 回退
+      mobileMql.addListener(onMobileChange)
+    }
+  }
+
   await nextTick()
   if (viewMode.value === 'gantt') {
     initChart()
@@ -602,6 +682,15 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   window.removeEventListener('resize', handleResize)
+
+  if (mobileMql) {
+    if (typeof mobileMql.removeEventListener === 'function') {
+      mobileMql.removeEventListener('change', onMobileChange)
+    } else {
+      mobileMql.removeListener(onMobileChange)
+    }
+    mobileMql = null
+  }
 })
 
 function handleResize() {
@@ -717,7 +806,8 @@ watch(
           <button
             class="view-tab"
             :class="{ active: viewMode === 'gantt' }"
-            @click="viewMode = 'gantt'"
+            :title="isMobile ? '窄屏下甘特图可读性较差，建议使用时间轴' : '甘特图'"
+            @click="switchView('gantt')"
           >
             <BarChartOutlined />
             <span>甘特图</span>
@@ -725,7 +815,7 @@ watch(
           <button
             class="view-tab"
             :class="{ active: viewMode === 'timeline' }"
-            @click="viewMode = 'timeline'"
+            @click="switchView('timeline')"
           >
             <FieldTimeOutlined />
             <span>时间轴</span>
@@ -816,7 +906,7 @@ watch(
                 :key="task.id"
                 class="task-card"
                 :class="{ 'is-tooltip-open': hoveredTask?.id === task.id }"
-                @click="emit('task-click', task)"
+                @click="isMobile ? toggleTaskSheet(task) : emit('task-click', task)"
                 @mouseenter="showTaskTooltip(task)"
                 @mouseleave="hideTaskTooltip"
               >
@@ -840,9 +930,9 @@ watch(
                   <h4 class="task-title">{{ task.title }}</h4>
                 </div>
 
-                <!-- Hover Tooltip -->
+                <!-- Hover Tooltip（桌面端浮层；移动端改用下方 Bottom Sheet） -->
                 <Transition name="tooltip-fade">
-                  <div v-if="hoveredTask?.id === task.id" class="task-tooltip">
+                  <div v-if="!isMobile && hoveredTask?.id === task.id" class="task-tooltip">
                     <div class="tt-row">
                       <span class="tt-label">知识点</span>
                       <span class="tt-value tt-kp">{{ task.knowledgePoint }}</span>
@@ -906,6 +996,64 @@ watch(
         </div>
       </div>
     </div>
+
+    <!-- ── 移动端 Bottom Sheet（替代悬浮 Tooltip，避免超出屏幕） ── -->
+    <Teleport to="body">
+      <Transition name="sheet-fade">
+        <div v-if="isMobile && hoveredTask" class="task-sheet-mask" @click="closeTaskSheet" />
+      </Transition>
+      <Transition name="sheet-slide">
+        <div
+          v-if="isMobile && hoveredTask"
+          class="task-sheet"
+          role="dialog"
+          aria-label="任务详情"
+          @click.stop
+        >
+          <div class="sheet-handle" />
+          <div class="sheet-header">
+            <h4 class="sheet-title">{{ hoveredTask.title }}</h4>
+            <button class="sheet-close" aria-label="关闭" @click="closeTaskSheet">
+              <CloseOutlined />
+            </button>
+          </div>
+          <div class="sheet-body">
+            <div class="tt-row">
+              <span class="tt-label">知识点</span>
+              <span class="tt-value tt-kp">{{ hoveredTask.knowledgePoint }}</span>
+            </div>
+            <div class="tt-row">
+              <span class="tt-label">难度</span>
+              <span class="tt-value" :style="{ color: getDifficultyColor(hoveredTask.difficulty) }">
+                {{ getDifficultyStars(hoveredTask.difficulty) }}
+              </span>
+            </div>
+            <div class="tt-row">
+              <span class="tt-label">预计时间</span>
+              <span class="tt-value">{{ hoveredTask.estimatedMinutes }} 分钟</span>
+            </div>
+            <p v-if="hoveredTask.description" class="tt-desc">{{ hoveredTask.description }}</p>
+            <div v-if="hoveredTask.resources?.length" class="tt-resources">
+              <span class="tt-resource-label">学习资源</span>
+              <span v-for="res in hoveredTask.resources" :key="res.title" class="tt-resource-item">
+                {{ res.title }}
+              </span>
+            </div>
+          </div>
+          <button
+            class="sheet-action"
+            @click="
+              () => {
+                if (hoveredTask) emit('task-click', hoveredTask)
+                closeTaskSheet()
+              }
+            "
+          >
+            查看任务详情
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -1577,5 +1725,174 @@ watch(
   .summary-bar {
     gap: @spacing-md;
   }
+
+  // 移动端任务卡片不再预留浮层空间
+  .task-card.is-tooltip-open {
+    z-index: auto;
+  }
+}
+</style>
+
+<!-- Bottom Sheet 通过 Teleport 挂到 body，样式需非 scoped -->
+<style lang="less">
+@import '@/assets/styles/variables.less';
+
+.task-sheet-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(6, 9, 16, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.task-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1201;
+  max-height: 76vh;
+  overflow-y: auto;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  background: rgba(20, 27, 43, 0.98);
+  border-top: 1px solid rgba(212, 163, 115, 0.22);
+  box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.5);
+  -webkit-overflow-scrolling: touch;
+
+  .sheet-handle {
+    width: 38px;
+    height: 4px;
+    margin: 0 auto 12px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  .sheet-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .sheet-title {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+
+  .sheet-close {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    cursor: pointer;
+
+    &:active {
+      background: rgba(255, 255, 255, 0.16);
+    }
+  }
+
+  .sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tt-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .tt-label {
+    flex-shrink: 0;
+    width: 60px;
+    color: #94a3b8;
+  }
+
+  .tt-value {
+    color: #e2e8f0;
+    word-break: break-all;
+  }
+
+  .tt-kp {
+    color: #d4a373;
+    font-weight: 600;
+  }
+
+  .tt-desc {
+    margin: 4px 0 0;
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .tt-resources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-top: 6px;
+  }
+
+  .tt-resource-label {
+    color: #94a3b8;
+    font-size: 12px;
+  }
+
+  .tt-resource-item {
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(79, 124, 255, 0.14);
+    color: #7aa2ff;
+    font-size: 12px;
+  }
+
+  .sheet-action {
+    width: 100%;
+    margin-top: 16px;
+    padding: 11px 0;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #d4a373, #b8875a);
+    color: #10131a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:active {
+      opacity: 0.85;
+    }
+  }
+}
+
+/* 过渡动画 */
+.sheet-fade-enter-active,
+.sheet-fade-leave-active {
+  transition: opacity 0.22s ease;
+}
+.sheet-fade-enter-from,
+.sheet-fade-leave-to {
+  opacity: 0;
+}
+
+.sheet-slide-enter-active,
+.sheet-slide-leave-active {
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sheet-slide-enter-from,
+.sheet-slide-leave-to {
+  transform: translateY(100%);
 }
 </style>

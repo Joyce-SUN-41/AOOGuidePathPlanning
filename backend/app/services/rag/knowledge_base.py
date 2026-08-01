@@ -551,6 +551,61 @@ class KnowledgeBase:
             query_id=query_id,
         )
 
+    async def direct_chat_stream(
+        self,
+        question: str,
+        temperature: float = 0.5,
+        max_tokens: int = 1024,
+    ) -> AsyncGenerator[str, None]:
+        """直连大模型的流式问答（不经过检索增强）
+
+        与 direct_chat 使用相同的 system prompt，仅输出方式改为逐块。
+
+        Yields:
+            增量答案文本；结束前产出一条 "<<SOURCES>>[]" 标记以对齐 query_stream 协议
+        """
+        if not self._llm_client:
+            yield "AI 服务未初始化，请稍后重试。"
+            yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
+            return
+
+        if not self._llm_client.is_configured:
+            yield (
+                "AI 服务未配置，请检查环境变量: "
+                "REST 模式需 XF_API_URL + XF_API_PASSWORD；"
+                "WebSocket 模式需 XF_APP_ID + XF_API_KEY + XF_API_SECRET + XF_ASSISTANT_ID"
+            )
+            yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
+            return
+
+        system_prompt = (
+            "你是一个专业的 AI 助手，名为「燕麦智导」。"
+            "请用中文简洁、准确地回答用户的问题。"
+            "如果问题超出你的知识范围，请如实说明。"
+            "回答应结构清晰，适当使用要点列表。"
+        )
+        messages = RAGPromptBuilder.normalize_roles(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question},
+            ]
+        )
+
+        try:
+            async for chunk in self._llm_client.chat_stream(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ):
+                if chunk.content:
+                    yield chunk.content
+        except Exception as e:  # noqa: BLE001
+            logger.error("[direct_chat_stream] LLM 流式调用失败: %s", e)
+            yield "\n\n[AI 生成过程中出现错误，请重试]"
+            return
+
+        yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
+
     # ---- 检索 ----
 
     async def retrieve(

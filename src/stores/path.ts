@@ -11,6 +11,7 @@ import type {
 import type { AOOConvergenceData } from '@/types/aoo'
 import { pathApi } from '@/api/modules/path'
 import { message } from 'ant-design-vue'
+import { trackEvent } from '@/utils/tracking'
 
 /** AOO 任务轮询间隔（毫秒） */
 const POLL_INTERVAL = 2000
@@ -68,6 +69,9 @@ export const usePathStore = defineStore(
 
     /** 当前轮询计数 */
     let _pollCount = 0
+
+    /** 路径生成起始时间戳（仅用于埋点统计耗时） */
+    let _generateStartedAt = 0
 
     // ═══════════ Getters ═══════════
 
@@ -189,6 +193,8 @@ export const usePathStore = defineStore(
       optimizationStatus.value = 'pending'
       generationProgress.value = 0
       error.value = null
+      _generateStartedAt = Date.now()
+      trackEvent('path_generate_start', { diagnosisId })
 
       try {
         // 1. 提交生成请求（异步任务）
@@ -253,6 +259,12 @@ export const usePathStore = defineStore(
               _applyResult(status.result as unknown as Record<string, unknown>)
             }
 
+            trackEvent('path_generate_complete', {
+              success: true,
+              durationMs: _generateStartedAt ? Date.now() - _generateStartedAt : 0,
+              taskCount: currentPath.value?.totalTasks ?? 0
+            })
+
             message.success('学习路径生成完毕！查看你的专属学习计划')
             stopPolling()
             break
@@ -261,6 +273,10 @@ export const usePathStore = defineStore(
             optimizationStatus.value = 'failed'
             isGenerating.value = false
             error.value = status.errorMessage || 'AOO 引擎处理失败'
+            trackEvent('path_generate_complete', {
+              success: false,
+              durationMs: _generateStartedAt ? Date.now() - _generateStartedAt : 0
+            })
             message.error('路径生成失败')
             stopPolling()
             break
@@ -478,6 +494,7 @@ export const usePathStore = defineStore(
       try {
         await pathApi.selectPath(pathId)
         const selected = alternativePaths.value.find((p) => p.id === pathId)
+        trackEvent('path_select', { pathId, pathType: selected?.type ?? '' })
         if (selected && currentPath.value) {
           // 从备选路径的 dailyTasks 重新计算 difficultyCurve
           const difficultyCurve = selected.dailyTasks.map((day) => {

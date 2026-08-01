@@ -6,6 +6,18 @@ import type {
   DashboardOverview
 } from '@/types'
 
+/** 平台公开统计数据（首页底部展示） */
+export interface PlatformStats {
+  /** 注册用户数 */
+  studentCount: number
+  /** 已生成学习路径数 */
+  pathCount: number
+  /** 覆盖知识点数 */
+  knowledgePointCount: number
+  /** 累计诊断次数 */
+  diagnosisCount: number
+}
+
 /**
  * 学情看板 API 模块
  *
@@ -31,5 +43,10 @@ export const dashboardApi = {
   /** 获取看板概览数据 */
   getOverview(): Promise<DashboardOverview> {
     return request.get<DashboardOverview>('/dashboard/overview')
+  },
+
+  /** 获取平台公开统计（首页展示用，无需登录） */
+  getPlatformStats(): Promise<PlatformStats> {
+    return request.get<PlatformStats>('/dashboard/platform-stats')
   }
 }

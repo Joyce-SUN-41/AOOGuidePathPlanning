@@ -135,6 +135,14 @@ const frameInterval = computed(() => {
 /** 总迭代数 */
 const totalIterations = computed(() => props.convergenceData.iterations[totalFrames.value - 1] ?? 0)
 
+/** 当前帧四分位区间 (Q1~Q3)，反映种群集中程度 */
+const currentQuartile = computed<{ q1: number; q3: number } | null>(() => {
+  const q1 = props.convergenceData.q1Fitness?.[currentFrameIndex.value]
+  const q3 = props.convergenceData.q3Fitness?.[currentFrameIndex.value]
+  if (typeof q1 !== 'number' || typeof q3 !== 'number') return null
+  return { q1, q3 }
+})
+
 /** 元信息 */
 const metadata = computed(() => props.convergenceData.metadata)
 
@@ -169,6 +177,8 @@ function buildChartOption(): EChartsOption {
   const medianFitness = props.convergenceData.medianFitness
   const diversity = props.convergenceData.diversity
   const snapshots = props.convergenceData.populationSnapshots
+  const q1Fitness = props.convergenceData.q1Fitness
+  const q3Fitness = props.convergenceData.q3Fitness
 
   const currentIdx = currentFrameIndex.value
   const maxIter = totalIterations.value
@@ -221,11 +231,29 @@ function buildChartOption(): EChartsOption {
   const lineMedianData: [number, number][] = []
   const lineDiversityData: [number, number][] = []
 
+  // 四分位误差带：Q1 作为透明基线，band 高度 = Q3 - Q1（stack 叠加实现区间填充）
+  const hasQuartile =
+    Array.isArray(q1Fitness) &&
+    Array.isArray(q3Fitness) &&
+    q1Fitness.length > 0 &&
+    q3Fitness.length >= q1Fitness.length
+  const bandLowerData: [number, number][] = []
+  const bandRangeData: [number, number][] = []
+
   for (let i = 0; i < lineDataLength; i++) {
     lineBestData.push([allIterations[i]!, bestFitness[i]!] as [number, number])
     lineAvgData.push([allIterations[i]!, avgFitness[i]!] as [number, number])
     lineMedianData.push([allIterations[i]!, medianFitness[i]!] as [number, number])
     lineDiversityData.push([allIterations[i]!, diversity[i]!] as [number, number])
+
+    if (hasQuartile) {
+      const q1 = q1Fitness![i]
+      const q3 = q3Fitness![i]
+      if (typeof q1 === 'number' && typeof q3 === 'number') {
+        bandLowerData.push([allIterations[i]!, q1] as [number, number])
+        bandRangeData.push([allIterations[i]!, Math.max(0, q3 - q1)] as [number, number])
+      }
+    }
   }
 
   // ── 当前迭代标记线 ──
@@ -270,8 +298,19 @@ function buildChartOption(): EChartsOption {
       itemWidth: 14,
       itemHeight: 8,
       itemGap: 20,
+      // 'Q1 基线' 为技术性占位序列，不进入图例
+      data: [
+        '四分位区间',
+        '历史种群',
+        '当前种群',
+        '最优适应度',
+        '平均适应度',
+        '中位数适应度',
+        '种群多样性'
+      ],
       selected: {
         历史种群: !!(snapshots && snapshots.length > 0),
+        四分位区间: hasQuartile,
         中位数适应度: false // 默认隐藏减少视觉噪音
       }
     },
@@ -336,6 +375,40 @@ function buildChartOption(): EChartsOption {
     ],
 
     series: [
+      // ⓪-a 四分位误差带下界 Q1（透明占位，仅用于抬高 stack 基线）
+      {
+        name: 'Q1 基线',
+        type: 'line' as const,
+        yAxisIndex: 0,
+        stack: 'quartile-band',
+        data: bandLowerData,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { opacity: 0 },
+        areaStyle: { opacity: 0 },
+        silent: true,
+        tooltip: { show: false },
+        zlevel: 0,
+        animation: false
+      },
+
+      // ⓪-b 四分位误差带 Q1~Q3（种群集中区间）
+      {
+        name: '四分位区间',
+        type: 'line' as const,
+        yAxisIndex: 0,
+        stack: 'quartile-band',
+        data: bandRangeData,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { opacity: 0 },
+        areaStyle: { color: 'rgba(79, 124, 255, 0.14)' },
+        silent: true,
+        tooltip: { show: false },
+        zlevel: 0,
+        animation: false
+      },
+
       // ① 历史种群散点（半透明灰点 — 显示收敛轨迹）
       {
         name: '历史种群',
@@ -663,6 +736,14 @@ defineExpose({
           </span>
         </div>
 
+        <!-- 四分位区间 Q1~Q3 -->
+        <div v-if="currentQuartile" class="stat-item stat-item--quartile">
+          <span class="stat-label">四分位区间</span>
+          <span class="stat-value stat-value--quartile">
+            {{ currentQuartile.q1.toFixed(3) }} ~ {{ currentQuartile.q3.toFixed(3) }}
+          </span>
+        </div>
+
         <!-- 种群多样性 -->
         <div class="stat-item stat-item--diversity">
           <span class="stat-label">种群多样性</span>
@@ -844,6 +925,12 @@ defineExpose({
 
 .stat-value--avg {
   color: #4f7cff;
+}
+
+.stat-value--quartile {
+  color: #7aa2ff;
+  font-size: 13px;
+  letter-spacing: -0.2px;
 }
 
 .stat-value--diversity {

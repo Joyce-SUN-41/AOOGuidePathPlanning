@@ -63,6 +63,37 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_optional(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """可选认证：有有效 Token 则返回用户，否则返回 None（不抛 401）
+
+    用于埋点等允许匿名访问的端点 —— navigator.sendBeacon 无法携带
+    Authorization 头，因此这类请求必须能在无身份的情况下被接受。
+    """
+    if not token:
+        return None
+
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "access":
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    try:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+    except Exception:  # noqa: BLE001 — 埋点场景下任何 DB 异常都降级为匿名
+        return None
+
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
 async def get_current_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:

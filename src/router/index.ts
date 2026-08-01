@@ -17,6 +17,7 @@ const TeacherKnowledgeView = () => import('@/views/TeacherKnowledgeView.vue')
 const TeacherQuestionsView = () => import('@/views/TeacherQuestionsView.vue')
 const AboutView = () => import('@/views/AboutView.vue')
 const RecordsView = () => import('@/views/RecordsView.vue')
+const ProfileView = () => import('@/views/ProfileView.vue')
 const NotFoundView = () => import('@/views/NotFoundView.vue')
 
 /**
@@ -156,6 +157,17 @@ const routes: RouteRecordRaw[] = [
           title: '我的记录',
           icon: 'HistoryOutlined',
           roles: ['student']
+        }
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: ProfileView,
+        meta: {
+          title: '个人中心',
+          icon: 'IdcardOutlined',
+          // 学生与教师均可访问，不在顶部导航中展示
+          hidden: true
         }
       }
     ]

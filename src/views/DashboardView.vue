@@ -16,6 +16,7 @@ import * as echarts from 'echarts'
 import { useDiagnosisStore } from '@/stores/diagnosis'
 import { usePathStore } from '@/stores/path'
 import { dashboardApi } from '@/api/modules/dashboard'
+import { diagnosisApi } from '@/api/modules/diagnosis'
 import type {
   CognitiveLoadTrendPoint,
   DailyActivityItem,
@@ -40,7 +41,8 @@ import {
   AimOutlined,
   DashboardOutlined,
   CaretLeftOutlined,
-  CaretRightOutlined
+  CaretRightOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons-vue'
 
 // ============================================================
@@ -72,6 +74,14 @@ const resizeObservers: ResizeObserver[] = []
 
 // 额外数据（API 获取，失败时用 fallback）
 const cognitiveTrend = ref<CognitiveLoadTrendPoint[]>([])
+
+/**
+ * 首次（最早一次）诊断的知识点掌握度基线。
+ * 来源：诊断历史列表中 createdAt 最早的那条记录的 masteryLevels。
+ * 说明：这是真实数据，不做任何模拟；若用户只有一次诊断（当前即首次）
+ * 或历史接口失败，则保持为 null，雷达图只渲染「当前掌握度」单系列。
+ */
+const baselineMastery = ref<Record<string, number> | null>(null)
 const calendarData = ref<DailyActivityItem[]>([])
 const suggestions = ref<LearningSuggestion[]>([])
 const overview = ref<DashboardOverview | null>(null)
@@ -102,6 +112,72 @@ const cognitiveLoad = computed(() => diagnosisStore.cognitiveLoad)
 const weakPoints = computed(() => diagnosisStore.sortedWeakPoints)
 const masteryStats = computed(() => diagnosisStore.masteryStats)
 const masteryRadarData = computed(() => diagnosisStore.masteryRadarData)
+
+/** 相对首次诊断的真实平均提升（百分点）；无基线时为 null */
+const avgImprovement = computed<number | null>(() => calculateAvgImprovement())
+
+// ---------- 薄弱点详情表格 ----------
+/** 严重程度排序权重（severe > moderate > mild） */
+const SEVERITY_WEIGHT: Record<WeakPoint['severity'], number> = {
+  severe: 3,
+  moderate: 2,
+  mild: 1
+}
+
+/** 表格数据源（带唯一 key，避免同名知识点冲突） */
+const weakPointRows = computed(() =>
+  weakPoints.value.map((wp, idx) => ({
+    ...wp,
+    knowledgePoint: wp.knowledgePoint || `未命名-${idx}`
+  }))
+)
+
+/** 按知识点名称生成筛选项 */
+const weakPointNameFilters = computed(() =>
+  Array.from(new Set(weakPointRows.value.map((w) => w.knowledgePoint))).map((n) => ({
+    text: n,
+    value: n
+  }))
+)
+
+const weakPointColumns = computed(() => [
+  {
+    title: '知识点',
+    dataIndex: 'knowledgePoint',
+    key: 'knowledgePoint',
+    width: 140,
+    ellipsis: true,
+    filters: weakPointNameFilters.value,
+    onFilter: (value: string | number | boolean, record: WeakPoint) =>
+      record.knowledgePoint === value
+  },
+  {
+    title: '严重程度',
+    dataIndex: 'severity',
+    key: 'severity',
+    width: 100,
+    sorter: (a: WeakPoint, b: WeakPoint) =>
+      SEVERITY_WEIGHT[a.severity] - SEVERITY_WEIGHT[b.severity],
+    defaultSortOrder: 'descend' as const
+  },
+  { title: '薄弱原因', dataIndex: 'reason', key: 'reason', ellipsis: true },
+  {
+    title: '改进建议',
+    dataIndex: 'suggestedRemediation',
+    key: 'remediation',
+    ellipsis: true
+  },
+  { title: '操作', key: 'action', width: 92, fixed: 'right' as const }
+])
+
+/** 详情抽屉 */
+const weakPointDetailVisible = ref(false)
+const activeWeakPoint = ref<WeakPoint | null>(null)
+
+function openWeakPointDetail(record: WeakPoint): void {
+  activeWeakPoint.value = record
+  weakPointDetailVisible.value = true
+}
 
 const totalTasks = computed(() => pathStore.taskCount)
 const estimatedHours = computed(() => pathStore.estimatedHours)
@@ -146,15 +222,24 @@ function initRadarChart(): void {
   // 当前掌握度
   const currentValues = masteryRadarData.value.map((item) => item.value)
 
-  // 模拟初始掌握度（首次诊断或对比上次诊断）
-  // 优先从历史诊断获取，若没有则使用当前值做基线偏移
-  const initialMultiplier = 0.55 + Math.random() * 0.15
-  const initialValues = masteryRadarData.value.map((item) =>
-    Math.max(5, Math.round(item.value * initialMultiplier))
-  )
+  // 初始掌握度：取自「首次诊断」的真实记录（baselineMastery）。
+  // 无历史基线时（仅一次诊断 / 接口失败）不渲染对比系列，避免展示虚假进步数据。
+  const baseline = baselineMastery.value
+  const initialValues = baseline
+    ? masteryRadarData.value.map((item) => baseline[item.name] ?? null)
+    : null
 
-  // 提升幅度
-  const improvements = currentValues.map((v, i) => v - (initialValues[i] ?? 0))
+  // 提升幅度（仅在有真实基线且该知识点存在于首次诊断时才有值）
+  const improvements = currentValues.map((v, i) => {
+    const init = initialValues?.[i]
+    return typeof init === 'number' ? v - init : null
+  })
+
+  // 平均提升幅度，用于图上角标注（如 +23%）
+  const validImprovements = improvements.filter((n): n is number => typeof n === 'number')
+  const avgImprovement = validImprovements.length
+    ? Math.round(validImprovements.reduce((s, n) => s + n, 0) / validImprovements.length)
+    : null
 
   chart.setOption({
     tooltip: {
@@ -164,16 +249,49 @@ function initRadarChart(): void {
       textStyle: { color: '#E2E8F0' },
       formatter: (params: { name: string; value: number; seriesName: string; color: string }) => {
         const idx = indicators.findIndex((ind) => ind.name === params.name)
-        const imp = idx >= 0 ? improvements[idx] : 0
+        const imp = idx >= 0 ? improvements[idx] : null
+        let delta = ''
+        if (params.seriesName === '当前掌握度' && typeof imp === 'number') {
+          const color = imp > 0 ? '#52c41a' : imp < 0 ? '#ff4d4f' : '#94A3B8'
+          const arrow = imp > 0 ? '↑ +' : imp < 0 ? '↓ ' : ''
+          delta = `<span style="color:${color};">${arrow}${imp}%（较首次诊断）</span>`
+        }
         return `<b>${params.name}</b><br/>
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${params.color};margin-right:6px;"></span>
           ${params.seriesName}: <b>${params.value}%</b><br/>
-          ${params.seriesName === '当前掌握度' ? `<span style="color:#52c41a;">↑ +${imp}%</span>` : ''}`
+          ${delta}`
       }
     },
+    // 雷达图右上角叠加平均提升百分比标注（仅有真实基线时显示）
+    graphic:
+      avgImprovement === null
+        ? []
+        : [
+            {
+              type: 'text',
+              right: 8,
+              top: 4,
+              style: {
+                text: `${avgImprovement > 0 ? '+' : ''}${avgImprovement}%`,
+                fontSize: 20,
+                fontWeight: 'bold',
+                fill: avgImprovement > 0 ? '#52C41A' : avgImprovement < 0 ? '#FF4D4F' : '#94A3B8'
+              }
+            },
+            {
+              type: 'text',
+              right: 8,
+              top: 28,
+              style: {
+                text: '平均较首次诊断',
+                fontSize: 11,
+                fill: '#94A3B8'
+              }
+            }
+          ],
     legend: {
       bottom: 0,
-      data: ['当前掌握度', '初始水平'],
+      data: initialValues ? ['当前掌握度', '初始水平'] : ['当前掌握度'],
       textStyle: { color: '#CBD5E1', fontSize: 12 }
     },
     radar: {
@@ -216,16 +334,21 @@ function initRadarChart(): void {
         areaStyle: { color: 'rgba(79,124,255,0.15)' },
         itemStyle: { color: '#4F7CFF', borderColor: '#141B2B', borderWidth: 2 }
       },
-      {
-        type: 'radar',
-        name: '初始水平',
-        data: [{ value: initialValues, name: '初始水平' }],
-        symbol: 'diamond',
-        symbolSize: 5,
-        lineStyle: { color: '#b8a99a', width: 1.5, type: 'dashed' },
-        areaStyle: { color: 'rgba(184,169,154,0.08)' },
-        itemStyle: { color: '#b8a99a' }
-      }
+      // 仅在存在真实首次诊断基线时渲染对比系列
+      ...(initialValues
+        ? [
+            {
+              type: 'radar' as const,
+              name: '初始水平',
+              data: [{ value: initialValues, name: '初始水平' }],
+              symbol: 'diamond',
+              symbolSize: 5,
+              lineStyle: { color: '#b8a99a', width: 1.5, type: 'dashed' as const },
+              areaStyle: { color: 'rgba(184,169,154,0.08)' },
+              itemStyle: { color: '#b8a99a' }
+            }
+          ]
+        : [])
     ]
   })
 
@@ -249,6 +372,11 @@ function initTrendChart(): void {
   const memory = trendData.map((d) => Math.round(d.memoryLoad * 100))
   const attention = trendData.map((d) => Math.round(d.attentionLoad * 100))
   const processing = trendData.map((d) => Math.round(d.processingLoad * 100))
+
+  // 默认展示最近 10 次诊断；超出则启用 dataZoom 横向滑动缩放
+  const DEFAULT_VISIBLE = 10
+  const needZoom = dates.length > DEFAULT_VISIBLE
+  const zoomStartIndex = needZoom ? dates.length - DEFAULT_VISIBLE : 0
 
   chart.setOption({
     tooltip: {
@@ -275,11 +403,62 @@ function initTrendChart(): void {
       itemWidth: 14,
       itemHeight: 8
     },
-    grid: { left: 40, right: 20, top: 56, bottom: 28 },
+    // 底部需容纳旋转后的日期标签 + dataZoom 滑块，留足空间避免被裁切
+    grid: {
+      left: 48,
+      right: 24,
+      top: 52,
+      bottom: needZoom ? (dates.length > 8 ? 96 : 76) : dates.length > 8 ? 68 : 44,
+      containLabel: false
+    },
+    // 数据点超过 10 个时启用横向缩放：默认展示最近 10 次诊断，
+    // 支持滑块拖拽与滚轮/双指缩放查看更早的历史。
+    dataZoom: needZoom
+      ? [
+          {
+            type: 'inside',
+            xAxisIndex: 0,
+            startValue: zoomStartIndex,
+            endValue: dates.length - 1,
+            zoomOnMouseWheel: 'shift',
+            moveOnMouseWheel: false,
+            moveOnMouseMove: true
+          },
+          {
+            type: 'slider',
+            xAxisIndex: 0,
+            startValue: zoomStartIndex,
+            endValue: dates.length - 1,
+            height: 18,
+            bottom: 8,
+            borderColor: 'rgba(255,255,255,0.12)',
+            backgroundColor: 'rgba(255,255,255,0.03)',
+            fillerColor: 'rgba(79,124,255,0.18)',
+            handleStyle: { color: '#4F7CFF', borderColor: '#4F7CFF' },
+            moveHandleStyle: { color: 'rgba(79,124,255,0.6)' },
+            dataBackground: {
+              lineStyle: { color: 'rgba(255,77,79,0.4)' },
+              areaStyle: { color: 'rgba(255,77,79,0.12)' }
+            },
+            selectedDataBackground: {
+              lineStyle: { color: '#FF4D4F' },
+              areaStyle: { color: 'rgba(255,77,79,0.25)' }
+            },
+            textStyle: { color: '#94A3B8', fontSize: 10 },
+            brushSelect: false
+          }
+        ]
+      : [],
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { color: '#94A3B8', fontSize: 11, rotate: dates.length > 8 ? 30 : 0 },
+      axisLabel: {
+        color: '#94A3B8',
+        fontSize: 11,
+        rotate: dates.length > 8 ? 35 : 0,
+        margin: 12,
+        hideOverlap: true
+      },
       axisTick: { show: false },
       axisLine: { lineStyle: { color: 'rgba(255,255,255,0.12)' } }
     },
@@ -730,10 +909,13 @@ async function handleRefresh(): Promise<void> {
 async function fetchDashboardExtras(): Promise<void> {
   // 并行获取额外数据，失败则使用 fallback
   const results = await Promise.allSettled([
-    dashboardApi.getCognitiveLoadTrend(10),
+    // 拉取较长历史，图表默认只展示最近 10 次，更早数据经 dataZoom 滑动查看
+    dashboardApi.getCognitiveLoadTrend(30),
     dashboardApi.getCalendarActivity(calendarYear.value, calendarMonth.value),
     dashboardApi.getSuggestions(),
-    dashboardApi.getOverview()
+    dashboardApi.getOverview(),
+    // 首次诊断基线（雷达图「初始水平」对比系列的真实数据来源）
+    loadBaselineMastery()
   ])
 
   // trend
@@ -872,15 +1054,54 @@ async function shiftCalendarMonth(delta: number): Promise<void> {
   initCalendarChart()
 }
 
-/** 计算当前 vs 初始的模拟平均提升 */
-function calculateAvgImprovement(): number {
-  if (!masteryLevels.value.length) return 0
-  const mult = 0.55 + Math.random() * 0.15
-  const totalImprovement = masteryLevels.value.reduce((sum, item) => {
-    const initial = Math.max(5, Math.round(item.mastery * 100 * mult))
-    return sum + (Math.round(item.mastery * 100) - initial)
-  }, 0)
-  return Math.round(totalImprovement / masteryLevels.value.length)
+/**
+ * 计算「当前 vs 首次诊断」的真实平均提升（百分点）。
+ * 无历史基线时返回 null，调用方应展示「—」而非编造数字。
+ */
+function calculateAvgImprovement(): number | null {
+  const baseline = baselineMastery.value
+  if (!baseline || !masteryLevels.value.length) return null
+
+  const deltas = masteryLevels.value
+    .map((item) => {
+      const init = baseline[item.knowledgePoint]
+      if (typeof init !== 'number') return null
+      return Math.round(item.mastery * 100) - init
+    })
+    .filter((n): n is number => n !== null)
+
+  if (!deltas.length) return null
+  return Math.round(deltas.reduce((s, n) => s + n, 0) / deltas.length)
+}
+
+/**
+ * 加载「首次诊断」掌握度基线。
+ * 流程：拉取诊断历史 → 取 createdAt 最早且不等于当前诊断的记录 → 取其 masteryLevels。
+ * 任一环节失败或无历史，均静默保持 baselineMastery = null（不模拟）。
+ */
+async function loadBaselineMastery(): Promise<void> {
+  try {
+    const currentId = diagnosisStore.currentDiagnosis?.id
+    const { list } = await diagnosisApi.getHistory({ page: 1, pageSize: 50 })
+    if (!list?.length) return
+
+    const earliest = [...list]
+      .filter((d) => d.id !== currentId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0]
+    if (!earliest) return
+
+    const detail = await diagnosisApi.getById(earliest.id)
+    if (!detail?.masteryLevels?.length) return
+
+    const map: Record<string, number> = {}
+    detail.masteryLevels.forEach((m) => {
+      map[m.knowledgePoint] = Math.round(m.mastery * 100)
+    })
+    baselineMastery.value = map
+  } catch (e) {
+    console.warn('[Dashboard] 获取首次诊断基线失败，雷达图将只展示当前掌握度', e)
+    baselineMastery.value = null
+  }
 }
 
 // ============================================================
@@ -969,7 +1190,7 @@ watch(
 // 数据就绪后（诊断/路径/趋势加载完成，且 loading 已结束）重新初始化图表，
 // 防止 onMounted 时数据尚未到达导致图表 init 为空。
 watch(
-  [hasDiagnosis, () => !!pathStore.currentPath, () => cognitiveTrend.value.length, () => calendarData.value.length, loading],
+  [hasDiagnosis, () => !!pathStore.currentPath, () => cognitiveTrend.value.length, () => calendarData.value.length, () => baselineMastery.value, loading],
   () => {
     if (loading.value) return
     safeInitCharts()
@@ -1183,17 +1404,24 @@ watch(
                 <h3><RadarChartOutlined /> 知识掌握度雷达图</h3>
                 <span class="card-hint">
                   <span class="legend-dot current"></span> 当前
-                  <span class="legend-dot initial"></span> 初始
+                  <template v-if="baselineMastery">
+                    <span class="legend-dot initial"></span> 初始
+                  </template>
                 </span>
               </div>
               <div class="chart-body">
                 <div :ref="(el) => (chartRefs.radar.value = el as HTMLDivElement | null)" class="echarts-container"></div>
-                <!-- 提升幅度 -->
-                <div class="improvement-bar" v-if="masteryLevels.length">
-                  <RiseOutlined style="color: #52c41a" />
+                <!-- 提升幅度：仅在存在真实首次诊断基线时展示 -->
+                <div class="improvement-bar" v-if="masteryLevels.length && avgImprovement !== null">
+                  <RiseOutlined :style="{ color: avgImprovement >= 0 ? '#52c41a' : '#ff4d4f' }" />
                   <span>
-                    平均提升 <b>{{ calculateAvgImprovement() }}%</b>
+                    较首次诊断平均{{ avgImprovement >= 0 ? '提升' : '下降' }}
+                    <b>{{ Math.abs(avgImprovement) }}%</b>
                   </span>
+                </div>
+                <div class="improvement-bar" v-else-if="masteryLevels.length">
+                  <InfoCircleOutlined style="color: #94a3b8" />
+                  <span>暂无历史诊断可对比，完成第二次诊断后可查看进步幅度</span>
                 </div>
               </div>
             </div>
@@ -1253,7 +1481,12 @@ watch(
           <div class="section-card">
             <div class="card-header">
               <h3><LineChartOutlined /> 认知负荷趋势</h3>
-              <span class="card-hint">越低越好 · 虚线为负荷警戒线</span>
+              <span class="card-hint">
+                越低越好 · 虚线为负荷警戒线
+                <template v-if="cognitiveTrend.length > 10">
+                  · 默认展示最近 10 次，可拖动下方滑块查看更早记录
+                </template>
+              </span>
             </div>
             <div class="chart-body">
               <div :ref="(el) => (chartRefs.trend.value = el as HTMLDivElement | null)" class="echarts-container" style="height: 340px"></div>
@@ -1307,25 +1540,43 @@ watch(
                 >
               </div>
               <div class="weak-points-detailed">
-                <template v-if="weakPoints.length > 0">
-                  <div
-                    v-for="(wp, idx) in weakPoints.slice(0, 6)"
-                    :key="idx"
-                    class="wp-detail-item"
-                    :style="{ borderLeftColor: getSeverityColor(wp.severity) }"
-                  >
-                    <div class="wp-detail-header">
-                      <strong>{{ wp.knowledgePoint }}</strong>
-                      <a-tag :color="getSeverityColor(wp.severity)" size="small">
-                        {{ getSeverityLabel(wp.severity) }}
+                <a-table
+                  v-if="weakPoints.length > 0"
+                  class="weak-point-table"
+                  size="small"
+                  row-key="knowledgePoint"
+                  :columns="weakPointColumns"
+                  :data-source="weakPointRows"
+                  :pagination="
+                    weakPointRows.length > 5 ? { pageSize: 5, size: 'small' } : false
+                  "
+                  :scroll="{ x: 'max-content' }"
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'severity'">
+                      <a-tag :color="getSeverityColor(record.severity)">
+                        {{ getSeverityLabel(record.severity) }}
                       </a-tag>
-                    </div>
-                    <p class="wp-detail-reason">{{ wp.reason }}</p>
-                    <p class="wp-detail-remediation" v-if="wp.suggestedRemediation">
-                      <BulbOutlined /> {{ wp.suggestedRemediation }}
-                    </p>
-                  </div>
-                </template>
+                    </template>
+                    <template v-else-if="column.key === 'reason'">
+                      <a-tooltip :title="record.reason">
+                        <span class="wp-cell-ellipsis">{{ record.reason || '—' }}</span>
+                      </a-tooltip>
+                    </template>
+                    <template v-else-if="column.key === 'remediation'">
+                      <a-tooltip :title="record.suggestedRemediation">
+                        <span class="wp-cell-ellipsis">
+                          {{ record.suggestedRemediation || '—' }}
+                        </span>
+                      </a-tooltip>
+                    </template>
+                    <template v-else-if="column.key === 'action'">
+                      <a-button type="link" size="small" @click="openWeakPointDetail(record)">
+                        查看详情
+                      </a-button>
+                    </template>
+                  </template>
+                </a-table>
                 <div v-else class="weak-empty">
                   <TrophyOutlined style="font-size: 36px; color: #52c41a" />
                   <p>未检测到薄弱点，学习状态良好！</p>
@@ -1400,6 +1651,33 @@ watch(
           </div>
         </div>
     </template>
+
+    <!-- 薄弱点详情抽屉 -->
+    <a-drawer
+      v-model:open="weakPointDetailVisible"
+      title="薄弱点详情"
+      placement="right"
+      :width="420"
+    >
+      <template v-if="activeWeakPoint">
+        <a-descriptions :column="1" bordered size="small">
+          <a-descriptions-item label="知识点">
+            {{ activeWeakPoint.knowledgePoint }}
+          </a-descriptions-item>
+          <a-descriptions-item label="严重程度">
+            <a-tag :color="getSeverityColor(activeWeakPoint.severity)">
+              {{ getSeverityLabel(activeWeakPoint.severity) }}
+            </a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item label="薄弱原因">
+            {{ activeWeakPoint.reason || '暂无说明' }}
+          </a-descriptions-item>
+          <a-descriptions-item label="改进建议">
+            {{ activeWeakPoint.suggestedRemediation || '暂无建议' }}
+          </a-descriptions-item>
+        </a-descriptions>
+      </template>
+    </a-drawer>
   </div>
 </template>
 
@@ -1821,47 +2099,76 @@ watch(
 // ============================================================
 .weak-points-detailed {
   padding: 12px @card-padding;
-  max-height: 420px;
-  overflow-y: auto;
 }
 
-.wp-detail-item {
-  padding: 12px 14px;
-  margin-bottom: 10px;
-  border-left: 3px solid;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 0 @radius-sm @radius-sm 0;
-
-  &:last-child {
-    margin-bottom: 0;
+// 薄弱点表格（深色主题适配）
+.weak-point-table {
+  :deep(.ant-table) {
+    background: transparent;
+    font-size: @font-size-sm;
   }
 
-  .wp-detail-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
+  :deep(.ant-table-thead > tr > th) {
+    background: rgba(255, 255, 255, 0.05);
+    color: @gray-200;
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+    font-weight: 600;
 
-    strong {
-      font-size: @font-size-sm;
-      color: @gray-50;
+    &::before {
+      display: none !important;
     }
   }
 
-  .wp-detail-reason {
-    font-size: @font-size-sm;
+  :deep(.ant-table-tbody > tr > td) {
+    background: transparent;
     color: @gray-200;
-    margin: 0 0 4px;
-    line-height: 1.5;
+    border-bottom-color: rgba(255, 255, 255, 0.06);
   }
 
-  .wp-detail-remediation {
-    font-size: @font-size-xs;
-    color: @brand-cyan-400;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  :deep(.ant-table-tbody > tr:hover > td) {
+    background: rgba(255, 255, 255, 0.05) !important;
+  }
+
+  :deep(.ant-table-cell-fix-right) {
+    background: @gray-800 !important;
+  }
+
+  :deep(.ant-table-column-sort) {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  :deep(.ant-table-column-sorter),
+  :deep(.ant-table-filter-trigger) {
+    color: @gray-400;
+  }
+
+  :deep(.ant-pagination) {
+    color: @gray-300;
+
+    .ant-pagination-item a {
+      color: @gray-300;
+    }
+
+    .ant-pagination-item-active {
+      background: transparent;
+      border-color: @brand-blue-500;
+
+      a {
+        color: @brand-blue-400;
+      }
+    }
+
+    .ant-pagination-prev button,
+    .ant-pagination-next button {
+      color: @gray-300;
+    }
+  }
+
+  .wp-cell-ellipsis {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     agent,
+    analytics,
     aoo,
     auth,
     chat,
@@ -31,3 +32,4 @@ router.include_router(chat.router, tags=["Chat"])
 router.include_router(teacher.router, prefix="/teacher", tags=["Teacher"])
 router.include_router(learning_paths.router, prefix="/learning-paths", tags=["Learning Paths"])
 router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+router.include_router(analytics.router, tags=["Analytics"])

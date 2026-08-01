@@ -15,8 +15,10 @@ import {
   EnvironmentOutlined,
   MailOutlined,
   GithubOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  BulbOutlined
 } from '@ant-design/icons-vue'
+import { dashboardApi } from '@/api/modules/dashboard'
 
 // ============================================================
 //   Store & Router
@@ -55,42 +57,74 @@ function initScrollObserver() {
   )
 
   nextTick(() => {
-    SECTION_KEYS.forEach((key) => {
-      const el = document.querySelector(`[data-reveal-key="${key}"]`)
-      if (el) observer.value?.observe(el)
-    })
+    SECTION_KEYS.forEach((key) => observeSection(key))
   })
+}
+
+/** 观察单个 section（供延迟渲染的区块补注册，如统计区块） */
+function observeSection(key: string) {
+  const el = document.querySelector(`[data-reveal-key="${key}"]`)
+  if (el) observer.value?.observe(el)
 }
 
 // ============================================================
 //   数字增长动画
 // ============================================================
 
-/** 当前显示数值 */
-const displayCounts = ref({ students: 0, paths: 0, rate: 0 })
+/** 当前显示数值（动画中间值） */
+const displayCounts = ref({ users: 0, paths: 0, knowledgePoints: 0 })
 
-/** 目标数值 */
-const TARGET_COUNTS = { students: 1256, paths: 3820, rate: 24.8 }
+/** 目标数值 — 来自后端真实统计，未加载完成前为 null */
+const targetCounts = ref<{ users: number; paths: number; knowledgePoints: number } | null>(null)
+
+/** 统计数据是否已成功加载（失败时隐藏该区块，不展示假数据） */
+const statsLoaded = ref(false)
 
 /** 动画时长(ms) */
 const DURATION = 2000
 
+/** 拉取平台真实统计数据 */
+async function fetchPlatformStats() {
+  try {
+    const stats = await dashboardApi.getPlatformStats()
+    targetCounts.value = {
+      users: stats.studentCount ?? 0,
+      paths: stats.pathCount ?? 0,
+      knowledgePoints: stats.knowledgePointCount ?? 0
+    }
+    statsLoaded.value = true
+    // 统计区块由 v-if 延迟渲染，需在 DOM 挂载后补注册滚动观察
+    await nextTick()
+    if (revealed.value['stats']) {
+      startCountUp() // 已在视口内：数据到达后补播动画
+    } else {
+      observeSection('stats')
+    }
+  } catch (e) {
+    console.warn('[Home] 平台统计数据获取失败，已隐藏统计区块', e)
+    statsLoaded.value = false
+  }
+}
+
 function startCountUp() {
+  const target = targetCounts.value
+  if (!target) return // 真实数据未就绪时不播放动画，避免滚动到编造数字
+
   const startTime = performance.now()
   const startVals = { ...displayCounts.value }
 
   function tick(now: number) {
     const elapsed = now - startTime
     const t = Math.min(elapsed / DURATION, 1)
-    // ease-out cubic
+    // ease-out quart
     const ease = 1 - Math.pow(1 - t, 4)
 
     displayCounts.value = {
-      students: Math.round(
-        startVals.students + (TARGET_COUNTS.students - startVals.students) * ease
-      ),
-      paths: Math.round(startVals.paths + (TARGET_COUNTS.paths - startVals.paths) * ease),
-      rate: parseFloat((startVals.rate + (TARGET_COUNTS.rate - startVals.rate) * ease).toFixed(1))
+      users: Math.round(startVals.users + (target!.users - startVals.users) * ease),
+      paths: Math.round(startVals.paths + (target!.paths - startVals.paths) * ease),
+      knowledgePoints: Math.round(
+        startVals.knowledgePoints + (target!.knowledgePoints - startVals.knowledgePoints) * ease
+      )
     }
 
     if (t < 1) {
@@ -113,6 +147,7 @@ function goTo(path: string) {
 // ============================================================
 onMounted(() => {
   initScrollObserver()
+  fetchPlatformStats()
 })
 
 onUnmounted(() => {
@@ -264,12 +299,17 @@ onUnmounted(() => {
             {{ userStore.isTeacher ? '进入仪表盘' : '开始诊断' }}
           </a-button>
           <a-button
+            v-if="userStore.isTeacher"
             size="large"
             class="hero-btn hero-btn--ghost"
-            @click="goTo(userStore.isTeacher ? '/diagnose' : '/chat')"
+            @click="goTo('/teacher/knowledge')"
           >
             <ThunderboltOutlined />
-            {{ userStore.isTeacher ? '体验学生功能' : '智能问答' }}
+            知识点管理
+          </a-button>
+          <a-button v-else size="large" class="hero-btn hero-btn--ghost" @click="goTo('/chat')">
+            <ThunderboltOutlined />
+            智能问答
           </a-button>
         </div>
       </div>
@@ -833,6 +873,7 @@ onUnmounted(() => {
          5. 数据统计
          ========================================================= -->
     <section
+      v-if="statsLoaded"
       class="section stats-section"
       data-reveal-key="stats"
       :class="{ 'is-revealed': revealed['stats'] }"
@@ -840,21 +881,9 @@ onUnmounted(() => {
       <div class="stats-inner">
         <div class="stat-item">
           <div class="stat-value">
-            <span class="stat-number">{{ displayCounts.students.toLocaleString() }}</span>
-            <span class="stat-plus">+</span>
-          </div>
-          <div class="stat-label">已服务学生</div>
-          <div class="stat-icon-bg">
-            <TeamOutlined />
-          </div>
-        </div>
-        <div class="stat-divider" />
-        <div class="stat-item">
-          <div class="stat-value">
             <span class="stat-number">{{ displayCounts.paths.toLocaleString() }}</span>
-            <span class="stat-plus">+</span>
           </div>
-          <div class="stat-label">生成学习路径</div>
+          <div class="stat-label">已生成学习路径</div>
           <div class="stat-icon-bg">
             <NodeIndexOutlined />
           </div>
@@ -862,12 +891,21 @@ onUnmounted(() => {
         <div class="stat-divider" />
         <div class="stat-item">
           <div class="stat-value">
-            <span class="stat-number">{{ displayCounts.rate }}</span>
-            <span class="stat-unit">%</span>
+            <span class="stat-number">{{ displayCounts.knowledgePoints.toLocaleString() }}</span>
           </div>
-          <div class="stat-label">平均学习效果提升率</div>
+          <div class="stat-label">覆盖知识点</div>
           <div class="stat-icon-bg">
-            <RocketOutlined />
+            <BulbOutlined />
+          </div>
+        </div>
+        <div class="stat-divider" />
+        <div class="stat-item">
+          <div class="stat-value">
+            <span class="stat-number">{{ displayCounts.users.toLocaleString() }}</span>
+          </div>
+          <div class="stat-label">平台用户</div>
+          <div class="stat-icon-bg">
+            <TeamOutlined />
           </div>
         </div>
       </div>
@@ -906,10 +944,17 @@ onUnmounted(() => {
         <!-- 中间：快捷导航 -->
         <div class="footer-nav">
           <h4>快捷入口</h4>
-          <a @click="goTo('/diagnose')">认知诊断</a>
-          <a @click="goTo('/path')">我的路径</a>
-          <a @click="goTo('/chat')">智能问答</a>
-          <a @click="goTo('/dashboard')">学情看板</a>
+          <template v-if="userStore.isTeacher">
+            <a @click="goTo('/teacher')">教师仪表盘</a>
+            <a @click="goTo('/teacher/knowledge')">知识点管理</a>
+            <a @click="goTo('/teacher/questions')">题库管理</a>
+          </template>
+          <template v-else>
+            <a @click="goTo('/diagnose')">认知诊断</a>
+            <a @click="goTo('/path')">我的路径</a>
+            <a @click="goTo('/chat')">智能问答</a>
+            <a @click="goTo('/dashboard')">学情看板</a>
+          </template>
         </div>
 
         <!-- 右侧：赛事 & 团队 -->
@@ -926,6 +971,10 @@ onUnmounted(() => {
           <div class="footer-info-item">
             <EnvironmentOutlined />
             <span>北方工业大学人工智能与计算机学院</span>
+          </div>
+          <div class="footer-info-item">
+            <EnvironmentOutlined />
+            <span>北方工业大学伦敦布鲁内尔学院</span>
           </div>
         </div>
       </div>

@@ -92,6 +92,8 @@ export function ragQueryStream(
           model: '',
           query_id: '',
         }
+        // 后端以 {"error": "..."} 帧上报错误，暂存后在 [DONE] 时统一抛出
+        let streamError = ''
 
         while (true) {
           const { done, value } = await reader.read()
@@ -102,35 +104,61 @@ export function ragQueryStream(
           buffer = lines.pop() || ''
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const raw = line.slice(6).trim()
-              if (raw === '[DONE]') continue
-              try {
-                const parsed = JSON.parse(raw)
-                if (parsed.type === 'chunk' && parsed.content) {
-                  full.answer += parsed.content
-                  onChunk(parsed.content)
-                } else if (parsed.type === 'done') {
-                  Object.assign(full, parsed)
-                  onDone(full)
-                  return
-                }
-              } catch {
-                // 非 JSON 行：当作纯文本增量
-                if (raw) {
-                  full.answer += raw
-                  onChunk(raw)
-                }
+            if (!line.startsWith('data: ')) continue
+
+            const raw = line.slice(6).trim()
+            if (!raw) continue
+            if (raw === '[DONE]') {
+              if (streamError) onError(new Error(streamError))
+              else onDone(full)
+              return
+            }
+
+            try {
+              const parsed = JSON.parse(raw)
+
+              // 错误帧：记录下来，等 [DONE] 时统一上报
+              if (parsed.error) {
+                streamError = String(parsed.error)
+                continue
               }
+              // 来源帧
+              if (Array.isArray(parsed.sources)) {
+                full.sources = parsed.sources
+                full.retrieval_count = parsed.sources.length
+                continue
+              }
+              // query_id 帧
+              if (parsed.query_id) {
+                full.query_id = String(parsed.query_id)
+                continue
+              }
+              // 增量内容帧（兼容旧的 {type:'chunk'} 形态）
+              const delta: string =
+                typeof parsed.content === 'string' ? parsed.content : ''
+              if (delta) {
+                full.answer += delta
+                onChunk(delta)
+              }
+            } catch {
+              // 非 JSON 行：当作纯文本增量
+              full.answer += raw
+              onChunk(raw)
             }
           }
         }
 
-        onDone(full)
+        // 流结束但没收到 [DONE]（如连接中断）时的兜底
+        if (streamError) onError(new Error(streamError))
+        else onDone(full)
       } else {
-        // 非流式响应：整体返回后用打字机效果
-        const json: RAGQueryResponse = await response.json()
-        onDone(json)
+        // 非流式回退：后端返回的是 ResponseBase 包裹结构，需要解包
+        const json = await response.json()
+        const body = (json?.data ?? json) as RAGQueryResponse
+        if (json?.code && json.code !== 200 && json.code !== 0) {
+          throw new Error(json.message || 'AI 服务暂时不可用')
+        }
+        onDone(body)
       }
     })
     .catch((err) => {

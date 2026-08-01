@@ -10,11 +10,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.diagnosis import DiagnosisRecord
+from app.models.knowledge_point import KnowledgePoint
 from app.models.learning_path import LearningPath
 from app.models.user import User
 from app.schemas.common import ResponseBase
 
 router = APIRouter()
+
+
+# ═══════════ GET /dashboard/platform-stats （公开） ════════
+
+
+@router.get(
+    "/platform-stats",
+    response_model=ResponseBase,
+    summary="平台公开统计数据（无需登录）",
+)
+async def get_platform_stats(db: AsyncSession = Depends(get_db)):
+    """
+    首页展示用的平台级聚合统计，均为数据库真实计数：
+    - studentCount   注册用户数
+    - pathCount      已生成学习路径数
+    - knowledgePointCount 覆盖知识点数
+    - diagnosisCount 累计诊断次数
+
+    该接口不返回任何用户隐私信息，仅为聚合计数，故不做鉴权。
+    任一统计项查询失败时降级为 0，保证首页始终可渲染。
+    """
+    async def _count(model) -> int:
+        try:
+            result = await db.execute(select(func.count()).select_from(model))
+            return int(result.scalar() or 0)
+        except Exception:  # noqa: BLE001 — 统计失败不应阻塞首页
+            return 0
+
+    return ResponseBase(
+        data={
+            "studentCount": await _count(User),
+            "pathCount": await _count(LearningPath),
+            "knowledgePointCount": await _count(KnowledgePoint),
+            "diagnosisCount": await _count(DiagnosisRecord),
+        }
+    )
 
 
 # ═══════════ GET /dashboard/cognitive-load-trend ══════════

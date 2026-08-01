@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { UserInfo, UserRole, LoginParams, RegisterParams } from '@/types'
 import { authApi } from '@/api/modules/auth'
 import { message } from 'ant-design-vue'
+import { trackEvent } from '@/utils/tracking'
 
 /**
  * 用户认证与信息状态管理
@@ -61,9 +62,11 @@ export const useUserStore = defineStore(
         token.value = res.token
         userInfo.value = res.userInfo
         remember.value = params.remember ?? false
+        trackEvent('user_login', { role: res.userInfo?.role ?? '', success: true })
         message.success('登录成功，欢迎回来！')
         return true
       } catch {
+        trackEvent('user_login', { success: false })
         return false
       }
     }
@@ -75,15 +78,18 @@ export const useUserStore = defineStore(
         token.value = res.token
         userInfo.value = res.userInfo
         remember.value = false
+        trackEvent('user_register', { role: res.userInfo?.role ?? '', success: true })
         message.success('注册成功！')
         return true
       } catch {
+        trackEvent('user_register', { success: false })
         return false
       }
     }
 
     /** 退出登录 */
     function logout(showMessage = true): void {
+      trackEvent('user_logout', { role: userInfo.value?.role ?? '' })
       token.value = ''
       userInfo.value = null
       // 立即清除所有认证相关的 localStorage 条目，避免 persist 插件恢复

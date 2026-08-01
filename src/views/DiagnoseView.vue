@@ -19,7 +19,9 @@ import {
   PlayCircleOutlined,
   BookOutlined
 } from '@ant-design/icons-vue'
+import CognitiveAuraBackground from '@/components/CognitiveAuraBackground.vue'
 import { diagnosisApi } from '@/api/modules/diagnosis'
+import { trackEvent } from '@/utils/tracking'
 import type {
   DiagnosisQuestion,
   DiagnosisAnswer,
@@ -400,6 +402,10 @@ function goNext() {
 /** 提交答案并获取诊断结果 */
 async function submitAnswers() {
   pageMode.value = 'submitting'
+  trackEvent('diagnosis_submit', {
+    subject: '人工智能导论',
+    answerCount: answers.value.length
+  })
 
   try {
     const result = await diagnosisApi.submit({
@@ -408,8 +414,10 @@ async function submitAnswers() {
       grade: '大学'
     })
     diagnosisResult.value = result
+    trackEvent('diagnosis_complete', { source: 'api' })
   } catch {
     // 后端不可用时本地计算 Mock 结果
+    trackEvent('diagnosis_complete', { source: 'local_fallback' })
     try {
       diagnosisResult.value = computeMockResult()
     } catch (mockError) {
@@ -837,6 +845,9 @@ watch(pageMode, (mode) => {
 
 <template>
   <div class="diagnose-page">
+    <!-- ═══════ 认知神经网络动态背景（全诊断页常驻，更炫酷精致） ═══════ -->
+    <CognitiveAuraBackground :density="38" :opacity="0.85" />
+
     <!-- ═══════ 加载态 ═══════ -->
     <div v-if="pageMode === 'loading'" class="diagnose-loading">
       <a-spin size="large" tip="正在加载题库..." />
@@ -882,16 +893,12 @@ watch(pageMode, (mode) => {
         </div>
 
         <div class="start-tips">
-          <a-alert type="info" :show-icon="false">
-            <template #message>
-              <div class="tips-content">
-                <BulbOutlined style="color: #4a90d9" />
-                <span
-                  >每题作答后自动进入下一题，请认真思考后选择。系统将根据你的答题时间和正确率综合评估学习状态。</span
-                >
-              </div>
-            </template>
-          </a-alert>
+          <div class="tips-content">
+            <span class="tips-icon"><BulbOutlined /></span>
+            <span class="tips-text">
+              每题作答后<em>自动进入下一题</em>，请认真思考后选择。系统将根据你的<em>答题时间</em>和<em>正确率</em>综合评估学习状态。
+            </span>
+          </div>
         </div>
 
         <div class="start-actions">
@@ -1192,7 +1199,8 @@ watch(pageMode, (mode) => {
                 </div>
                 <div v-if="wp.suggestedRemediation" class="wp-suggestion">
                   <BookOutlined class="wp-suggestion-icon" />
-                  {{ wp.suggestedRemediation }}
+                  <span class="wp-suggestion-label">补救建议</span>
+                  <span class="wp-suggestion-text">{{ wp.suggestedRemediation }}</span>
                 </div>
               </div>
             </div>
@@ -1251,9 +1259,19 @@ export default {
    Diagnose Page — 整体容器
    ═══════════════════════════════════════════ */
 .diagnose-page {
+  position: relative;
+  z-index: 1;
   max-width: 860px;
   margin: 0 auto;
   padding: 0 12px;
+}
+
+/* 尊重用户的减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .bg-glow,
+  .sparkle {
+    animation: none !important;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -1347,16 +1365,48 @@ export default {
   margin: 12px 0;
 }
 
+/* 提示条：深色玻璃底 + 左侧金色导引条，正文使用高对比中性色，
+   关键词用燕麦金强调，保证在深色背景上清晰可读 */
 .tips-content {
   display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(212, 163, 115, 0.12) 0%,
+    rgba(212, 163, 115, 0.05) 45%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  border: 1px solid rgba(212, 163, 115, 0.22);
+  border-left: 3px solid #d4a373;
+}
+
+.tips-icon {
+  flex-shrink: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   font-size: 13px;
-  color: #d4a373;
-  background: rgba(212, 163, 115, 0.08);
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(212, 163, 115, 0.15);
+  color: #f0c894;
+  background: rgba(212, 163, 115, 0.18);
+  margin-top: 1px;
+}
+
+.tips-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #cbd5e1;
+}
+
+.tips-text em {
+  font-style: normal;
+  font-weight: 600;
+  color: #f0c894;
 }
 
 .start-actions {
@@ -1884,24 +1934,43 @@ export default {
   top: 2px;
 }
 
+/* 补救建议：深色卡片上使用浅色正文 + 燕麦金标签，避免深棕字被背景吞掉 */
 .wp-suggestion {
-  font-size: 12px;
-  color: #7a5a30;
-  background: rgba(232, 213, 183, 0.3);
-  padding: 8px 12px;
+  font-size: 12.5px;
+  color: #e2e8f0;
+  background: rgba(212, 163, 115, 0.1);
+  border: 1px solid rgba(212, 163, 115, 0.2);
+  border-left: 2px solid rgba(212, 163, 115, 0.65);
+  padding: 8px 12px 8px 32px;
   border-radius: 8px;
   margin-top: 8px;
-  line-height: 1.5;
-  padding-left: 22px;
+  line-height: 1.6;
   position: relative;
 }
 
 .wp-suggestion-icon {
   font-size: 13px;
-  color: #e8d5b7;
+  color: #f0c894;
   position: absolute;
   left: 12px;
   top: 10px;
+}
+
+.wp-suggestion-label {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f0c894;
+  background: rgba(212, 163, 115, 0.18);
+  border: 1px solid rgba(212, 163, 115, 0.28);
+  vertical-align: 1px;
+}
+
+.wp-suggestion-text {
+  color: #dbe3ee;
 }
 
 /* AI 摘要 */

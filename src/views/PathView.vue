@@ -217,14 +217,55 @@ const revealedIterations = computed(() => {
   }
 })
 
+/**
+ * 初始化（或重建）收敛曲线图表。
+ *
+ * 注意：图表容器位于 `v-if="convergenceTab === 'curve'"` 内部，
+ * 切到「粒子轨迹」再切回来时 DOM 节点会被销毁并重建。
+ * 若继续复用旧的 ECharts 实例，它绑定的是已脱离文档的旧节点，
+ * 画面就会一片空白。因此这里始终以「当前真实节点」为准重建实例。
+ */
 function initConvergenceChart() {
-  if (!convergenceChartRef.value) return
-  chartInstance = echarts.init(convergenceChartRef.value)
+  const el = convergenceChartRef.value
+  if (!el) return
 
+  // 释放可能存在的旧实例 / 旧监听，避免内存泄漏与错误复用
+  disposeConvergenceChart()
+
+  chartInstance = echarts.init(el)
   resizeObserver = new ResizeObserver(() => chartInstance?.resize())
-  resizeObserver.observe(convergenceChartRef.value)
+  resizeObserver.observe(el)
 
   renderConvergenceChart()
+}
+
+/** 销毁收敛曲线图表实例与其尺寸监听 */
+function disposeConvergenceChart() {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+}
+
+/**
+ * 确保图表实例与当前 DOM 节点一致；不一致则重建。
+ * 用于 Tab 切换、面板展开等场景。
+ */
+function ensureConvergenceChart() {
+  const el = convergenceChartRef.value
+  if (!el) return
+  // getInstanceByDom 拿不到，说明该节点尚未绑定实例（DOM 被重建过）
+  const bound = echarts.getInstanceByDom(el)
+  if (!bound || bound !== chartInstance || chartInstance?.isDisposed()) {
+    initConvergenceChart()
+  } else {
+    chartInstance.resize()
+    renderConvergenceChart()
+  }
 }
 
 function renderConvergenceChart() {
@@ -262,7 +303,8 @@ function renderConvergenceChart() {
     },
     yAxis: {
       type: 'value',
-      inverse: true,
+      // 纵轴恢复常规方向：数值自下而上递增
+      inverse: false,
       name: '适应度',
       nameLocation: 'middle',
       nameGap: 44,
@@ -355,15 +397,21 @@ function onConvergenceCollapseChange(keys: string | string[]): void {
 
 watch(convergenceExpanded, (val) => {
   if (val) {
-    nextTick(() => {
-      if (!chartInstance) initConvergenceChart()
-      else {
-        chartInstance.resize()
-        renderConvergenceChart()
-      }
-    })
+    nextTick(() => ensureConvergenceChart())
   } else {
     pausePlayback()
+  }
+})
+
+// 切换「收敛曲线 / 粒子轨迹」时，曲线容器会被 v-if 销毁重建，
+// 切回来必须重新绑定实例，否则图表不显示。
+watch(convergenceTab, (tab) => {
+  if (tab === 'curve') {
+    nextTick(() => ensureConvergenceChart())
+  } else {
+    // 离开曲线视图时暂停回放并释放实例，避免持有失效 DOM
+    pausePlayback()
+    disposeConvergenceChart()
   }
 })
 
@@ -374,53 +422,89 @@ watch(
   (val) => {
     if (!val?.iterations?.length) return
     currentFrame.value = 0
-    if (!convergenceExpanded.value) return
-    nextTick(() => {
-      if (!chartInstance) initConvergenceChart()
-      else renderConvergenceChart()
-    })
+    if (!convergenceExpanded.value || convergenceTab.value !== 'curve') return
+    nextTick(() => ensureConvergenceChart())
   }
 )
 
 // ============================================================
 //   操作按钮
 // ============================================================
-async function handleRegenerate() {
+async function handleRegenerate(diagnosisId?: string | number) {
   // ── 获取有效的 diagnosis_id ──
-  let diagnosisId: string | number = currentPath.value?.diagnosisId || ''
+  let diagId = diagnosisId
 
-  // 1. 如果当前路径没有 diagnosisId，尝试从诊断 Store 获取 (persisted)
-  if (!diagnosisId) {
-    diagnosisId = diagnosisStore.currentDiagnosis?.id || ''
+  // 1. 如果未指定，尝试使用当前路径已有的 diagnosisId
+  if (!diagId) {
+    diagId = currentPath.value?.diagnosisId || ''
   }
 
-  // 2. 如果还没有，从 API 获取最新诊断结果
-  if (!diagnosisId) {
+  // 2. 如果当前路径没有 diagnosisId，尝试从诊断 Store 获取 (persisted)
+  if (!diagId) {
+    diagId = diagnosisStore.currentDiagnosis?.id || ''
+  }
+
+  // 3. 如果还没有，从 API 获取最新诊断结果
+  if (!diagId) {
     try {
       const latest = await diagnosisApi.getLatest()
       if (latest?.id) {
-        diagnosisId = latest.id
+        diagId = latest.id
       }
     } catch {
       // 忽略查询失败，下面会统一处理
     }
   }
 
-  // 3. 最终校验
-  if (!diagnosisId) {
+  // 4. 最终校验
+  if (!diagId) {
     message.warning('暂无可用的诊断结果，请先完成认知诊断测评')
     return
   }
 
   regenerating.value = true
   try {
-    await pathStore.generatePath(String(diagnosisId))
+    await pathStore.generatePath(String(diagId))
     message.success('学习路径已启动生成，请稍候...')
   } catch {
     message.error('重新生成失败，请稍后重试')
   } finally {
     regenerating.value = false
   }
+}
+
+// ── 重新规划：选择诊断历史 ──
+const replanModalVisible = ref(false)
+const replanLoading = ref(false)
+const replanHistory = ref<ReplanDiagItem[]>([])
+
+interface ReplanDiagItem {
+  id: string | number
+  created_at: string
+  score: number
+  mastery: number
+  weak_points: string[]
+}
+
+async function openReplanModal() {
+  replanModalVisible.value = true
+  replanLoading.value = true
+  replanHistory.value = []
+  try {
+    const list = await diagnosisApi.getHistory()
+    replanHistory.value = Array.isArray(list)
+      ? (list as ReplanDiagItem[]).slice().reverse()
+      : []
+  } catch {
+    message.warning('获取诊断历史失败，请稍后重试')
+  } finally {
+    replanLoading.value = false
+  }
+}
+
+function confirmReplan(item: ReplanDiagItem) {
+  replanModalVisible.value = false
+  handleRegenerate(item.id)
 }
 
 function handleExport() {
@@ -496,8 +580,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   pausePlayback()
-  chartInstance?.dispose()
-  resizeObserver?.disconnect()
+  disposeConvergenceChart()
   // 清理轮询定时器，防止页面切换后僵尸轮询
   pathStore.dispose()
 })
@@ -516,7 +599,7 @@ onUnmounted(() => {
         </h1>
       </div>
       <div class="header-right" v-if="hasPath && !isGenerating">
-        <a-button class="action-btn" :loading="regenerating" @click="handleRegenerate">
+        <a-button class="action-btn" :loading="regenerating" @click="openReplanModal">
           <ReloadOutlined /> 重新规划
         </a-button>
         <a-button class="action-btn" @click="handleExport">
@@ -973,6 +1056,57 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+
+    <!-- =========================================================
+         重新规划：选择依据的诊断历史
+         ========================================================= -->
+    <a-modal
+      v-model:visible="replanModalVisible"
+      title="重新规划学习路径"
+      :footer="null"
+      width="640px"
+      class="replan-modal"
+    >
+      <p class="replan-tip">
+        请选择本次重新规划所依据的一次认知诊断结果，系统将根据该次诊断的薄弱知识点与掌握度重新优化路径。
+      </p>
+      <div v-if="replanLoading" class="replan-loading">
+        <a-spin tip="正在加载诊断历史..." />
+      </div>
+      <a-empty
+        v-else-if="replanHistory.length === 0"
+        description="暂无认知诊断记录，请先完成一次测评"
+      />
+      <a-list
+        v-else
+        class="replan-list"
+        :data-source="replanHistory"
+        item-layout="horizontal"
+      >
+        <template #renderItem="{ item }">
+          <a-list-item class="replan-list-item" @click="confirmReplan(item)">
+            <a-list-item-meta>
+              <template #title>
+                <span class="replan-item-title">
+                  诊断于 {{ formatDate(item.created_at) }}
+                </span>
+              </template>
+              <template #description>
+                <span class="replan-item-desc">
+                  综合得分 {{ item.score }} · 掌握度 {{ Math.round(item.mastery * 100) }}%
+                  <template v-if="item.weak_points?.length">
+                    · 薄弱：{{ item.weak_points.slice(0, 3).join('、') }}
+                  </template>
+                </span>
+              </template>
+            </a-list-item-meta>
+            <template #actions>
+              <a-button type="primary" ghost size="small">选用此次</a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </a-modal>
   </div>
 </template>
 
@@ -1880,5 +2014,67 @@ onUnmounted(() => {
     aspect-ratio: 1 / 1;
     min-height: 220px;
   }
+}
+</style>
+
+<!-- 重新规划对话框（a-modal teleport 到 body，需非 scoped 样式） -->
+<style lang="less">
+.replan-modal {
+  .ant-modal-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .ant-modal-title {
+    color: #f1f5f9;
+    font-weight: 600;
+  }
+  .ant-modal-content {
+    background: #141b2b;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  }
+  .ant-modal-close-x {
+    color: #94a3b8;
+  }
+  .ant-modal-body {
+    padding-top: 12px;
+  }
+}
+.replan-tip {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.replan-loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+.replan-list {
+  max-height: 52vh;
+  overflow-y: auto;
+  .ant-list-item {
+    cursor: pointer;
+    border-radius: 10px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: all 0.18s ease;
+    &:hover {
+      border-color: rgba(212, 163, 115, 0.5);
+      background: rgba(212, 163, 115, 0.06);
+    }
+  }
+  .ant-list-item-meta-title {
+    margin-bottom: 4px;
+  }
+}
+.replan-item-title {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+.replan-item-desc {
+  color: #94a3b8;
+  font-size: 12.5px;
 }
 </style>
