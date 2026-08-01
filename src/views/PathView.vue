@@ -10,12 +10,15 @@
  *   5. 操作按钮行（重新规划 / 导出 / 分享）
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { usePathStore } from '@/stores/path'
+import { useDiagnosisStore } from '@/stores/diagnosis'
+import { diagnosisApi } from '@/api/modules/diagnosis'
+import { pathApi } from '@/api/modules/path'
 import LearningPathView from '@/components/LearningPathView.vue'
+import SeedTrajectory from '@/components/SeedTrajectory.vue'
 import type { LearningTask, DailyTaskView } from '@/types'
-import type { AOOConvergenceData } from '@/types/aoo'
 import {
   NodeIndexOutlined,
   ThunderboltOutlined,
@@ -38,6 +41,7 @@ import {
   LeftOutlined,
   ExperimentOutlined,
   SettingOutlined,
+  AimOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
@@ -45,7 +49,9 @@ import { message } from 'ant-design-vue'
 //   Store & Router
 // ============================================================
 const router = useRouter()
+const route = useRoute()
 const pathStore = usePathStore()
+const diagnosisStore = useDiagnosisStore()
 
 // ============================================================
 //   基础 State
@@ -182,24 +188,32 @@ const convergenceExpanded = ref(false)
 const convergenceChartRef = ref<HTMLDivElement | null>(null)
 const isPlaying = ref(false)
 const currentFrame = ref(0)
+/** 收敛视图 Tab: 'curve' = 收敛曲线, 'trajectory' = 粒子轨迹 */
+const convergenceTab = ref<'curve' | 'trajectory'>('curve')
 let chartInstance: echarts.ECharts | null = null
 let playTimer: ReturnType<typeof setInterval> | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const convergenceData = computed(() => pathStore.convergenceData)
 const hasConvergence = computed(() => pathStore.hasConvergenceData)
+/** 是否包含粒子快照数据（用于展示 SeedTrajectory） */
+const hasPopulationSnapshots = computed(() => {
+  const data = convergenceData.value
+  return !!(data?.populationSnapshots && data.populationSnapshots.length > 0)
+})
 
 const totalFrames = computed(() => convergenceData.value?.iterations?.length ?? 0)
 
 /** 当前帧标注的数据集 */
 const revealedIterations = computed(() => {
   const data = convergenceData.value
-  if (!data || !data.iterations) return { x: [] as number[], best: [] as number[], avg: [] as number[] }
+  if (!data || !data.iterations)
+    return { x: [] as number[], best: [] as number[], avg: [] as number[] }
   const end = currentFrame.value || data.iterations.length
   return {
     x: data.iterations.slice(0, end),
     best: (data.bestFitness || []).slice(0, end),
-    avg: (data.avgFitness || []).slice(0, end),
+    avg: (data.avgFitness || []).slice(0, end)
   }
 })
 
@@ -225,31 +239,39 @@ function renderConvergenceChart() {
       trigger: 'axis',
       backgroundColor: 'rgba(10,13,20,0.95)',
       borderColor: 'rgba(212,163,115,0.20)',
-      textStyle: { color: '#F8FAFC', fontSize: 13 },
+      textStyle: { color: '#F8FAFC', fontSize: 13 }
     },
     legend: {
       data: ['最优适应度', '平均适应度'],
-      bottom: 0,
-      textStyle: { fontSize: 12, color: '#64748B' },
+      top: 0,
+      right: 10,
+      textStyle: { fontSize: 12, color: '#CBD5E1' }
     },
-    grid: { top: 20, right: 30, bottom: 40, left: 50 },
+    grid: { top: 44, right: 30, bottom: 56, left: 64 },
     xAxis: {
       type: 'value',
       name: '迭代次数',
-      nameTextStyle: { fontSize: 11, color: '#475569' },
+      nameLocation: 'middle',
+      nameGap: 32,
+      nameTextStyle: { fontSize: 12, color: '#CBD5E1', fontWeight: 500 },
       min: 0,
       max: cd.iterations?.length ?? 100,
-      axisLabel: { fontSize: 11, color: '#475569' },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+      axisLabel: { fontSize: 11, color: '#94A3B8' },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.18)' } },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } }
     },
     yAxis: {
       type: 'value',
+      inverse: true,
       name: '适应度',
-      nameTextStyle: { fontSize: 11, color: '#475569' },
-      axisLabel: { fontSize: 11, color: '#475569' },
+      nameLocation: 'middle',
+      nameGap: 44,
+      nameTextStyle: { fontSize: 12, color: '#CBD5E1', fontWeight: 500 },
+      axisLabel: { fontSize: 11, color: '#94A3B8' },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.18)' } },
       splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
       min: (val: { min: number }) => Math.floor(val.min * 0.98),
-      max: (val: { max: number }) => Math.ceil(val.max * 1.02),
+      max: (val: { max: number }) => Math.ceil(val.max * 1.02)
     },
     series: [
       {
@@ -260,10 +282,12 @@ function renderConvergenceChart() {
         lineStyle: { color: '#D4A373', width: 1.5 },
         itemStyle: { color: '#D4A373' },
         symbol: 'none',
-        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: 'rgba(212,163,115,0.15)' },
-          { offset: 1, color: 'rgba(212,163,115,0.02)' },
-        ])},
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(212,163,115,0.15)' },
+            { offset: 1, color: 'rgba(212,163,115,0.02)' }
+          ])
+        }
       },
       {
         name: '平均适应度',
@@ -272,9 +296,9 @@ function renderConvergenceChart() {
         smooth: true,
         lineStyle: { color: '#4A6CF7', width: 1.2, type: 'dashed' },
         itemStyle: { color: '#4A6CF7' },
-        symbol: 'none',
-      },
-    ],
+        symbol: 'none'
+      }
+    ]
   }
 
   chartInstance.setOption(option, true)
@@ -317,6 +341,18 @@ function resetPlayback() {
   currentFrame.value = 0
 }
 
+/**
+ * a-collapse 面板展开/折叠回调。
+ *
+ * activeKey 是单向绑定（三元表达式不能用于 v-model），
+ * 因此必须在这里手动同步 convergenceExpanded，
+ * 否则点击标题栏没有任何反应 —— 回放区永远打不开。
+ */
+function onConvergenceCollapseChange(keys: string | string[]): void {
+  const arr = Array.isArray(keys) ? keys : keys ? [keys] : []
+  convergenceExpanded.value = arr.includes('1')
+}
+
 watch(convergenceExpanded, (val) => {
   if (val) {
     nextTick(() => {
@@ -326,16 +362,60 @@ watch(convergenceExpanded, (val) => {
         renderConvergenceChart()
       }
     })
+  } else {
+    pausePlayback()
   }
 })
+
+// 数据是异步到达的（AOO 轮询完成后才写入 store）。
+// 若此时面板已展开，需要重新渲染，否则图表停留在空状态。
+watch(
+  () => pathStore.convergenceData,
+  (val) => {
+    if (!val?.iterations?.length) return
+    currentFrame.value = 0
+    if (!convergenceExpanded.value) return
+    nextTick(() => {
+      if (!chartInstance) initConvergenceChart()
+      else renderConvergenceChart()
+    })
+  }
+)
 
 // ============================================================
 //   操作按钮
 // ============================================================
 async function handleRegenerate() {
+  // ── 获取有效的 diagnosis_id ──
+  let diagnosisId: string | number = currentPath.value?.diagnosisId || ''
+
+  // 1. 如果当前路径没有 diagnosisId，尝试从诊断 Store 获取 (persisted)
+  if (!diagnosisId) {
+    diagnosisId = diagnosisStore.currentDiagnosis?.id || ''
+  }
+
+  // 2. 如果还没有，从 API 获取最新诊断结果
+  if (!diagnosisId) {
+    try {
+      const latest = await diagnosisApi.getLatest()
+      if (latest?.id) {
+        diagnosisId = latest.id
+      }
+    } catch {
+      // 忽略查询失败，下面会统一处理
+    }
+  }
+
+  // 3. 最终校验
+  if (!diagnosisId) {
+    message.warning('暂无可用的诊断结果，请先完成认知诊断测评')
+    return
+  }
+
   regenerating.value = true
   try {
-    await pathStore.generatePath(currentPath.value?.diagnosisId || '')
+    await pathStore.generatePath(String(diagnosisId))
+    message.success('学习路径已启动生成，请稍候...')
   } catch {
     message.error('重新生成失败，请稍后重试')
   } finally {
@@ -365,16 +445,29 @@ function goToDiagnose() {
 function formatDate(iso: string | undefined): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('zh-CN', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   })
 }
 
 const TASK_TYPE_LABELS: Record<string, string> = {
-  video: '视频', quiz: '测验', reading: '阅读', article: '阅读', project: '项目', exercise: '练习',
+  video: '视频',
+  quiz: '测验',
+  reading: '阅读',
+  article: '阅读',
+  project: '项目',
+  exercise: '练习'
 }
 const TASK_TYPE_COLORS: Record<string, string> = {
-  video: '#1890FF', quiz: '#FA8C16', reading: '#52C41A', article: '#52C41A', project: '#722ED1', exercise: '#13C2C2',
+  video: '#1890FF',
+  quiz: '#FA8C16',
+  reading: '#52C41A',
+  article: '#52C41A',
+  project: '#722ED1',
+  exercise: '#13C2C2'
 }
 
 // ============================================================
@@ -383,6 +476,17 @@ const TASK_TYPE_COLORS: Record<string, string> = {
 onMounted(async () => {
   loading.value = true
   try {
+    // 若从「我的记录」带 ?id= 打开指定历史路径，则加载该路径
+    const targetId = route.query['id'] as string | undefined
+    if (targetId) {
+      try {
+        const target = await pathApi.getPath(targetId)
+        pathStore.currentPath = target
+        return
+      } catch (e) {
+        // 加载失败回退到当前活跃路径
+      }
+    }
     // 总是从 API 获取最新路径数据，避免持久化过期数据导致渲染异常
     await pathStore.fetchCurrentPath()
   } finally {
@@ -394,12 +498,13 @@ onUnmounted(() => {
   pausePlayback()
   chartInstance?.dispose()
   resizeObserver?.disconnect()
+  // 清理轮询定时器，防止页面切换后僵尸轮询
+  pathStore.dispose()
 })
 </script>
 
 <template>
   <div class="path-page">
-
     <!-- =========================================================
          1. 页面头部 + 操作按钮
          ========================================================= -->
@@ -452,10 +557,15 @@ onUnmounted(() => {
 
     <div v-else-if="!hasPath && !loading" class="state-card empty">
       <a-result title="尚未生成学习路径">
-        <template #icon><NodeIndexOutlined style="color: #9B8A7A; font-size: 64px;" /></template>
+        <template #icon><NodeIndexOutlined style="color: #9b8a7a; font-size: 64px" /></template>
         <template #sub-title>完成认知诊断后，AOO 引擎将为你量身定制专属学习路径</template>
         <template #extra>
-          <a-button type="primary" size="large" @click="goToDiagnose">前往认知诊断</a-button>
+          <a-space direction="vertical">
+            <a-button type="primary" size="large" :loading="regenerating" @click="handleRegenerate">
+              <ThunderboltOutlined /> 生成学习路径
+            </a-button>
+            <a-button size="large" @click="goToDiagnose">前往认知诊断</a-button>
+          </a-space>
         </template>
       </a-result>
     </div>
@@ -472,7 +582,7 @@ onUnmounted(() => {
         <!-- 路径信息卡片 -->
         <div class="overview-card overview-card--info">
           <div class="overview-card-header">
-            <div class="overview-card-icon" style="background: #EFF3FF; color: #4F7CFF;">
+            <div class="overview-card-icon" style="background: #eff3ff; color: #4f7cff">
               <CalendarOutlined />
             </div>
             <div>
@@ -490,7 +600,7 @@ onUnmounted(() => {
 
         <!-- 总天数 -->
         <div class="overview-card overview-card--metric">
-          <div class="overview-card-icon" style="background: #E6F4FF; color: #1677FF;">
+          <div class="overview-card-icon" style="background: #e6f4ff; color: #1677ff">
             <CalendarOutlined />
           </div>
           <div class="overview-metric-value">{{ totalDays }}</div>
@@ -499,7 +609,7 @@ onUnmounted(() => {
 
         <!-- 总任务数 -->
         <div class="overview-card overview-card--metric">
-          <div class="overview-card-icon" style="background: #F6FFED; color: #52C41A;">
+          <div class="overview-card-icon" style="background: #f6ffed; color: #52c41a">
             <BookOutlined />
           </div>
           <div class="overview-metric-value">{{ totalTasks }}</div>
@@ -508,16 +618,24 @@ onUnmounted(() => {
 
         <!-- 总时长 -->
         <div class="overview-card overview-card--metric">
-          <div class="overview-card-icon" style="background: rgba(251, 191, 36, 0.12); color: #FBBF24;">
+          <div
+            class="overview-card-icon"
+            style="background: rgba(251, 191, 36, 0.12); color: #fbbf24"
+          >
             <ClockCircleOutlined />
           </div>
-          <div class="overview-metric-value">{{ totalHours }}<span class="metric-unit">h</span></div>
+          <div class="overview-metric-value">
+            {{ totalHours }}<span class="metric-unit">h</span>
+          </div>
           <div class="overview-metric-label">预计总时长</div>
         </div>
 
         <!-- 认知负荷仪表盘 -->
         <div class="overview-card overview-card--gauge">
-          <div class="overview-card-icon" style="background: rgba(248, 113, 113, 0.12); color: #F87171;">
+          <div
+            class="overview-card-icon"
+            style="background: rgba(248, 113, 113, 0.12); color: #f87171"
+          >
             <DashboardOutlined />
           </div>
           <div class="gauge-wrap">
@@ -543,7 +661,8 @@ onUnmounted(() => {
               />
               <!-- 指针 -->
               <line
-                x1="50" y1="52"
+                x1="50"
+                y1="52"
                 :x2="50 + 35 * Math.cos(Math.PI - (cognitiveLoadIndex / 100) * Math.PI)"
                 :y2="52 - 35 * Math.sin(Math.PI - (cognitiveLoadIndex / 100) * Math.PI)"
                 :stroke="cognitiveLoadLevel.color"
@@ -561,7 +680,7 @@ onUnmounted(() => {
 
         <!-- 完成进度 -->
         <div class="overview-card overview-card--progress">
-          <div class="overview-card-icon" style="background: #F9F0FF; color: #722ED1;">
+          <div class="overview-card-icon" style="background: #f9f0ff; color: #722ed1">
             <TrophyOutlined />
           </div>
           <div class="progress-circle-wrap">
@@ -569,7 +688,9 @@ onUnmounted(() => {
             <svg viewBox="0 0 100 100" class="progress-circle-svg">
               <circle cx="50" cy="50" r="38" fill="none" stroke="#F0F0F0" stroke-width="8" />
               <circle
-                cx="50" cy="50" r="38"
+                cx="50"
+                cy="50"
+                r="38"
                 fill="none"
                 stroke="#722ED1"
                 stroke-width="8"
@@ -617,10 +738,12 @@ onUnmounted(() => {
           :key="idx"
           class="variant-tab"
           :class="{ 'is-active': activeVariantIndex === idx }"
-          @click="handleVariantChange(
-            idx === 0 ? (currentPath?.id ?? '') : (pathStore.alternativePaths[idx - 1]?.id ?? ''),
-            idx
-          )"
+          @click="
+            handleVariantChange(
+              idx === 0 ? (currentPath?.id ?? '') : (pathStore.alternativePaths[idx - 1]?.id ?? ''),
+              idx
+            )
+          "
         >
           <component :is="variantIcons[idx]" class="variant-tab-icon" />
           <span>{{ label }}</span>
@@ -632,7 +755,7 @@ onUnmounted(() => {
            4. 甘特图 / 时间轴 主视图
            ========================================================= -->
       <LearningPathView
-        :key="pathId + activeVariantIndex"
+        :key="(pathId ?? '') + activeVariantIndex"
         :show-stats="false"
         :show-variants="false"
         :show-legend="true"
@@ -647,21 +770,30 @@ onUnmounted(() => {
       <div v-if="selectedDay" id="daily-detail-panel" class="daily-detail">
         <div class="daily-detail-header">
           <div class="daily-detail-title-row">
-            <button class="daily-nav-btn" @click="goToDay(-1)" :disabled="selectedDay.dayIndex <= 1">
+            <button
+              class="daily-nav-btn"
+              @click="goToDay(-1)"
+              :disabled="selectedDay.dayIndex <= 1"
+            >
               <LeftOutlined />
             </button>
-            <h3 class="daily-detail-title">
-              {{ selectedDay.dayLabel }} · {{ selectedDay.date }}
-            </h3>
-            <button class="daily-nav-btn" @click="goToDay(1)" :disabled="selectedDay.dayIndex >= totalDays">
+            <h3 class="daily-detail-title">{{ selectedDay.dayLabel }} · {{ selectedDay.date }}</h3>
+            <button
+              class="daily-nav-btn"
+              @click="goToDay(1)"
+              :disabled="selectedDay.dayIndex >= totalDays"
+            >
               <RightOutlined />
             </button>
           </div>
           <div class="daily-detail-meta">
             <span><ClockCircleOutlined /> {{ selectedDay.totalMinutes }} 分钟</span>
             <span><BarChartOutlined /> 难度 {{ selectedDay.difficulty }}</span>
-            <span><CheckCircleOutlined />
-              {{ selectedDay.tasks.filter((t: LearningTask) => completedTasks.has(t.id)).length }}/{{ selectedDay.tasks.length }} 已完成
+            <span
+              ><CheckCircleOutlined />
+              {{
+                selectedDay.tasks.filter((t: LearningTask) => completedTasks.has(t.id)).length
+              }}/{{ selectedDay.tasks.length }} 已完成
             </span>
           </div>
           <a-button type="text" size="small" @click="closeDayDetail">
@@ -678,7 +810,9 @@ onUnmounted(() => {
           >
             <div
               class="daily-task-status"
-              :style="{ borderColor: TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF' }"
+              :style="{
+                borderColor: TASK_TYPE_COLORS[task.resources?.[0]?.type ?? 'reading'] || '#4F7CFF'
+              }"
               @click="toggleTaskComplete(task.id)"
             >
               <CheckCircleOutlined v-if="isTaskCompleted(task.id)" />
@@ -688,9 +822,14 @@ onUnmounted(() => {
                 <span class="daily-task-name">{{ task.title }}</span>
                 <span
                   class="daily-task-type"
-                  :style="{ background: (TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF') + '1a', color: TASK_TYPE_COLORS[task.resources?.[0]?.type] || '#4F7CFF' }"
+                  :style="{
+                    background:
+                      (TASK_TYPE_COLORS[task.resources?.[0]?.type ?? 'reading'] || '#4F7CFF') +
+                      '1a',
+                    color: TASK_TYPE_COLORS[task.resources?.[0]?.type ?? 'reading'] || '#4F7CFF'
+                  }"
                 >
-                  {{ TASK_TYPE_LABELS[task.resources?.[0]?.type] || '任务' }}
+                  {{ TASK_TYPE_LABELS[task.resources?.[0]?.type ?? 'reading'] || '任务' }}
                 </span>
               </div>
               <p class="daily-task-desc" v-if="task.description">{{ task.description }}</p>
@@ -730,48 +869,85 @@ onUnmounted(() => {
            6. AOO 寻优过程回放
            ========================================================= -->
       <div class="convergence-section" v-if="hasConvergence">
-        <a-collapse :activeKey="convergenceExpanded ? ['1'] : []" :bordered="false">
+        <a-collapse
+          :activeKey="convergenceExpanded ? ['1'] : []"
+          :bordered="false"
+          @change="onConvergenceCollapseChange"
+        >
           <a-collapse-panel key="1">
             <template #header>
               <div class="convergence-header">
                 <PlayCircleOutlined class="convergence-header-icon" />
                 <span>AOO 寻优过程回放</span>
                 <span class="convergence-header-badge" v-if="convergenceData?.metadata">
-                  {{ convergenceData.metadata.populationSize }} 个体 · {{ convergenceData.metadata.convergenceRate?.toFixed(1) }}% 收敛率
+                  {{ convergenceData.metadata.populationSize }} 个体 ·
+                  {{ convergenceData.metadata.convergenceRate?.toFixed(1) }}% 收敛率
                 </span>
               </div>
             </template>
 
             <div class="convergence-body">
-              <!-- 回放控制栏 -->
-              <div class="convergence-controls">
-                <a-button
-                  :type="isPlaying ? 'default' : 'primary'"
-                  size="small"
-                  @click="togglePlay"
+              <!-- Tab 切换：收敛曲线 | 粒子轨迹 -->
+              <div class="convergence-tabs" v-if="hasPopulationSnapshots">
+                <button
+                  class="convergence-tab"
+                  :class="{ 'convergence-tab--active': convergenceTab === 'curve' }"
+                  @click="convergenceTab = 'curve'"
                 >
-                  <PauseCircleOutlined v-if="isPlaying" />
-                  <PlayCircleOutlined v-else />
-                  {{ isPlaying ? '暂停' : '播放' }}
-                </a-button>
-                <a-button size="small" @click="resetPlayback">
-                  <ReloadOutlined /> 重置
-                </a-button>
-                <span class="convergence-frame-info">
-                  迭代 {{ currentFrame }} / {{ totalFrames }}
-                </span>
-                <a-slider
-                  v-model:value="currentFrame"
-                  :min="0"
-                  :max="totalFrames"
-                  :step="1"
-                  class="convergence-slider"
-                  :tooltip="{ formatter: (v: number) => `迭代 ${v}` }"
-                />
+                  <BarChartOutlined /> 收敛曲线
+                </button>
+                <button
+                  class="convergence-tab"
+                  :class="{ 'convergence-tab--active': convergenceTab === 'trajectory' }"
+                  @click="convergenceTab = 'trajectory'"
+                >
+                  <AimOutlined /> 粒子轨迹
+                </button>
               </div>
 
-              <!-- ECharts 容器 -->
-              <div ref="convergenceChartRef" class="convergence-chart" />
+              <!-- 收敛曲线视图 -->
+              <template v-if="convergenceTab === 'curve'">
+                <div class="convergence-controls">
+                  <a-button
+                    :type="isPlaying ? 'default' : 'primary'"
+                    size="small"
+                    @click="togglePlay"
+                  >
+                    <PauseCircleOutlined v-if="isPlaying" />
+                    <PlayCircleOutlined v-else />
+                    {{ isPlaying ? '暂停' : '播放' }}
+                  </a-button>
+                  <a-button size="small" @click="resetPlayback"> <ReloadOutlined /> 重置 </a-button>
+                  <span class="convergence-frame-info">
+                    迭代 {{ currentFrame }} / {{ totalFrames }}
+                  </span>
+                  <a-slider
+                    v-model:value="currentFrame"
+                    :min="0"
+                    :max="totalFrames"
+                    :step="1"
+                    class="convergence-slider"
+                    :tooltip="{ formatter: (v: number) => `迭代 ${v}` }"
+                  />
+                </div>
+
+                <div ref="convergenceChartRef" class="convergence-chart" />
+              </template>
+
+              <!-- 粒子轨迹视图 (SeedTrajectory) -->
+              <div
+                v-if="convergenceTab === 'trajectory' && hasPopulationSnapshots"
+                class="convergence-trajectory"
+              >
+                <SeedTrajectory
+                  :convergence-data="convergenceData!"
+                  :height="480"
+                  :auto-play="convergenceExpanded"
+                  :show-controls="true"
+                  :trail-length="14"
+                  default-view="2d"
+                />
+              </div>
 
               <!-- 元信息 -->
               <div class="convergence-meta" v-if="convergenceData?.metadata">
@@ -787,9 +963,12 @@ onUnmounted(() => {
       </div>
 
       <!-- 无收敛数据的说明 -->
-      <div v-else-if="currentPath?.metadata?.generationTime" class="convergence-section convergence-section--empty">
+      <div
+        v-else-if="currentPath?.metadata?.generationTime"
+        class="convergence-section convergence-section--empty"
+      >
         <div class="convergence-empty">
-          <BarChartOutlined style="font-size: 28px; color: #A8A6A2;" />
+          <BarChartOutlined style="font-size: 28px; color: #a8a6a2" />
           <span>当前路径不包含 AOO 收敛过程数据</span>
         </div>
       </div>
@@ -915,7 +1094,7 @@ onUnmounted(() => {
     right: 0;
     width: 32px;
     height: 24px;
-    background: linear-gradient(135deg, transparent 40%, rgba(212,163,115,0.06) 100%);
+    background: linear-gradient(135deg, transparent 40%, rgba(212, 163, 115, 0.06) 100%);
     pointer-events: none;
   }
 }
@@ -928,7 +1107,9 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 14px 20px;
 
-  &::after { display: none; }
+  &::after {
+    display: none;
+  }
 }
 
 .overview-card-header {
@@ -1023,7 +1204,9 @@ onUnmounted(() => {
   width: 100%;
   height: 55px;
 
-  path:first-child { stroke: rgba(255,255,255,0.06); }
+  path:first-child {
+    stroke: rgba(255, 255, 255, 0.06);
+  }
 }
 
 .gauge-value-arc {
@@ -1056,7 +1239,9 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
 
-  circle:first-child { stroke: rgba(255,255,255,0.06); }
+  circle:first-child {
+    stroke: rgba(255, 255, 255, 0.06);
+  }
 }
 
 .progress-circle-arc {
@@ -1089,7 +1274,9 @@ onUnmounted(() => {
   grid-column: 1 / -1;
   padding: 10px 20px;
 
-  &::after { display: none; }
+  &::after {
+    display: none;
+  }
 }
 
 .extra-row {
@@ -1164,7 +1351,9 @@ onUnmounted(() => {
   }
 }
 
-.variant-tab-icon { font-size: 15px; }
+.variant-tab-icon {
+  font-size: 15px;
+}
 
 .variant-tag {
   font-size: 9px;
@@ -1190,8 +1379,14 @@ onUnmounted(() => {
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .daily-detail-header {
@@ -1276,13 +1471,13 @@ onUnmounted(() => {
   transition: all @transition-fast;
 
   &:hover {
-    border-color: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.03);
   }
 
   &.is-completed {
     background: rgba(46, 204, 113, 0.04);
-    border-color: rgba(46, 204, 113, 0.10);
+    border-color: rgba(46, 204, 113, 0.1);
 
     .daily-task-name {
       text-decoration: line-through;
@@ -1386,7 +1581,9 @@ onUnmounted(() => {
   border-radius: @radius-tag;
   transition: background @transition-fast;
 
-  &:hover { background: rgba(0, 212, 255, 0.12); }
+  &:hover {
+    background: rgba(0, 212, 255, 0.12);
+  }
 }
 
 .daily-task-action {
@@ -1466,6 +1663,46 @@ onUnmounted(() => {
   gap: @spacing-md;
 }
 
+/* ---- 收敛视图 Tab 切换 ---- */
+.convergence-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  align-self: flex-start;
+}
+
+.convergence-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.convergence-tab:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.convergence-tab--active {
+  color: #d4a373;
+  background: rgba(212, 163, 115, 0.12);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.convergence-trajectory {
+  /* SeedTrajectory 组件的深色背景容器已内置于组件，此处仅做留白 */
+}
+
 .convergence-controls {
   display: flex;
   align-items: center;
@@ -1522,8 +1759,12 @@ onUnmounted(() => {
     grid-template-rows: auto;
   }
 
-  .overview-card--info { grid-column: 1 / -1; }
-  .overview-card--extras { grid-column: 1 / -1; }
+  .overview-card--info {
+    grid-column: 1 / -1;
+  }
+  .overview-card--extras {
+    grid-column: 1 / -1;
+  }
 
   .convergence-chart {
     aspect-ratio: 4 / 3;
@@ -1547,10 +1788,18 @@ onUnmounted(() => {
     grid-template-columns: 1fr 1fr;
   }
 
-  .overview-card--info { grid-column: 1 / -1; }
-  .overview-card--gauge { grid-column: 1 / -1; }
-  .overview-card--progress { grid-column: 1 / -1; }
-  .overview-card--extras { grid-column: 1 / -1; }
+  .overview-card--info {
+    grid-column: 1 / -1;
+  }
+  .overview-card--gauge {
+    grid-column: 1 / -1;
+  }
+  .overview-card--progress {
+    grid-column: 1 / -1;
+  }
+  .overview-card--extras {
+    grid-column: 1 / -1;
+  }
 
   .overview-card--info {
     flex-direction: column;

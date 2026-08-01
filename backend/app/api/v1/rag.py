@@ -1,137 +1,149 @@
-"""RAG 知识库 API 端点"""
+"""RAG 知识库 API — 检索增强生成问答
+
+端点:
+- POST /api/v1/rag/query   RAG 问答（支持 skip_retrieval 直连 LLM）
+- POST /api/v1/rag/index   索引文档目录
+- GET  /api/v1/rag/stats   获取知识库统计
+- POST /api/v1/rag/reset   重置知识库
+"""
 
 import logging
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
+from app.core.database import get_db
+from app.models.user import User
+from app.schemas.common import ResponseBase
 from app.schemas.rag import (
     RAGIndexRequest,
     RAGIndexResponse,
     RAGQueryRequest,
     RAGQueryResponse,
-    RAGSource,
     RAGStatsResponse,
-    RAGTokenUsage,
 )
-from app.services.rag.knowledge_base import get_knowledge_base
-
-logger = logging.getLogger(__name__)
+from app.services.rag import get_knowledge_base, reset_knowledge_base
+from app.services.rag.knowledge_base import KnowledgeBase
 
 router = APIRouter(prefix="/rag", tags=["RAG Knowledge Base"])
 
+logger = logging.getLogger(__name__)
 
-# ---- 问答接口 ----
+
+def _to_query_response(result) -> RAGQueryResponse:
+    """将 KnowledgeBase 的 RAGQueryResult 转为对外 Schema"""
+    token_usage = None
+    if getattr(result, "token_usage", None):
+        token_usage = result.token_usage
+    return RAGQueryResponse(
+        answer=result.answer,
+        sources=result.sources,
+        confidence=result.confidence,
+        retrieval_count=result.retrieval_count,
+        model=result.model,
+        token_usage=token_usage,
+        query_id=result.query_id,
+    )
 
 
-@router.post("/query", response_model=RAGQueryResponse, summary="RAG 知识问答")
-async def rag_query(req: RAGQueryRequest):
-    """基于知识库的增强问答
+async def _get_kb() -> KnowledgeBase:
+    """获取已初始化的知识库单例"""
+    return await get_knowledge_base()
 
-    流程: 用户问题 → 语义检索 → 构建增强 Prompt → LLM 生成 → 返回答案+来源
+
+@router.post("/query", response_model=ResponseBase[RAGQueryResponse])
+async def rag_query(
+    payload: RAGQueryRequest,
+    current_user: User = Depends(get_current_user),
+    kb: KnowledgeBase = Depends(_get_kb),
+):
+    """RAG 问答
+
+    - skip_retrieval=False: 先检索知识库再增强生成
+    - skip_retrieval=True:  跳过检索，直接调用大模型回答
     """
     try:
-        kb = await get_knowledge_base()
-
-        # 如果有学科过滤，传递到检索
-        # (当前 ChromaDB 过滤通过 metadata where 实现)
-        result = await kb.query(
-            question=req.question,
-            top_k=req.top_k,
-            temperature=req.temperature,
-            max_tokens=req.max_tokens,
-        )
-
-        sources = [
-            RAGSource(
-                document=s.get("document", "未知文档"),
-                page=str(s.get("page", "")),
-                section=str(s.get("section", "")),
-                content=s.get("content", ""),
-                score=s.get("score", 0.0),
-                ref=s.get("ref", 0),
+        if payload.skip_retrieval:
+            result = await kb.direct_chat(
+                question=payload.question,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
             )
-            for s in result.sources
-        ]
-
-        token_usage = None
-        if result.token_usage:
-            token_usage = RAGTokenUsage(**result.token_usage)
-
-        return RAGQueryResponse(
-            answer=result.answer,
-            sources=sources,
-            confidence=result.confidence,
-            retrieval_count=result.retrieval_count,
-            model=result.model,
-            token_usage=token_usage,
-            query_id=result.query_id,
+        else:
+            result = await kb.query(
+                question=payload.question,
+                top_k=payload.top_k,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("[/rag/query] 问答处理失败")
+        # 不返回生硬的 500，向前端返回可读的错误提示（HTTP 200）
+        return ResponseBase[RAGQueryResponse](
+            code=500,
+            message=f"AI 服务暂时不可用：{e}",
+            data=RAGQueryResponse(
+                answer=f"AI 服务暂时不可用：{e}",
+                sources=[],
+                confidence=0.0,
+                retrieval_count=0,
+                model="",
+                token_usage=None,
+                query_id=str(uuid.uuid4())[:8],
+            ),
         )
-
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=f"知识库未就绪: {e}")
-    except Exception as e:
-        logger.exception("RAG query failed")
-        raise HTTPException(status_code=500, detail=f"问答服务错误: {e}")
+    return ResponseBase[RAGQueryResponse](data=_to_query_response(result))
 
 
-# ---- 索引接口 ----
-
-
-@router.post("/index", response_model=RAGIndexResponse, summary="索引文档目录")
-async def rag_index(req: RAGIndexRequest):
-    """索引指定目录中的文档到知识库
-
-    支持 PDF、TXT、Markdown 格式。
-    """
+@router.post("/index", response_model=ResponseBase[RAGIndexResponse])
+async def rag_index(
+    payload: RAGIndexRequest,
+    current_user: User = Depends(get_current_user),
+    kb: KnowledgeBase = Depends(_get_kb),
+):
+    """索引指定目录下的文档到知识库"""
     try:
-        kb = await get_knowledge_base()
-
-        count = await kb.index_directory(
-            directory=req.directory,
-            recursive=req.recursive,
-            clear_existing=req.clear_existing,
+        chunks_indexed = await kb.index_directory(
+            payload.directory,
+            recursive=payload.recursive,
+            clear_existing=payload.clear_existing,
         )
+    except Exception as e:  # noqa: BLE001
+        from fastapi import HTTPException
 
-        return RAGIndexResponse(
-            message=f"索引完成，共 {count} 个文档块",
-            chunks_indexed=count,
-            directory=req.directory,
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"索引失败: {e}",
         )
-
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except NotADirectoryError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=f"知识库未就绪: {e}")
-    except Exception as e:
-        logger.exception("RAG indexing failed")
-        raise HTTPException(status_code=500, detail=f"索引失败: {e}")
+    return ResponseBase[RAGIndexResponse](
+        data=RAGIndexResponse(
+            message=f"已完成索引，共 {chunks_indexed} 个文档块",
+            chunks_indexed=chunks_indexed,
+            directory=payload.directory,
+        )
+    )
 
 
-# ---- 管理接口 ----
-
-
-@router.get("/stats", response_model=RAGStatsResponse, summary="知识库统计")
-async def rag_stats():
+@router.get("/stats", response_model=ResponseBase[RAGStatsResponse])
+async def rag_stats(
+    current_user: User = Depends(get_current_user),
+):
     """获取知识库统计信息"""
     try:
         kb = await get_knowledge_base()
-        stats = kb.get_stats()
-        return RAGStatsResponse(**stats)
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=f"知识库未就绪: {e}")
+        raw = kb.get_stats()
+    except Exception:  # noqa: BLE001
+        raw = {"status": "not_initialized", "documents": 0}
+    return ResponseBase[RAGStatsResponse](data=RAGStatsResponse(**raw))
 
 
-@router.post("/reset", summary="重置知识库")
-async def rag_reset():
-    """重置知识库（清空数据并重建）"""
-    from app.services.rag import reset_knowledge_base
-
-    try:
-        await reset_knowledge_base()
-        return {"message": "知识库已重置"}
-    except Exception as e:
-        logger.exception("RAG reset failed")
-        raise HTTPException(status_code=500, detail=f"重置失败: {e}")
+@router.post("/reset", response_model=ResponseBase[dict])
+async def rag_reset(
+    current_user: User = Depends(get_current_user),
+):
+    """重置知识库（清空索引并释放资源）"""
+    await reset_knowledge_base()
+    return ResponseBase[dict](data={"message": "知识库已重置"})

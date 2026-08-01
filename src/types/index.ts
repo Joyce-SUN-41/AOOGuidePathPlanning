@@ -119,7 +119,10 @@ export interface DiagnosisQuestion {
 /** 用户提交的答案 */
 export interface DiagnosisAnswer {
   questionId: string
-  selectedOptionIds: string[]
+  /** 用户选择的选项 ID（单选）。
+   *  后端 SubmittedAnswer.selected_option 为单个字符串，
+   *  此前误定义为 selectedOptionIds: string[]，导致提交字段对不上。 */
+  selectedOption: string
   timeSpent: number // 答题耗时(秒)
 }
 
@@ -193,7 +196,13 @@ export interface DiagnosisBrief {
 // ============= 学习路径相关 =============
 
 /** AOO 任务状态 */
-export type TaskStatus = 'pending' | 'queued' | 'processing' | 'completed' | 'failed'
+export type TaskStatus =
+  | 'idle'
+  | 'pending'
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
 
 /** 单个学习任务 */
 export interface LearningTask {
@@ -243,13 +252,22 @@ export interface LearningPath {
 export interface AlternativePath {
   id: string
   taskId: string
-  label: string // 方案名称，如 "激进速通"、"稳扎稳打"
+  /** 方案名称：速成冲刺 / 稳扎稳打 / 查漏补缺 */
+  label: string
+  /** 方案类型，对应后端 pathType: efficiency / balanced / robust */
+  type?: 'intensive' | 'balanced' | 'light'
   description: string
   totalDays: number
   totalTasks: number
   totalEstimatedHours: number
   highlights: string[] // 方案亮点
   dailyTasks: LearningTask[][]
+  /** 适用人群，如「考前冲刺的学生」 */
+  targetAudience?: string
+  /** 方案理念一句话说明 */
+  philosophy?: string
+  /** 方案特性标签 */
+  features?: string[]
 }
 
 /** AOO 生成路径请求 — 请优先使用 aoo.ts 中的 AOOGenerateRequest */
@@ -276,8 +294,22 @@ export interface TaskStatusResponse {
   taskId: string
   status: TaskStatus
   progress: number // 0-100
-  result?: import('./aoo').AOOLearningPathResult // 完成后返回路径 + 收敛数据
-  alternativePaths?: AlternativePath[] // 备选路径（与 convergence 互斥时使用）
+  /**
+   * 优化完成后的完整结果。
+   * 后端字段名为 convergenceData / alternativePaths（camelCase），
+   * 回放图与备选方案标签页都依赖此处的数据。
+   */
+  result?: {
+    bestPath?: Record<string, unknown>
+    convergenceData?: import('./aoo').AOOConvergenceData
+    alternativePaths?: AlternativePath[]
+    fitnessDetail?: Record<string, unknown>
+    paretoFront?: unknown[]
+    executionTime?: number
+  }
+  /** 顶层收敛快照（仅当前代，不含 iterations，不能用于回放） */
+  convergenceData?: Record<string, unknown>
+  alternativePaths?: AlternativePath[]
   errorMessage?: string
 }
 
@@ -451,6 +483,8 @@ export interface DashboardOverview {
   totalKPs: number
   streakDays: number
   lastStudyDate: string | null
+  totalDiagnoses: number
+  totalPaths: number
 }
 
 // ============= 教师仪表盘相关 =============

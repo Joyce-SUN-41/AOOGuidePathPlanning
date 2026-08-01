@@ -28,11 +28,25 @@ const { isLoading } = storeToRefs(appStore)
               </filter>
             </defs>
             <!-- 背景轨道 -->
-            <circle cx="60" cy="60" r="42" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2" />
+            <circle
+              cx="60"
+              cy="60"
+              r="42"
+              fill="none"
+              stroke="rgba(255,255,255,0.06)"
+              stroke-width="2"
+            />
             <!-- 流动光弧 -->
             <circle
-              cx="60" cy="60" r="42" fill="none" stroke="url(#loader-grad)" stroke-width="2"
-              stroke-linecap="round" stroke-dasharray="60 200" filter="url(#loader-glow)"
+              cx="60"
+              cy="60"
+              r="42"
+              fill="none"
+              stroke="url(#loader-grad)"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-dasharray="60 200"
+              filter="url(#loader-glow)"
               class="loader-arc"
             />
             <!-- 中心种子图标 -->
@@ -97,8 +111,12 @@ const { isLoading } = storeToRefs(appStore)
 }
 
 @keyframes arc-rotate {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 中心种子脉冲 */
@@ -107,15 +125,24 @@ const { isLoading } = storeToRefs(appStore)
 }
 
 @keyframes seed-pulse {
-  0%   { transform: translate(30px, 30px) scale(1); opacity: 0.6; }
-  50%  { transform: translate(30px, 30px) scale(2.5); opacity: 1; }
-  100% { transform: translate(30px, 30px) scale(1); opacity: 0.6; }
+  0% {
+    transform: translate(30px, 30px) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translate(30px, 30px) scale(2.5);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(30px, 30px) scale(1);
+    opacity: 0.6;
+  }
 }
 
 .loader-label {
   font-size: 14px;
   font-weight: 500;
-  color: #94A3B8;
+  color: #94a3b8;
   letter-spacing: 2px;
 }
 
@@ -128,12 +155,19 @@ const { isLoading } = storeToRefs(appStore)
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #D4A373;
+  background: #d4a373;
   animation: dot-sequence 1.2s ease-in-out infinite;
 }
 
 @keyframes dot-sequence {
-  0%, 100% { opacity: 0.2; transform: scale(0.8); }
-  50%      { opacity: 1; transform: scale(1); }
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 </style>

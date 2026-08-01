@@ -24,7 +24,7 @@ def _to_camel(s: str) -> str:
 
 
 class CamelModel(BaseModel):
-    """Pydantic 基类：自动 snsake_case → camelCase JSON 序列化"""
+    """Pydantic 基类：自动 snake_case → camelCase JSON 序列化"""
 
     model_config = ConfigDict(
         alias_generator=_to_camel,
@@ -110,7 +110,7 @@ class BestPath(CamelModel):
     """AOO 计算的最优路径"""
 
     days: List[PathDay] = Field(..., description="按天组织的学习路径")
-    total_fitness: float = Field(..., description="适应度得分 [0, 1]", ge=0, le=1)
+    total_fitness: float = Field(..., description="适应度得分 (含惩罚项, 可能为负)")
     total_days: int = Field(..., description="总天数", ge=0)
     total_tasks: int = Field(..., description="总任务数", ge=0)
     total_estimated_hours: float = Field(..., description="总预估小时数", ge=0)

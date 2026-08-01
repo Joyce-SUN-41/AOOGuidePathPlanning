@@ -134,12 +134,7 @@ export interface AOOLearningPathResponse {
 }
 
 /** AOO 优化任务状态 */
-export type AOOOptimizationStatus =
-  | 'pending'
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'failed'
+export type AOOOptimizationStatus = 'pending' | 'queued' | 'processing' | 'completed' | 'failed'
 
 // ============================================================
 // 图表绑定辅助类型
@@ -155,18 +150,18 @@ export interface ChartPoint {
 export interface ConvergenceSeriesConfig {
   name: string
   type: 'line'
-  data: [number, number][] // [[iteration, value], ...]
+  data: [number, number | undefined][] // [[iteration, value], ...]
   smooth: boolean
-  lineStyle: { color: string; width: number }
+  lineStyle: { color: string; width: number; type?: string }
   areaStyle?: { color: string; opacity: number }
 }
 
 /** 种群散点图数据帧（动画用） */
 export interface PopulationFrame {
-  currentIteration: number
-  data: [number, number][] // [[x, y], ...] 降维后的个体坐标
-  bestPoint: [number, number]
-  diversity: number
+  currentIteration: number | undefined
+  data: [number, number | undefined][] // [[x, y], ...] 降维后的个体坐标
+  bestPoint: [number | undefined, number | undefined]
+  diversity: number | undefined
 }
 
 // ============================================================
@@ -210,23 +205,17 @@ export function isOptimizationCompleted(
 }
 
 /** 检查响应是否失败 */
-export function isOptimizationFailed(
-  response: AOOLearningPathResponse
-): boolean {
+export function isOptimizationFailed(response: AOOLearningPathResponse): boolean {
   return response.status === 'failed'
 }
 
 /** 检查响应是否在运行中 */
-export function isOptimizationRunning(
-  response: AOOLearningPathResponse
-): boolean {
+export function isOptimizationRunning(response: AOOLearningPathResponse): boolean {
   return ['pending', 'queued', 'processing'].includes(response.status)
 }
 
 /** 从收敛数据构造 ECharts 收敛曲线 series */
-export function buildConvergenceSeries(
-  data: AOOConvergenceData
-): ConvergenceSeriesConfig[] {
+export function buildConvergenceSeries(data: AOOConvergenceData): ConvergenceSeriesConfig[] {
   return [
     {
       name: '最佳适应度',
@@ -234,52 +223,45 @@ export function buildConvergenceSeries(
       data: data.iterations.map((it, i) => [it, data.bestFitness[i]]),
       smooth: true,
       lineStyle: { color: '#4F7CFF', width: 2.5 },
-      areaStyle: { color: '#4F7CFF', opacity: 0.08 },
+      areaStyle: { color: '#4F7CFF', opacity: 0.08 }
     },
     {
       name: '平均适应度',
       type: 'line',
       data: data.iterations.map((it, i) => [it, data.avgFitness[i]]),
       smooth: true,
-      lineStyle: { color: '#9B8A7A', width: 2, type: 'dashed' },
+      lineStyle: { color: '#9B8A7A', width: 2, type: 'dashed' }
     },
     {
       name: '中位数适应度',
       type: 'line',
       data: data.iterations.map((it, i) => [it, data.medianFitness[i]]),
       smooth: true,
-      lineStyle: { color: '#C4B5A5', width: 1.5 },
-    },
+      lineStyle: { color: '#C4B5A5', width: 1.5 }
+    }
   ]
 }
 
 /** 从收敛数据构造种群多样性曲线 */
-export function buildDiversitySeries(
-  data: AOOConvergenceData
-): ConvergenceSeriesConfig {
+export function buildDiversitySeries(data: AOOConvergenceData): ConvergenceSeriesConfig {
   return {
     name: '种群多样性',
     type: 'line',
     data: data.iterations.map((it, i) => [it, data.diversity[i]]),
     smooth: true,
     lineStyle: { color: '#FF8C42', width: 2 },
-    areaStyle: { color: '#FF8C42', opacity: 0.12 },
+    areaStyle: { color: '#FF8C42', opacity: 0.12 }
   }
 }
 
 /** 将种群快照转换为散点图动画帧 */
-export function buildPopulationFrames(
-  data: AOOConvergenceData
-): PopulationFrame[] {
+export function buildPopulationFrames(data: AOOConvergenceData): PopulationFrame[] {
   if (!data.populationSnapshots) return []
 
   return data.populationSnapshots.map((snapshot, index) => ({
     currentIteration: data.iterations[index],
     data: snapshot.positionsX.map((x, i) => [x, snapshot.positionsY[i]]),
-    bestPoint: [
-      snapshot.positionsX[snapshot.bestIndex],
-      snapshot.positionsY[snapshot.bestIndex],
-    ],
-    diversity: data.diversity[index],
+    bestPoint: [snapshot.positionsX[snapshot.bestIndex], snapshot.positionsY[snapshot.bestIndex]],
+    diversity: data.diversity[index]
   }))
 }

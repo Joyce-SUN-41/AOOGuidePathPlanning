@@ -5,7 +5,7 @@
 - DocumentLoader: 文档加载 (PDF/TXT/MD)
 - DocumentChunker / MarkdownChunker: 文档分块
 - FallingBackEmbedder: 向量化 (Spark → BGE → 哈希降级)
-- VectorStore: ChromaDB 向量存储
+- VectorStore: NumPy + JSON 向量存储
 
 用法:
     from app.services.rag import get_knowledge_base

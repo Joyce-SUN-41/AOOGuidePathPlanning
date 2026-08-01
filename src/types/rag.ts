@@ -25,6 +25,10 @@ export interface RAGQueryRequest {
   max_tokens?: number
   student_id?: string
   subject?: string
+  /** true = 跳过知识库检索直连大模型；默认 false（走 RAG 检索增强） */
+  skip_retrieval?: boolean
+  /** true = 走 SSE 流式返回（仅 ragQueryStream 使用） */
+  stream?: boolean
 }
 
 /** RAG 查询响应 */

@@ -41,9 +41,11 @@ export const useChatStore = defineStore('chat', () => {
     const turns: ChatMessage[] = []
     let count = 0
     for (let i = messages.value.length - 1; i >= 0; i--) {
-      if (messages.value[i].role !== 'system') {
-        turns.unshift(messages.value[i])
-        if (messages.value[i].role === 'user') count++
+      const msg = messages.value[i]
+      if (!msg) continue
+      if (msg.role !== 'system') {
+        turns.unshift(msg)
+        if (msg.role === 'user') count++
         if (count >= MAX_TURNS) break
       }
     }
@@ -125,8 +127,8 @@ export const useChatStore = defineStore('chat', () => {
     // 移除最后一个空的 assistant placeholder
     if (
       messages.value.length > 0 &&
-      messages.value[messages.value.length - 1].role === 'assistant' &&
-      messages.value[messages.value.length - 1].isStreaming
+      messages.value[messages.value.length - 1]?.role === 'assistant' &&
+      messages.value[messages.value.length - 1]?.isStreaming
     ) {
       messages.value.pop()
     }

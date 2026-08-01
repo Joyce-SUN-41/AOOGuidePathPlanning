@@ -151,8 +151,8 @@ export const useUserStore = defineStore(
     persist: {
       key: 'oat_user_store',
       storage: localStorage,
-      // 仅持久化 token / userInfo / remember
-      pick: ['token', 'userInfo', 'remember'],
+      // 仅持久化 token / userInfo / remember (v3 使用 paths 字段)
+      paths: ['token', 'userInfo', 'remember'],
       // 退出登录后清空 storage
       afterRestore(ctx) {
         // 如果没有勾选"记住我"，退出时不保留 token

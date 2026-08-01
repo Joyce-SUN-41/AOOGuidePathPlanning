@@ -62,7 +62,7 @@ export const teacherApi = {
   },
 
   /** 获取单个学生学情详情 */
-  getStudentDetail(studentId: number): Promise<StudentDetail> {
+  getStudentDetail(studentId: string | number): Promise<StudentDetail> {
     return request.get<StudentDetail>(`/teacher/students/${studentId}`)
   },
 

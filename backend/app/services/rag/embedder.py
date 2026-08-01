@@ -33,8 +33,8 @@ class EmbedderConfig:
         model: str = "text-embedding",
         dimension: int = 1536,
         batch_size: int = 16,
-        max_retries: int = 3,
-        timeout: float = 30.0,
+        max_retries: int = 1,
+        timeout: float = 5.0,
     ):
         self.api_key = api_key
         self.api_secret = api_secret
@@ -228,39 +228,73 @@ class BGEEmbedder(BaseEmbedder):
             from sentence_transformers import SentenceTransformer
 
             logger.info("Loading BGE model: %s", self.model_name)
-            self._model = SentenceTransformer(self.model_name)
+            # 超时保护：HuggingFace 下载在受限网络下会长时间阻塞（重试可达
+            # 数十秒）。限制 15 秒，超时直接抛异常由调用方降级，避免拖垮查询。
+            try:
+                self._model = asyncio.run_coroutine_threadsafe(
+                    self._load_model_async(), asyncio.get_event_loop()
+                ).result(timeout=15)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("BGE model load failed (offline?): %s", e)
+                raise
             self._dimension = self._model.get_sentence_embedding_dimension()
         return self._model
 
+    async def _load_model_async(self):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: SentenceTransformer(self.model_name),  # type: ignore[arg-type]
+        )
+
 
 class FallingBackEmbedder(BaseEmbedder):
-    """带降级的 Embedder：优先 Spark API → BGE 本地 → 哈希模拟"""
+    """带降级的 Embedder：优先 Spark API → BGE 本地 → 哈希模拟
+
+    关键稳定性设计：Spark / BGE 一旦被确认不可用（网络不可达、鉴权失败、
+    模型下载失败等），会**永久短路**并直接走确定性哈希降级，避免每次查询
+    都去撞网络（HuggingFace 下载重试一次可达数十秒，足以引发前端超时）。
+    """
 
     def __init__(self, config: EmbedderConfig):
         self.spark = SparkEmbedder(config)
         self._bge: Optional[BGEEmbedder] = None
+        # 短路标志：确认不可用后不再重试，避免每次 query 卡在网络超时
+        self._spark_dead: bool = False
+        self._bge_dead: bool = False
 
     async def embed(self, texts: List[str]) -> EmbeddingResult:
         if not texts:
             return EmbeddingResult([], [])
 
-        # 优先：Spark API
-        if self.spark.is_configured:
+        # 优先：Spark API（仅在未确认不可用且已配置时尝试）
+        if not self._spark_dead and self.spark.is_configured:
             result = await self.spark.embed(texts)
             if not result.error and result.vectors:
                 return result
-            logger.warning("Spark embedding failed: %s, trying BGE fallback", result.error)
+            # 确认不可用 → 短路，后续不再重试（避免每次 query 撞错 URL/超时）
+            logger.warning(
+                "Spark embedding unavailable (%s), short-circuited for future calls",
+                result.error,
+            )
+            self._spark_dead = True
 
-        # 次选：BGE 本地
-        bge = await self._get_bge()
-        if bge:
-            result = await bge.embed(texts)
-            if not result.error and result.vectors:
-                return result
-            logger.warning("BGE embedding failed: %s, using hash fallback", result.error)
+        # 次选：BGE 本地（同样短路，避免反复尝试下载模型）
+        if not self._bge_dead:
+            bge = await self._get_bge()
+            if bge:
+                result = await bge.embed(texts)
+                if not result.error and result.vectors:
+                    return result
+                logger.warning(
+                    "BGE embedding unavailable (%s), short-circuited for future calls",
+                    result.error,
+                )
+                self._bge_dead = True
 
-        # 最终降级：确定性哈希向量
-        logger.warning("All embedders unavailable, using deterministic hash vectors")
+        # 最终降级：确定性哈希向量（瞬时完成，离线可用）
+        # 仅在首次真正降级时提示一次，避免日志刷屏
+        logger.info("Embedding fallback: using deterministic hash vectors (offline-safe)")
         return _fallback_embed(texts, self.spark.config.dimension)
 
     async def embed_query(self, text: str) -> List[float]:
@@ -275,6 +309,7 @@ class FallingBackEmbedder(BaseEmbedder):
             return self._bge
         except ImportError:
             logger.warning("sentence-transformers not installed, BGE not available")
+            self._bge_dead = True
             return None
 
     async def close(self) -> None:
@@ -301,7 +336,8 @@ def _fallback_embed(texts: List[str], dimension: int = 1536) -> EmbeddingResult:
         vectors = []
         for text in texts:
             h = hashlib.sha256(text.encode("utf-8")).digest()
-            seed = abs(int.from_bytes(h[:8], "big"))
+            # numpy RandomState 要求 seed 在 0 ~ 2^32-1 范围内
+            seed = int.from_bytes(h[:8], "big") % (2**32 - 1)
             rng = np.random.RandomState(seed)
             vec = rng.randn(dimension).astype(np.float32)
             vec = vec / (np.linalg.norm(vec) + 1e-10)

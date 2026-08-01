@@ -20,7 +20,7 @@ import {
   GlobalOutlined,
   NodeIndexOutlined,
   CompassOutlined,
-  RocketOutlined,
+  RocketOutlined
 } from '@ant-design/icons-vue'
 import type { AOOConvergenceData } from '@/types/aoo'
 
@@ -43,7 +43,7 @@ interface InterpolatedFrame {
 interface TrailEntry {
   x: number
   y: number
-  age: number     // frames since this entry was current
+  age: number // frames since this entry was current
   phase: SeedPhase
   phaseRatio: number
 }
@@ -66,7 +66,7 @@ const props = withDefaults(
     height: 520,
     showControls: true,
     trailLength: 12,
-    defaultView: '2d',
+    defaultView: '2d'
   }
 )
 
@@ -81,21 +81,24 @@ const emit = defineEmits<{
 // Constants
 // ═══════════════════════════════════════════
 
-const PHASE_CONFIG: Record<SeedPhase, {
-  name: string
-  range: [number, number]
-  color: string
-  gradient: string[]
-  icon: typeof CompassOutlined
-  description: string
-}> = {
+const PHASE_CONFIG: Record<
+  SeedPhase,
+  {
+    name: string
+    range: [number, number]
+    color: string
+    gradient: string[]
+    icon: typeof CompassOutlined
+    description: string
+  }
+> = {
   exploration: {
     name: '探索扩散',
     range: [0, 0.3],
     color: '#FF8C42',
     gradient: ['#FF6B35', '#FF8C42', '#FFB347', '#FFD700'],
     icon: CompassOutlined,
-    description: '风/水/动物传播：种群在全局空间大面积扩散搜索',
+    description: '风/水/动物传播：种群在全局空间大面积扩散搜索'
   },
   rolling: {
     name: '湿敏滚动',
@@ -103,7 +106,7 @@ const PHASE_CONFIG: Record<SeedPhase, {
     color: '#4F7CFF',
     gradient: ['#3366FF', '#4F7CFF', '#6B9FFF', '#7BB8FF'],
     icon: NodeIndexOutlined,
-    description: '螺旋逼近：个体沿最优方向滚动，逐步收敛聚合',
+    description: '螺旋逼近：个体沿最优方向滚动，逐步收敛聚合'
   },
   ejection: {
     name: '储能弹射',
@@ -111,15 +114,15 @@ const PHASE_CONFIG: Record<SeedPhase, {
     color: '#A855F7',
     gradient: ['#7C3AED', '#A855F7', '#C084FC', '#FF4D4F'],
     icon: RocketOutlined,
-    description: '高精度弹射：在最优区域附近进行精细局部搜索',
-  },
+    description: '高精度弹射：在最优区域附近进行精细局部搜索'
+  }
 }
 
 const SPEED_OPTIONS = [
   { label: '0.5x', value: 0.5 },
   { label: '1x', value: 1 },
   { label: '2x', value: 2 },
-  { label: '4x', value: 4 },
+  { label: '4x', value: 4 }
 ] as const
 
 /** 每对快照间的插值步数 */
@@ -219,9 +222,13 @@ function getPhaseColor(ratio: number): string {
 }
 
 function hslInterp(
-  h1: number, h2: number, t: number,
-  s1: number, s2: number,
-  l1: number, l2: number
+  h1: number,
+  h2: number,
+  t: number,
+  s1: number,
+  s2: number,
+  l1: number,
+  l2: number
 ): string {
   const h = h1 + (h2 - h1) * t
   const s = s1 + (s2 - s1) * t
@@ -248,7 +255,9 @@ function getTrailSize(age: number): number {
 // ═══════════════════════════════════════════
 
 let seed = 42
-function resetRNG(s = 42) { seed = s }
+function resetRNG(s = 42) {
+  seed = s
+}
 function random01(): number {
   seed = (seed * 16807) % 2147483647
   return (seed - 1) / 2147483646
@@ -273,14 +282,16 @@ function precomputeFrames(): InterpolatedFrame[] {
     // 只有 1 个快照时，生成单帧
     if (snapshots && snapshots.length === 1) {
       const s = snapshots[0]!
-      return [{
-        iteration: iterations[0] ?? 1,
-        phaseRatio: 0,
-        phase: 'exploration',
-        positions: s.positionsX.map((x, j) => [x, s.positionsY[j]!] as [number, number]),
-        bestIndex: s.bestIndex,
-        diversity: diversityArr[0] ?? 1,
-      }]
+      return [
+        {
+          iteration: iterations[0] ?? 1,
+          phaseRatio: 0,
+          phase: 'exploration',
+          positions: s.positionsX.map((x, j) => [x, s.positionsY[j]!] as [number, number]),
+          bestIndex: s.bestIndex,
+          diversity: diversityArr[0] ?? 1
+        }
+      ]
     }
     return []
   }
@@ -329,15 +340,15 @@ function precomputeFrames(): InterpolatedFrame[] {
           const dx = targetBestX - x
           const dy = targetBestY - y
           const dist = Math.sqrt(dx * dx + dy * dy) + 1e-8
-          const spiralAngle = alpha * Math.PI * 4  // 2 圈螺旋
+          const spiralAngle = alpha * Math.PI * 4 // 2 圈螺旋
           const sinA = Math.sin(spiralAngle)
 
           // 螺旋偏移（垂直于最优方向）
           const nx = -dy / dist
           const ny = dx / dist
           const spiralStrength = noiseAmplitude * 3 * (1 - alpha)
-          x += nx * sinA * spiralStrength + dx / dist * noiseAmplitude * 0.5
-          y += ny * sinA * spiralStrength + dy / dist * noiseAmplitude * 0.5
+          x += nx * sinA * spiralStrength + (dx / dist) * noiseAmplitude * 0.5
+          y += ny * sinA * spiralStrength + (dy / dist) * noiseAmplitude * 0.5
 
           // 小量随机扰动
           x += randomNormal() * noiseAmplitude * 0.3
@@ -376,7 +387,7 @@ function precomputeFrames(): InterpolatedFrame[] {
     phase: 'ejection',
     positions: last.positionsX.map((x, j) => [x, last.positionsY[j]!] as [number, number]),
     bestIndex: last.bestIndex,
-    diversity: diversityArr[snapshots.length - 1] ?? 0,
+    diversity: diversityArr[snapshots.length - 1] ?? 0
   })
 
   return result
@@ -396,7 +407,7 @@ function updateTrailBuffer(idx: number, frame: InterpolatedFrame): void {
     y: pos[1],
     age: 0,
     phase: frame.phase,
-    phaseRatio: frame.phaseRatio,
+    phaseRatio: frame.phaseRatio
   }))
   trailBuffer[idx] = entries
 
@@ -421,7 +432,7 @@ function init2DChart(): void {
   if (!chart2DContainer.value) return
   chart2D?.dispose()
   chart2D = echarts.init(chart2DContainer.value, undefined, {
-    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2)
   })
   resizeObserver2D = new ResizeObserver(() => chart2D?.resize())
   resizeObserver2D.observe(chart2DContainer.value)
@@ -445,14 +456,14 @@ function render2DFrame(frame: InterpolatedFrame): void {
     const buf = trailBuffer[t]
     if (!buf) continue
     for (const entry of buf) {
-      if (entry.age === 0) continue  // skip current (rendered separately)
+      if (entry.age === 0) continue // skip current (rendered separately)
       trailScatterData.push({
         value: [entry.x, entry.y],
         symbolSize: getTrailSize(entry.age),
         itemStyle: {
           color: getPhaseColor(entry.phaseRatio),
-          opacity: getTrailOpacity(entry.age),
-        },
+          opacity: getTrailOpacity(entry.age)
+        }
       })
     }
   }
@@ -461,7 +472,13 @@ function render2DFrame(frame: InterpolatedFrame): void {
   const currentScatterData: {
     value: [number, number]
     symbolSize: number
-    itemStyle: { color: string; borderColor: string; borderWidth: number; shadowBlur: number; shadowColor: string }
+    itemStyle: {
+      color: string
+      borderColor: string
+      borderWidth: number
+      shadowBlur: number
+      shadowColor: string
+    }
   }[] = []
 
   for (let j = 0; j < frame.positions.length; j++) {
@@ -476,8 +493,8 @@ function render2DFrame(frame: InterpolatedFrame): void {
         borderColor: isBest ? color : color,
         borderWidth: isBest ? 3 : 1.5,
         shadowBlur: isBest ? 12 : 0,
-        shadowColor: isBest ? color : 'transparent',
-      },
+        shadowColor: isBest ? color : 'transparent'
+      }
     })
   }
 
@@ -494,7 +511,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
   }
 
   const option: EChartsOption = {
-    animation: false,  // 逐帧渲染，无需入场动画
+    animation: false, // 逐帧渲染，无需入场动画
 
     backgroundColor: 'transparent',
 
@@ -507,7 +524,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
         if (!params.value || params.value.length < 2) return ''
         const [x, y] = params.value
         return `${params.seriesName}<br/>X: ${x.toFixed(3)}<br/>Y: ${y.toFixed(3)}`
-      },
+      }
     } as any,
 
     grid: {
@@ -515,7 +532,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
       right: 20,
       bottom: 16,
       left: 20,
-      containLabel: false,
+      containLabel: false
     },
 
     xAxis: {
@@ -526,7 +543,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { color: '#A8A6A2', fontSize: 10 },
-      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } },
+      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } }
     },
 
     yAxis: {
@@ -537,7 +554,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { color: '#A8A6A2', fontSize: 10 },
-      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } },
+      splitLine: { show: true, lineStyle: { color: 'rgba(0,0,0,0.04)', type: 'dashed' } }
     },
 
     series: [
@@ -547,7 +564,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
         type: 'scatter' as const,
         data: trailScatterData as any,
         emphasis: { scale: 1.3 },
-        zlevel: 0,
+        zlevel: 0
       } as ScatterSeriesOption,
       // ② 最优个体历史轨迹线
       {
@@ -560,9 +577,9 @@ function render2DFrame(frame: InterpolatedFrame): void {
           color: 'rgba(255, 255, 255, 0.7)',
           width: 2.5,
           shadowBlur: 6,
-          shadowColor: 'rgba(0,0,0,0.3)',
+          shadowColor: 'rgba(0,0,0,0.3)'
         },
-        zlevel: 1,
+        zlevel: 1
       },
       // ③ 当前种群粒子
       {
@@ -570,9 +587,9 @@ function render2DFrame(frame: InterpolatedFrame): void {
         type: 'scatter' as const,
         data: currentScatterData as any,
         emphasis: { scale: 1.5 },
-        zlevel: 3,
-      } as ScatterSeriesOption,
-    ] as EChartsOption['series'],
+        zlevel: 3
+      } as ScatterSeriesOption
+    ] as EChartsOption['series']
   }
 
   chart2D.setOption(option, { notMerge: true, lazyUpdate: false })
@@ -597,7 +614,7 @@ async function init3DChart(): Promise<boolean> {
 
   chart3D?.dispose()
   chart3D = echarts.init(chart3DContainer.value, undefined, {
-    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2)
   })
   resizeObserver3D = new ResizeObserver(() => chart3D?.resize())
   resizeObserver3D.observe(chart3DContainer.value)
@@ -628,11 +645,11 @@ function render3DFrame(frame: InterpolatedFrame): void {
         autoRotateSpeed: 2,
         distance: 180,
         alpha: 35,
-        beta: 45,
+        beta: 45
       },
       boxWidth: 100,
       boxHeight: 100,
-      boxDepth: 60,
+      boxDepth: 60
     },
 
     xAxis3D: { type: 'value', min: -0.05, max: 1.05, name: '维度 1' },
@@ -648,13 +665,13 @@ function render3DFrame(frame: InterpolatedFrame): void {
             color: colorList[i],
             borderColor: frame.bestIndex === i ? getPhaseColor(frame.phaseRatio) : 'transparent',
             borderWidth: frame.bestIndex === i ? 2 : 0,
-            opacity: 0.85,
-          },
+            opacity: 0.85
+          }
         })),
         symbolSize: (_value: number[], params: { dataIndex: number }) =>
-          frame.bestIndex === params.dataIndex ? 12 : 6,
-      },
-    ],
+          frame.bestIndex === params.dataIndex ? 12 : 6
+      }
+    ]
   }
 
   chart3D.setOption(option, { notMerge: true, lazyUpdate: false })
@@ -700,7 +717,7 @@ function renderFrame(): void {
 // ═══════════════════════════════════════════
 
 function getFrameIntervalMs(): number {
-  return (1000 / TARGET_FPS) / currentSpeed.value
+  return 1000 / TARGET_FPS / currentSpeed.value
 }
 
 function animationLoop(timestamp: number): void {
@@ -909,7 +926,7 @@ defineExpose({
   currentIteration,
   currentPhase,
   currentFrameIndex: computed(() => frameIndex),
-  totalFrames,
+  totalFrames
 })
 </script>
 
@@ -923,7 +940,7 @@ defineExpose({
             class="phase-segment"
             :class="{
               'phase-segment--active': currentPhase === key,
-              'phase-segment--past': PHASE_CONFIG[currentPhase].range[0] >= cfg.range[1],
+              'phase-segment--past': PHASE_CONFIG[currentPhase].range[0] >= cfg.range[1]
             }"
           >
             <div class="phase-segment__icon">
@@ -951,17 +968,9 @@ defineExpose({
     <!-- ── 图表区域 ── -->
     <div class="st-chart-area" :style="{ height: `${height}px` }">
       <!-- 2D 视图 -->
-      <div
-        v-show="viewMode === '2d'"
-        ref="chart2DContainer"
-        class="st-chart st-chart--2d"
-      />
+      <div v-show="viewMode === '2d'" ref="chart2DContainer" class="st-chart st-chart--2d" />
       <!-- 3D 视图 -->
-      <div
-        v-show="viewMode === '3d'"
-        ref="chart3DContainer"
-        class="st-chart st-chart--3d"
-      />
+      <div v-show="viewMode === '3d'" ref="chart3DContainer" class="st-chart st-chart--3d" />
 
       <!-- 空状态 -->
       <div v-if="totalFrames === 0" class="st-empty">
@@ -1016,10 +1025,7 @@ defineExpose({
             @input="seekTo(Number(($event.target as HTMLInputElement).value))"
           />
           <!-- 已播放填充 -->
-          <div
-            class="st-progress-fill"
-            :style="{ width: `${progressPercent}%` }"
-          />
+          <div class="st-progress-fill" :style="{ width: `${progressPercent}%` }" />
         </div>
         <span class="st-progress-label">{{ totalIterations }}</span>
       </div>
@@ -1066,36 +1072,21 @@ defineExpose({
     <!-- ── 图例 ── -->
     <div class="st-legend">
       <div class="st-legend__phase">
-        <span
-          class="legend-swatch"
-          :style="{ background: getPhaseColor(0.1) }"
-        />
+        <span class="legend-swatch" :style="{ background: getPhaseColor(0.1) }" />
         <span>探索期</span>
       </div>
       <div class="st-legend__phase">
-        <span
-          class="legend-swatch"
-          :style="{ background: getPhaseColor(0.5) }"
-        />
+        <span class="legend-swatch" :style="{ background: getPhaseColor(0.5) }" />
         <span>滚动期</span>
       </div>
       <div class="st-legend__phase">
-        <span
-          class="legend-swatch"
-          :style="{ background: getPhaseColor(0.9) }"
-        />
+        <span class="legend-swatch" :style="{ background: getPhaseColor(0.9) }" />
         <span>弹射期</span>
       </div>
       <div class="st-legend__divider" />
-      <div class="st-legend__stat">
-        迭代 {{ currentIteration }}/{{ totalIterations }}
-      </div>
-      <div class="st-legend__stat">
-        多样性 {{ (currentDiversity * 100).toFixed(0) }}%
-      </div>
-      <div v-if="populationSize" class="st-legend__stat">
-        粒子 {{ populationSize }}
-      </div>
+      <div class="st-legend__stat">迭代 {{ currentIteration }}/{{ totalIterations }}</div>
+      <div class="st-legend__stat">多样性 {{ (currentDiversity * 100).toFixed(0) }}%</div>
+      <div v-if="populationSize" class="st-legend__stat">粒子 {{ populationSize }}</div>
     </div>
   </div>
 </template>
@@ -1149,38 +1140,38 @@ defineExpose({
 
 .phase-segment__icon {
   font-size: 16px;
-  color: #94A3B8;
+  color: #94a3b8;
   display: flex;
   align-items: center;
 }
 
 .phase-segment--active .phase-segment__icon {
-  color: #D4A373;
+  color: #d4a373;
 }
 
 .phase-segment__label {
   font-size: 13px;
   font-weight: 500;
-  color: #94A3B8;
+  color: #94a3b8;
   white-space: nowrap;
 }
 
 .phase-segment--active .phase-segment__label {
-  color: #D4A373;
+  color: #d4a373;
   font-weight: 600;
 }
 
 .phase-connector {
   width: 24px;
   height: 2px;
-  background: #E8E0D8;
+  background: #e8e0d8;
   border-radius: 1px;
   flex-shrink: 0;
   margin: 0 4px;
 }
 
 .phase-connector--past {
-  background: #D6D4D0;
+  background: #d6d4d0;
   opacity: 0.4;
 }
 
@@ -1207,7 +1198,7 @@ defineExpose({
 .phase-desc__text {
   margin: 0;
   font-size: 12px;
-  color: #82807C;
+  color: #82807c;
   line-height: 1.4;
 }
 
@@ -1229,7 +1220,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-size: 14px;
 }
 
@@ -1257,19 +1248,23 @@ defineExpose({
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid #E8E0D8;
+  border: 1px solid #e8e0d8;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.6);
-  color: #5C5A57;
+  color: #5c5a57;
   cursor: pointer;
   font-size: 14px;
-  transition: background 150ms, border-color 150ms, color 150ms, transform 100ms;
+  transition:
+    background 150ms,
+    border-color 150ms,
+    color 150ms,
+    transform 100ms;
 }
 
 .st-btn:hover:not(:disabled) {
   background: rgba(79, 124, 255, 0.08);
-  border-color: #B8CBFF;
-  color: #4F7CFF;
+  border-color: #b8cbff;
+  color: #4f7cff;
 }
 
 .st-btn:active:not(:disabled) {
@@ -1285,8 +1280,8 @@ defineExpose({
   width: 38px;
   height: 38px;
   font-size: 18px;
-  border-color: #4F7CFF;
-  color: #4F7CFF;
+  border-color: #4f7cff;
+  color: #4f7cff;
   background: rgba(79, 124, 255, 0.06);
 }
 
@@ -1305,7 +1300,7 @@ defineExpose({
 
 .st-progress-label {
   font-size: 11px;
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   min-width: 28px;
   text-align: center;
@@ -1318,7 +1313,7 @@ defineExpose({
   height: 5px;
   border-radius: 3px;
   overflow: hidden;
-  background: #F0EFEC;
+  background: #f0efec;
 }
 
 .st-progress-phase {
@@ -1346,7 +1341,8 @@ defineExpose({
   top: 0;
   left: 0;
   height: 100%;
-  background: linear-gradient(90deg,
+  background: linear-gradient(
+    90deg,
     hsl(30, 90%, 55%),
     hsl(225, 100%, 55%) 35%,
     hsl(285, 100%, 60%) 75%,
@@ -1367,7 +1363,7 @@ defineExpose({
 }
 
 .st-speed-icon {
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-size: 14px;
   display: flex;
 }
@@ -1375,7 +1371,7 @@ defineExpose({
 .st-speed-group {
   display: flex;
   gap: 2px;
-  background: #F5F4F2;
+  background: #f5f4f2;
   border-radius: 8px;
   padding: 2px;
 }
@@ -1385,29 +1381,31 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807C;
+  color: #82807c;
   font-size: 12px;
   font-weight: 500;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   cursor: pointer;
-  transition: background 150ms, color 150ms;
+  transition:
+    background 150ms,
+    color 150ms;
 }
 
 .st-speed-btn:hover {
-  color: #3D3B39;
+  color: #3d3b39;
   background: rgba(255, 255, 255, 0.5);
 }
 
 .st-speed-btn--active {
   background: #fff;
-  color: #4F7CFF;
+  color: #4f7cff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .st-view-toggle {
   display: flex;
   gap: 0;
-  background: #F5F4F2;
+  background: #f5f4f2;
   border-radius: 8px;
   padding: 2px;
   margin-left: 4px;
@@ -1421,21 +1419,23 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807C;
+  color: #82807c;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 150ms, color 150ms;
+  transition:
+    background 150ms,
+    color 150ms;
 }
 
 .st-view-btn:hover {
-  color: #3D3B39;
+  color: #3d3b39;
   background: rgba(255, 255, 255, 0.5);
 }
 
 .st-view-btn--active {
   background: #fff;
-  color: #4F7CFF;
+  color: #4f7cff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
@@ -1454,7 +1454,7 @@ defineExpose({
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: #82807C;
+  color: #82807c;
 }
 
 .legend-swatch {
@@ -1468,12 +1468,12 @@ defineExpose({
 .st-legend__divider {
   width: 1px;
   height: 12px;
-  background: #E8E0D8;
+  background: #e8e0d8;
 }
 
 .st-legend__stat {
   font-size: 11px;
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 

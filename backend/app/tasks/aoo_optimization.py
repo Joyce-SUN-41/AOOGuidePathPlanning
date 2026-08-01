@@ -1,4 +1,4 @@
-"""AOO 路径优化异步任务 — Celery Worker 执行
+"""AOO 路径优化异步任务 — Celery Worker 执行 + 同步兜底
 
 核心职责:
   1. 接收优化请求参数
@@ -6,12 +6,15 @@
   3. 调用 OptimizationService 执行 AOO 算法
   4. 将最终结果写入 Redis (TTL 1 小时)
   5. 失败时记录错误信息到 Redis
+  6. Celery 不可用时, 通过后台线程同步执行 (兜底)
 """
 
 import asyncio
 import json
 import logging
+import threading
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 import redis as redis_py
@@ -444,3 +447,204 @@ def mark_task_failed(task_id: str, error_message: str) -> None:
         pipe.execute()
     except Exception as exc:
         logger.warning("标记任务失败写入 Redis 失败: %s", exc)
+
+
+# ── 通用 Redis 任务初始化 (Celery + 同步兜底共用) ─────────
+
+
+def _initialize_task_redis(
+    task_id: str,
+    diagnosis_id: str,
+    student_id: str,
+    mastery_levels: Dict[str, float],
+    cognitive_load: float,
+    config: Optional[Dict[str, Any]],
+    status: str = "processing",
+) -> float:
+    """通用初始化: 将任务状态/进度/元数据写入 Redis
+
+    Returns:
+        created_at (float): 创建时间 Unix 时间戳
+    """
+    created_at = time.time()
+    total_iters = (config or {}).get("max_iterations", 500)
+
+    try:
+        r = _get_redis()
+        pipe = r.pipeline()
+        pipe.set(
+            AOO_TASK_STATUS_KEY.format(task_id=task_id),
+            status,
+            ex=AOO_TASK_TTL,
+        )
+        pipe.set(
+            AOO_TASK_PROGRESS_KEY.format(task_id=task_id),
+            json.dumps({
+                "progress": 0,
+                "current_iteration": 0,
+                "max_iterations": total_iters,
+                "best_fitness_so_far": None,
+                "estimated_remaining_seconds": None,
+                "updated_at": time.time(),
+            }),
+            ex=AOO_TASK_TTL,
+        )
+        pipe.set(
+            AOO_TASK_META_KEY.format(task_id=task_id),
+            json.dumps({
+                "diagnosis_id": diagnosis_id,
+                "student_id": student_id,
+                "cognitive_load": cognitive_load,
+                "kp_count": len(mastery_levels),
+                "config": config or {},
+                "created_at": created_at,
+                "updated_at": created_at,
+            }),
+            ex=AOO_TASK_TTL,
+        )
+        pipe.delete(AOO_TASK_CONVERGENCE_KEY.format(task_id=task_id))
+        pipe.execute()
+    except Exception as exc:
+        logger.error("Redis 状态初始化失败 (task_id=%s): %s", task_id, exc)
+
+    return created_at
+
+
+# ── 同步执行函数 (Celery 不可用时的兜底方案) ─────────────────
+
+
+def run_aoo_optimization_sync(
+    diagnosis_id: str,
+    student_id: str,
+    mastery_levels: Dict[str, float],
+    cognitive_load: float,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """在后台线程同步执行 AOO 优化 (不需要 Celery)
+
+    通过 Thread + Redis 进度上报实现与 Celery 任务兼容的状态轮询。
+    前端通过 GET /aoo/status/{task_id} 轮询进度，与此函数写入的 Redis key 完全兼容。
+
+    Args:
+        diagnosis_id: 诊断记录 ID
+        student_id: 学生用户 ID
+        mastery_levels: 知识点掌握度 {kp_id: value}
+        cognitive_load: 综合认知负荷指数
+        config: AOO 超参数覆盖 (可选)
+
+    Returns:
+        task_id (str): 用于轮询进度的任务 ID
+    """
+    task_id = f"sync-{uuid.uuid4().hex[:12]}"
+    t_start = time.perf_counter()
+    total_iters = (config or {}).get("max_iterations", 500)
+
+    logger.info(
+        "AOO 同步执行启动: task_id=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        task_id, diagnosis_id, student_id,
+        len(mastery_levels), cognitive_load,
+    )
+
+    # ── 初始化 Redis 状态 ──
+    _initialize_task_redis(
+        task_id=task_id,
+        diagnosis_id=diagnosis_id,
+        student_id=student_id,
+        mastery_levels=mastery_levels,
+        cognitive_load=cognitive_load,
+        config=config,
+        status="queued",  # 先标记为 queued，线程启动后切换为 processing
+    )
+
+    # ── 构建回调 ──
+    progress_cb = _make_progress_callback(task_id, total_iters, t_start)
+    iteration_cb = _make_iteration_callback(task_id, total_iters)
+
+    def _run_in_thread() -> None:
+        """后台线程执行体"""
+        # 切换状态为 processing
+        redis_available = False
+        try:
+            _r = _get_redis()
+            _r.set(
+                AOO_TASK_STATUS_KEY.format(task_id=task_id),
+                "processing",
+                ex=AOO_TASK_TTL,
+            )
+            redis_available = True
+        except Exception:
+            logger.warning("Redis 不可用, 同步任务将无法上报进度 (task_id=%s)", task_id)
+
+        try:
+            handler = OptimizationService()
+            result = asyncio.run(
+                handler.run(
+                    diagnosis_id=diagnosis_id,
+                    student_id=student_id,
+                    mastery_levels=mastery_levels,
+                    cognitive_load=cognitive_load,
+                    config=config,
+                    progress_callback=progress_cb,
+                    iteration_callback=iteration_cb,
+                    task_id=task_id,
+                )
+            )
+        except Exception as exc:
+            logger.error(
+                "AOO 同步执行失败: task_id=%s error=%s",
+                task_id, exc, exc_info=True,
+            )
+            error_msg = str(exc)[:500]
+            _set_task_error(task_id, error_msg)
+            return
+
+        # ── 保存完成结果 ──
+        t_total = round(time.perf_counter() - t_start, 3)
+
+        if redis_available:
+            try:
+                pipe = _r.pipeline()
+                pipe.set(
+                    AOO_TASK_RESULT_KEY.format(task_id=task_id),
+                    json.dumps(
+                        {"task_id": task_id, "status": "completed",
+                         "progress": 100.0, "result": result},
+                        default=str,
+                    ),
+                    ex=AOO_TASK_TTL,
+                )
+                pipe.set(
+                    AOO_TASK_STATUS_KEY.format(task_id=task_id),
+                    "completed",
+                    ex=AOO_TASK_TTL,
+                )
+                pipe.set(
+                    AOO_TASK_PROGRESS_KEY.format(task_id=task_id),
+                    json.dumps({
+                        "progress": 100.0,
+                        "current_iteration": total_iters,
+                        "max_iterations": total_iters,
+                        "best_fitness_so_far": result.get("best_path", {}).get(
+                            "total_fitness", 0
+                        ),
+                        "estimated_remaining_seconds": 0,
+                        "updated_at": time.time(),
+                    }),
+                    ex=AOO_TASK_TTL,
+                )
+                pipe.execute()
+            except Exception as exc:
+                logger.error("Redis 结果写入失败 (sync): %s", exc)
+
+        logger.info(
+            "AOO 同步执行完成: task_id=%s time=%.2fs best_f=%s",
+            task_id, t_total,
+            result.get("best_path", {}).get("total_fitness"),
+        )
+
+    # 启动后台线程
+    thread = threading.Thread(target=_run_in_thread, daemon=True, name=f"aoo-sync-{task_id}")
+    thread.start()
+
+    logger.info("AOO 同步执行已入队: task_id=%s", task_id)
+    return task_id

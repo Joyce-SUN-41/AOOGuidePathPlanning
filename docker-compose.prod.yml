@@ -8,7 +8,7 @@ version: "3.9"
 
 services:
   # ========================================
-  #  PostgreSQL 16 数据库
+  #  PostgreSQL 16 (内部网络，不暴露端口)
   # ========================================
   postgres:
     image: postgres:16-alpine
@@ -18,8 +18,6 @@ services:
       POSTGRES_USER: aoo_user
       POSTGRES_PASSWORD: aoo_password_2024
       POSTGRES_DB: aoo_guide_path
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -31,15 +29,13 @@ services:
       - aoo_network
 
   # ========================================
-  #  Redis 7 缓存 + 消息队列
+  #  Redis 7 (内部网络，不暴露端口)
   # ========================================
   redis:
     image: redis:7-alpine
     container_name: oat_redis
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -68,8 +64,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     networks:
       - aoo_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   # ========================================
   #  Celery Worker (异步任务)
@@ -88,8 +98,22 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app:celery_app inspect ping 2>&1 | grep -q 'OK' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       - aoo_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
   # ========================================
   #  前端 (Nginx 静态服务)
@@ -105,8 +129,21 @@ services:
     depends_on:
       backend:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - aoo_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
 volumes:
   postgres_data:

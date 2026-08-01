@@ -61,22 +61,21 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import {
-  SendOutlined,
-  DeleteOutlined,
-  DownloadOutlined,
-} from '@ant-design/icons-vue'
+import { SendOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons-vue'
 
-const props = withDefaults(defineProps<{
-  modelValue?: string
-  sending?: boolean
-  hasContent?: boolean
-  placeholder?: string
-  hintType?: 'subject' | 'chinese' | 'mixed'
-}>(), {
-  placeholder: '输入你的问题，Enter 发送，Shift+Enter 换行',
-  hintType: 'mixed',
-})
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string
+    sending?: boolean
+    hasContent?: boolean
+    placeholder?: string
+    hintType?: 'subject' | 'chinese' | 'mixed'
+  }>(),
+  {
+    placeholder: '输入你的问题，Enter 发送，Shift+Enter 换行',
+    hintType: 'mixed'
+  }
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -89,9 +88,12 @@ const emit = defineEmits<{
 const localInput = ref(props.modelValue || '')
 const textareaRef = ref()
 
-watch(() => props.modelValue, (val) => {
-  localInput.value = val || ''
-})
+watch(
+  () => props.modelValue,
+  (val) => {
+    localInput.value = val || ''
+  }
+)
 
 watch(localInput, (val) => {
   emit('update:modelValue', val)
@@ -147,8 +149,12 @@ function handleSend() {
 
   :deep(.ant-btn-text) {
     color: #475569 !important;
-    &:hover:not(:disabled) { color: #94A3B8 !important; }
-    &:disabled { color: rgba(71, 85, 105, 0.3) !important; }
+    &:hover:not(:disabled) {
+      color: #94a3b8 !important;
+    }
+    &:disabled {
+      color: rgba(71, 85, 105, 0.3) !important;
+    }
   }
 }
 
@@ -160,7 +166,9 @@ function handleSend() {
   border-radius: 14px;
   padding: 6px 6px 6px 16px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: border-color 0.25s, box-shadow 0.25s;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
 
   &:focus-within {
     border-color: rgba(212, 163, 115, 0.35);
@@ -179,7 +187,7 @@ function handleSend() {
   :deep(textarea) {
     background: transparent !important;
     padding: 6px 0;
-    color: #F8FAFC;
+    color: #f8fafc;
 
     &::placeholder {
       color: #475569;
@@ -195,11 +203,11 @@ function handleSend() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #D4A373, #B8860B) !important;
+  background: linear-gradient(135deg, #d4a373, #b8860b) !important;
   border: none !important;
   box-shadow: 0 2px 12px rgba(212, 163, 115, 0.3);
   transition: all 0.25s;
-  color: #0A0D14;
+  color: #0a0d14;
 
   &:hover:not(:disabled) {
     transform: scale(1.06);
@@ -228,19 +236,24 @@ function handleSend() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #D4A373;
+  color: #d4a373;
 }
 
 .hint-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #D4A373;
+  background: #d4a373;
   animation: dotPulse 1.2s ease-in-out infinite;
 }
 
 @keyframes dotPulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

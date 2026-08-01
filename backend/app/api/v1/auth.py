@@ -1,6 +1,6 @@
 """认证接口 — 登录 / 注册 / Token 刷新"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,12 +125,12 @@ async def register(
     )
 
 
-@router.post("/refresh", response_model=Token, summary="刷新 Token")
+@router.post("/refresh", response_model=ResponseBase[Token], summary="刷新 Token")
 async def refresh_token(
-    refresh_token: str,
+    refresh_token: str = Body(..., embed=True, description="refresh_token 值"),
     db: AsyncSession = Depends(get_db),
 ):
-    """使用 refresh_token 换取新的 access_token"""
+    """使用 refresh_token 换取新的 access_token（参数通过 JSON body 传递）"""
     payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(
@@ -148,13 +148,13 @@ async def refresh_token(
             detail="用户不存在或已被禁用",
         )
 
-    return Token(
+    return ResponseBase(data=Token(
         access_token=create_access_token(subject=str(user.id)),
         refresh_token=create_refresh_token(subject=str(user.id)),
-    )
+    ))
 
 
-@router.get("/me", response_model=UserOut, summary="获取当前用户信息")
+@router.get("/me", response_model=ResponseBase[UserOut], summary="获取当前用户信息")
 async def get_me(current_user: User = Depends(get_current_user)):
     """返回当前登录用户的详细信息"""
-    return current_user
+    return ResponseBase(data=current_user)

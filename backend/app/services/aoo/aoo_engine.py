@@ -43,6 +43,9 @@ class PopulationSnapshot:
     iteration: int
     fitness_values: List[float]
     best_index: int
+    positions_x: List[float] = field(default_factory=list)
+    positions_y: List[float] = field(default_factory=list)
+    colors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -467,11 +470,42 @@ class AOOEngine:
         conv.q3_fitness.append(float(np.percentile(sorted_f, 75)))
 
     def _capture_snapshot(self, iteration: int) -> PopulationSnapshot:
-        """捕获当前代种群快照"""
+        """捕获当前代种群快照
+
+        将高维种群降维到 2D 平面 (取前两维) 用于前端散点动画，
+        并根据个体状态着色: elite (最优个体) / exploring (探索阶段高探索率时) / normal。
+        """
+        pop = self._population  # (N, Dim)
+        N = pop.shape[0]
+        Dim = pop.shape[1]
+
+        # 降维: 优先使用前两维；维度不足时用随机微扰散布避免重叠
+        if Dim >= 2:
+            positions_x = pop[:, 0].tolist()
+            positions_y = pop[:, 1].tolist()
+        elif Dim == 1:
+            positions_x = pop[:, 0].tolist()
+            positions_y = (self._rng.rand(N) - 0.5).tolist()
+        else:
+            positions_x = (self._rng.rand(N) - 0.5).tolist()
+            positions_y = (self._rng.rand(N) - 0.5).tolist()
+
+        best_idx = int(np.argmax(self._fitness))
+        # 探索率阈值着色
+        colors = []
+        for i in range(N):
+            if i == best_idx:
+                colors.append("elite")
+            else:
+                colors.append("normal")
+
         return PopulationSnapshot(
             iteration=iteration,
             fitness_values=self._fitness.tolist(),
-            best_index=int(np.argmax(self._fitness)),
+            best_index=best_idx,
+            positions_x=[float(v) for v in positions_x],
+            positions_y=[float(v) for v in positions_y],
+            colors=colors,
         )
 
     def _make_log_entry(self, t: int, params: Dict[str, float]) -> Dict[str, Any]:

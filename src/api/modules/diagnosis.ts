@@ -10,9 +10,23 @@ import type {
  * 认知诊断 API 模块
  */
 export const diagnosisApi = {
-  /** 获取诊断题目列表 */
-  getQuestions(subject?: string): Promise<DiagnosisQuestion[]> {
-    return request.get<DiagnosisQuestion[]>('/diagnosis/questions', { subject })
+  /** 获取诊断题目列表
+   *  后端返回 QuestionsResponse { questions, total, subject, estimated_duration_min }
+   *  经 axios 拦截器 unwrap 后此处返回的是 QuestionsResponse 对象
+   *  调用方应读取 .questions 字段获取题目数组
+   */
+  getQuestions(subject?: string): Promise<{
+    questions: DiagnosisQuestion[]
+    total: number
+    subject: string
+    estimated_duration_min: number
+  }> {
+    return request.get('/diagnosis/questions', { subject }) as Promise<{
+      questions: DiagnosisQuestion[]
+      total: number
+      subject: string
+      estimated_duration_min: number
+    }>
   },
 
   /** 提交诊断答案，返回诊断结果 */
@@ -33,11 +47,23 @@ export const diagnosisApi = {
     return request.get<DiagnosisResult>(`/diagnosis/${id}`)
   },
 
-  /** 获取诊断历史列表 */
-  getHistory(params?: { page?: number; pageSize?: number }): Promise<{
+  /** 获取诊断历史列表
+   *  后端返回 DiagnosisHistoryResponse { items, total }
+   *  本方法映射 items → list 保持前端一致性
+   */
+  async getHistory(params?: { page?: number; pageSize?: number }): Promise<{
     list: DiagnosisBrief[]
     total: number
   }> {
-    return request.get('/diagnosis/history', params as Record<string, unknown>)
-  }
+    const raw = await request.get<{ items: DiagnosisBrief[]; total: number }>(
+      '/diagnosis/history',
+      params as Record<string, unknown>
+    )
+    return { list: raw.items ?? [], total: raw.total ?? 0 }
+  },
+
+  /** 删除诊断记录 */
+  delete(id: string): Promise<null> {
+    return request.delete<null>(`/diagnosis/${id}`)
+  },
 }

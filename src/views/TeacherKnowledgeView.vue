@@ -28,7 +28,6 @@ const form = reactive<KnowledgePointForm>({
   parent_id: ''
 })
 const tagInput = ref('')
-const prereqInput = ref('')
 
 // ========== 选项常量 ==========
 const layerOptions = ['基础层', '核心层', '进阶层']
@@ -50,7 +49,7 @@ async function loadData() {
 
 // 筛选后的知识点
 const filteredPoints = computed(() => {
-  return knowledgePoints.value.filter(kp => {
+  return knowledgePoints.value.filter((kp) => {
     if (filterSubject.value && kp.subject !== filterSubject.value) return false
     if (filterLayer.value && kp.layer !== filterLayer.value) return false
     return true
@@ -60,7 +59,7 @@ const filteredPoints = computed(() => {
 // 获取前置知识点的名称
 function getPrereqNames(prereqIds: string[]): string {
   return prereqIds
-    .map(id => knowledgePoints.value.find(k => k.id === id)?.name || id.substring(0, 8))
+    .map((id) => knowledgePoints.value.find((k) => k.id === id)?.name || id.substring(0, 8))
     .join(' → ')
 }
 
@@ -72,7 +71,7 @@ function getDifficultyColor(level: number): string {
 
 // 层级标签
 function getLayerColor(layer: string | undefined): string {
-  const colors: Record<string, string> = { '基础层': 'green', '核心层': 'blue', '进阶层': 'purple' }
+  const colors: Record<string, string> = { 基础层: 'green', 核心层: 'blue', 进阶层: 'purple' }
   return colors[layer || ''] || 'default'
 }
 
@@ -82,8 +81,14 @@ function openCreate() {
   editingId.value = ''
   modalTitle.value = '新增知识点'
   Object.assign(form, {
-    name: '', description: '', subject: '人工智能导论',
-    difficulty_level: 1, layer: '', tags: [], prerequisites: [], parent_id: ''
+    name: '',
+    description: '',
+    subject: '人工智能导论',
+    difficulty_level: 1,
+    layer: '',
+    tags: [],
+    prerequisites: [],
+    parent_id: ''
   })
   modalVisible.value = true
 }
@@ -137,18 +142,9 @@ function addTag() {
   }
 }
 
-// 添加前置知识点
-function addPrereq() {
-  const val = prereqInput.value.trim()
-  if (val && !form.prerequisites.includes(val)) {
-    form.prerequisites.push(val)
-    prereqInput.value = ''
-  }
-}
-
 // 获取前置知识点可选列表
 const availablePrereqs = computed(() => {
-  return knowledgePoints.value.filter(kp => kp.id !== editingId.value)
+  return knowledgePoints.value.filter((kp) => kp.id !== editingId.value)
 })
 
 // 确认删除
@@ -206,29 +202,23 @@ onMounted(() => {
           placeholder="学科筛选"
           style="width: 160px"
           allow-clear
-          :options="subjectOptions.map(s => ({ value: s, label: s }))"
+          :options="subjectOptions.map((s) => ({ value: s, label: s }))"
         />
         <a-select
           v-model:value="filterLayer"
           placeholder="层级筛选"
           style="width: 140px"
           allow-clear
-          :options="layerOptions.map(l => ({ value: l, label: l }))"
+          :options="layerOptions.map((l) => ({ value: l, label: l }))"
         />
         <a-tag color="blue">共 {{ filteredPoints.length }} 个知识点</a-tag>
       </a-space>
     </div>
 
     <a-spin :spinning="loading">
-
       <!-- ========== 列表视图 ========== -->
       <div v-if="viewMode === 'list'" class="kp-list">
-        <a-table
-          :data-source="filteredPoints"
-          :pagination="false"
-          row-key="id"
-          size="middle"
-        >
+        <a-table :data-source="filteredPoints" :pagination="false" row-key="id" size="middle">
           <a-table-column title="名称" data-index="name" :width="200">
             <template #default="{ record }">
               <span class="kp-name">{{ record.name }}</span>
@@ -241,7 +231,9 @@ onMounted(() => {
           </a-table-column>
           <a-table-column title="层级" data-index="layer" :width="100">
             <template #default="{ record }">
-              <a-tag v-if="record.layer" :color="getLayerColor(record.layer)">{{ record.layer }}</a-tag>
+              <a-tag v-if="record.layer" :color="getLayerColor(record.layer)">{{
+                record.layer
+              }}</a-tag>
               <span v-else class="text-muted">—</span>
             </template>
           </a-table-column>
@@ -255,7 +247,9 @@ onMounted(() => {
           <a-table-column title="标签" data-index="tags" :width="160">
             <template #default="{ record }">
               <a-space v-if="record.tags?.length" :size="4" wrap>
-                <a-tag v-for="tag in record.tags" :key="tag" color="geekblue" size="small">{{ tag }}</a-tag>
+                <a-tag v-for="tag in record.tags" :key="tag" color="geekblue" size="small">{{
+                  tag
+                }}</a-tag>
               </a-space>
               <span v-else class="text-muted">—</span>
             </template>
@@ -272,7 +266,9 @@ onMounted(() => {
             <template #default="{ record }">
               <a-space>
                 <a-button type="link" size="small" @click="openEdit(record)">编辑</a-button>
-                <a-button type="link" danger size="small" @click="handleDelete(record)">删除</a-button>
+                <a-button type="link" danger size="small" @click="handleDelete(record)"
+                  >删除</a-button
+                >
               </a-space>
             </template>
           </a-table-column>
@@ -289,7 +285,7 @@ onMounted(() => {
             </div>
             <div class="layer-nodes">
               <div
-                v-for="kp in filteredPoints.filter(p => p.layer === layer)"
+                v-for="kp in filteredPoints.filter((p) => p.layer === layer)"
                 :key="kp.id"
                 class="graph-node-card"
               >
@@ -306,10 +302,15 @@ onMounted(() => {
                 </div>
                 <div class="node-actions">
                   <a-button type="link" size="small" @click="openEdit(kp)">编辑</a-button>
-                  <a-button type="link" danger size="small" @click="handleDelete(kp)">删除</a-button>
+                  <a-button type="link" danger size="small" @click="handleDelete(kp)"
+                    >删除</a-button
+                  >
                 </div>
               </div>
-              <div v-if="filteredPoints.filter(p => p.layer === layer).length === 0" class="empty-nodes">
+              <div
+                v-if="filteredPoints.filter((p) => p.layer === layer).length === 0"
+                class="empty-nodes"
+              >
                 暂无该层级的知识点
               </div>
             </div>
@@ -322,7 +323,9 @@ onMounted(() => {
               <span v-for="edge in edges.slice(0, 8)" :key="edge.id" class="legend-edge">
                 {{ edge.source_name }} → {{ edge.target_name }}
               </span>
-              <span v-if="edges.length > 8" class="legend-more">...还有 {{ edges.length - 8 }} 条</span>
+              <span v-if="edges.length > 8" class="legend-more"
+                >...还有 {{ edges.length - 8 }} 条</span
+              >
             </div>
           </div>
         </div>
@@ -348,7 +351,12 @@ onMounted(() => {
           </a-col>
           <a-col :span="8">
             <a-form-item label="难度等级" required>
-              <a-input-number v-model:value="form.difficulty_level" :min="1" :max="5" style="width: 100%" />
+              <a-input-number
+                v-model:value="form.difficulty_level"
+                :min="1"
+                :max="5"
+                style="width: 100%"
+              />
             </a-form-item>
           </a-col>
         </a-row>
@@ -356,14 +364,17 @@ onMounted(() => {
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="学科">
-              <a-select v-model:value="form.subject" :options="subjectOptions.map(s => ({ value: s, label: s }))" />
+              <a-select
+                v-model:value="form.subject"
+                :options="subjectOptions.map((s) => ({ value: s, label: s }))"
+              />
             </a-form-item>
           </a-col>
           <a-col :span="12">
             <a-form-item label="层级">
               <a-select
                 v-model:value="form.layer"
-                :options="layerOptions.map(l => ({ value: l, label: l }))"
+                :options="layerOptions.map((l) => ({ value: l, label: l }))"
                 placeholder="选择层级"
                 allow-clear
               />
@@ -377,7 +388,12 @@ onMounted(() => {
 
         <a-form-item label="标签">
           <a-space>
-            <a-input v-model:value="tagInput" placeholder="输入标签后回车" style="width: 160px" @press-enter="addTag" />
+            <a-input
+              v-model:value="tagInput"
+              placeholder="输入标签后回车"
+              style="width: 160px"
+              @press-enter="addTag"
+            />
             <a-button size="small" @click="addTag">添加</a-button>
           </a-space>
           <div v-if="form.tags.length" class="tag-list">
@@ -387,7 +403,8 @@ onMounted(() => {
               closable
               color="geekblue"
               @close="form.tags.splice(idx, 1)"
-            >{{ tag }}</a-tag>
+              >{{ tag }}</a-tag
+            >
           </div>
         </a-form-item>
 
@@ -397,8 +414,11 @@ onMounted(() => {
             mode="multiple"
             placeholder="选择前置知识点"
             style="width: 100%"
-            :options="availablePrereqs.map(kp => ({ value: kp.id, label: kp.name }))"
-            :filter-option="(input: string, option: any) => option.label.toLowerCase().includes(input.toLowerCase())"
+            :options="availablePrereqs.map((kp) => ({ value: kp.id, label: kp.name }))"
+            :filter-option="
+              (input: string, option: any) =>
+                option.label.toLowerCase().includes(input.toLowerCase())
+            "
           />
         </a-form-item>
       </a-form>
@@ -427,9 +447,22 @@ export default {
   align-items: flex-start;
   margin-bottom: 20px;
 }
-.page-title { font-size: 22px; font-weight: 700; color: #F8FAFC; margin: 0; }
-.page-subtitle { color: #94A3B8; font-size: 13px; margin: 4px 0 0; }
-.header-actions { display: flex; gap: 12px; align-items: center; }
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0;
+}
+.page-subtitle {
+  color: #94a3b8;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
 
 /* ========== 筛选栏 ========== */
 .filter-bar {
@@ -448,9 +481,18 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
-.kp-name { font-weight: 600; color: #D4A373; }
-.prereq-text { font-size: 12px; color: #94A3B8; }
-.text-muted { color: #94A3B8; font-size: 12px; }
+.kp-name {
+  font-weight: 600;
+  color: #d4a373;
+}
+.prereq-text {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.text-muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
 
 /* ========== 图谱视图 ========== */
 .graph-container {
@@ -464,8 +506,13 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px 16px;
 }
-.layer-header { margin-bottom: 10px; }
-.layer-tag { font-weight: 600; font-size: 13px; }
+.layer-header {
+  margin-bottom: 10px;
+}
+.layer-tag {
+  font-weight: 600;
+  font-size: 13px;
+}
 .layer-nodes {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -477,15 +524,53 @@ export default {
   padding: 12px;
   transition: box-shadow 0.2s;
 }
-.graph-node-card:hover { box-shadow: 0 2px 8px rgba(74,108,247,0.15); }
-.node-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.node-name { font-weight: 600; font-size: 14px; color: #F8FAFC; }
-.node-desc { font-size: 12px; color: #94A3B8; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.node-prereqs { font-size: 12px; color: #94A3B8; margin-bottom: 4px; }
-.prereq-label { color: #94A3B8; }
-.prereq-list { color: #D4A373; }
-.node-actions { display: flex; gap: 4px; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; }
-.empty-nodes { color: #94A3B8; font-size: 13px; text-align: center; padding: 20px; }
+.graph-node-card:hover {
+  box-shadow: 0 2px 8px rgba(74, 108, 247, 0.15);
+}
+.node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.node-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #f8fafc;
+}
+.node-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.node-prereqs {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.prereq-label {
+  color: #94a3b8;
+}
+.prereq-list {
+  color: #d4a373;
+}
+.node-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+.empty-nodes {
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
 
 .graph-legend {
   background: rgba(255, 255, 255, 0.04);
@@ -493,18 +578,37 @@ export default {
   padding: 12px 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.legend-title { font-size: 13px; font-weight: 600; color: #94A3B8; }
-.legend-edges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.legend-edges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
 .legend-edge {
   font-size: 12px;
-  color: #D4A373;
-  background: rgba(212, 163, 115, 0.10);
+  color: #d4a373;
+  background: rgba(212, 163, 115, 0.1);
   padding: 2px 8px;
   border-radius: 4px;
 }
-.legend-more { font-size: 12px; color: #94A3B8; }
+.legend-more {
+  font-size: 12px;
+  color: #94a3b8;
+}
 
 /* ========== 表单 ========== */
-.kp-form { margin-top: 8px; }
-.tag-list { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+.kp-form {
+  margin-top: 8px;
+}
+.tag-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 </style>

@@ -24,7 +24,7 @@ import { ref } from 'vue'
 import { TagOutlined, DownOutlined } from '@ant-design/icons-vue'
 import type { RAGSource } from '@/types/rag'
 
-const props = defineProps<{
+const { source } = defineProps<{
   source: RAGSource
 }>()
 
@@ -42,7 +42,9 @@ function toggle() {
   border-radius: 8px;
   background: #fafbfc;
   overflow: hidden;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   cursor: pointer;
 
   &:hover {
@@ -81,14 +83,14 @@ function toggle() {
 .source-doc {
   flex: 1;
   font-weight: 500;
-  color: #E2E8F0;
+  color: #e2e8f0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .source-page {
-  color: #94A3B8;
+  color: #94a3b8;
   font-size: 11px;
 }
 

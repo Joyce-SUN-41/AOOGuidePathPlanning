@@ -2,7 +2,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import type { RegisterParams, UserRole } from '@/types'
+import type { RegisterParams } from '@/types'
 import type { FormInstance, Rule } from 'ant-design-vue/es/form'
 
 const router = useRouter()
@@ -43,16 +43,12 @@ const rules: Record<string, Rule[]> = {
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, max: 20, message: '密码长度 6-20 个字符', trigger: 'blur' }
   ],
-  confirmPassword: [
-    { required: true, validator: validateConfirmPassword, trigger: 'blur' }
-  ],
+  confirmPassword: [{ required: true, validator: validateConfirmPassword, trigger: 'blur' }],
   nickname: [
     { required: true, message: '请输入昵称', trigger: 'blur' },
     { max: 20, message: '昵称不能超过 20 个字符', trigger: 'blur' }
   ],
-  email: [
-    { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
-  ]
+  email: [{ type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }]
 }
 
 // ========== 注册 ==========
@@ -67,7 +63,7 @@ async function handleRegister() {
   try {
     const success = await userStore.register(formState)
     if (success) {
-      const redirect = (route.query.redirect as string) || '/home'
+      const redirect = (route.query['redirect'] as string) || '/home'
       router.push(redirect)
     }
   } finally {
@@ -117,10 +113,7 @@ async function handleRegister() {
           </a-col>
           <a-col :span="12">
             <a-form-item name="nickname">
-              <a-input
-                v-model:value="formState.nickname"
-                placeholder="昵称（显示名称）"
-              >
+              <a-input v-model:value="formState.nickname" placeholder="昵称（显示名称）">
                 <template #prefix>
                   <IdcardOutlined class="input-icon" />
                 </template>
@@ -130,11 +123,7 @@ async function handleRegister() {
         </a-row>
 
         <a-form-item name="email">
-          <a-input
-            v-model:value="formState.email"
-            placeholder="邮箱（选填）"
-            autocomplete="email"
-          >
+          <a-input v-model:value="formState.email" placeholder="邮箱（选填）" autocomplete="email">
             <template #prefix>
               <MailOutlined class="input-icon" />
             </template>
@@ -142,11 +131,7 @@ async function handleRegister() {
         </a-form-item>
 
         <a-form-item name="role">
-          <a-radio-group
-            v-model:value="formState.role"
-            button-style="solid"
-            class="role-group"
-          >
+          <a-radio-group v-model:value="formState.role" button-style="solid" class="role-group">
             <a-radio-button value="student">
               <UserOutlined />
               我是学生
@@ -183,13 +168,7 @@ async function handleRegister() {
         </a-form-item>
 
         <a-form-item>
-          <a-button
-            type="primary"
-            html-type="submit"
-            :loading="loading"
-            block
-            class="register-btn"
-          >
+          <a-button type="primary" html-type="submit" :loading="loading" block class="register-btn">
             注 册
           </a-button>
         </a-form-item>
@@ -197,9 +176,7 @@ async function handleRegister() {
 
       <div class="register-footer">
         已有账号？
-        <a-button type="link" size="small" @click="router.push('/login')">
-          立即登录
-        </a-button>
+        <a-button type="link" size="small" @click="router.push('/login')"> 立即登录 </a-button>
       </div>
     </div>
   </div>
@@ -233,7 +210,7 @@ export default {
    ============================================================ */
 .register-page {
   min-height: 100vh;
-  background: radial-gradient(ellipse at 50% 30%, #141B2B 0%, #0F1623 50%, #0A0D14 100%);
+  background: radial-gradient(ellipse at 50% 30%, #141b2b 0%, #0f1623 50%, #0a0d14 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -273,28 +250,28 @@ export default {
   justify-content: center;
   width: 40px;
   height: 40px;
-  background: linear-gradient(135deg, #D4A373, #B8860B);
+  background: linear-gradient(135deg, #d4a373, #b8860b);
   border-radius: 12px;
   font-size: 22px;
-  color: #0A0D14;
+  color: #0a0d14;
 }
 
 .logo-text {
   font-size: 18px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   letter-spacing: 1px;
 }
 
 .register-title {
   font-size: 24px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   margin: 0 0 8px;
 }
 
 .register-subtitle {
-  color: #94A3B8;
+  color: #94a3b8;
   font-size: 14px;
   margin: 0;
 }
@@ -307,7 +284,7 @@ export default {
 }
 
 .input-icon {
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .role-group {
@@ -345,7 +322,7 @@ export default {
 .register-footer {
   text-align: center;
   font-size: 13px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-top: 16px;
 }
 </style>

@@ -10,7 +10,7 @@
  *   5. 预警通知(需要关注的学生)
  *   6. 学生详情抽屉(点击行查看)
  */
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { useUserStore } from '@/stores/user'
@@ -21,27 +21,20 @@ import type {
   WeakKpStat,
   MasteryTrendPoint,
   AlertStudent,
-  StudentDetail,
-  MasteryItem,
-  CognitiveLoadProfile,
-  WeakPoint
+  StudentDetail
 } from '@/types'
 import {
   TeamOutlined,
-  RiseOutlined,
   ThunderboltOutlined,
   AimOutlined,
   ReloadOutlined,
-  EyeOutlined,
   WarningOutlined,
   TrophyOutlined,
-  CloseOutlined,
   BarChartOutlined,
   LineChartOutlined,
-  ExperimentOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  UserOutlined,
+  UserOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
@@ -88,11 +81,11 @@ const studentDetail = ref<StudentDetail | null>(null)
 // ECharts
 const chartRefs = {
   loadDist: ref<HTMLDivElement | null>(null),
-  trend: ref<HTMLDivElement | null>(null),
+  trend: ref<HTMLDivElement | null>(null)
 }
 const chartInstances: Record<string, echarts.ECharts | null> = {
   loadDist: null,
-  trend: null,
+  trend: null
 }
 const resizeObservers: ResizeObserver[] = []
 
@@ -120,9 +113,12 @@ const studentColumns = [
     sorter: true,
     customRender: ({ text }: { text: number }) => {
       const pct = Math.round(text * 100)
-      const color = pct >= 80 ? '#52C41A' : pct >= 60 ? '#4F7CFF' : pct >= 40 ? '#FA8C16' : '#FF4D4F'
+      const color =
+        pct >= 80 ? '#52C41A' : pct >= 60 ? '#4F7CFF' : pct >= 40 ? '#FA8C16' : '#FF4D4F'
       return h('div', { class: 'mastery-cell' }, [
-        h('div', { class: 'mastery-bar-bg' },
+        h(
+          'div',
+          { class: 'mastery-bar-bg' },
           h('div', { class: 'mastery-bar-fill', style: { width: pct + '%', background: color } })
         ),
         h('span', { class: 'mastery-pct', style: { color } }, pct + '%')
@@ -139,7 +135,14 @@ const studentColumns = [
       const pct = Math.round(text * 100)
       const color = pct > 70 ? '#FF4D4F' : pct > 50 ? '#FA8C16' : '#52C41A'
       const label = pct > 70 ? '偏高' : pct > 50 ? '适中' : '良好'
-      return h('span', { class: 'load-tag', style: { color, background: color + '15', borderColor: color + '30' } }, label)
+      return h(
+        'span',
+        {
+          class: 'load-tag',
+          style: { color, background: color + '15', borderColor: color + '30' }
+        },
+        label
+      )
     }
   },
   {
@@ -151,8 +154,11 @@ const studentColumns = [
     customRender: ({ text }: { text: number }) =>
       h('div', { class: 'completion-cell' }, [
         h('a-progress', {
-          percent: text, size: 'small', strokeColor: text >= 80 ? '#52C41A' : '#4F7CFF',
-          'show-info': false, style: { width: '70px' }
+          percent: text,
+          size: 'small',
+          strokeColor: text >= 80 ? '#52C41A' : '#4F7CFF',
+          'show-info': false,
+          style: { width: '70px' }
         }),
         h('span', { class: 'completion-pct' }, Math.round(text) + '%')
       ])
@@ -162,7 +168,7 @@ const studentColumns = [
     dataIndex: 'lastActiveDate',
     key: 'lastActiveDate',
     width: 110,
-    sorter: true,
+    sorter: true
   },
   {
     title: '操作',
@@ -178,20 +184,14 @@ const studentColumns = [
 //   Computed
 // ============================================================
 const loadDistData = computed(() => {
-  return students.value.map(s => ({
+  return students.value.map((s) => ({
     name: s.nickname || s.name,
     value: Math.round(s.cognitiveLoad * 100),
     color: s.cognitiveLoad > 0.7 ? '#FF4D4F' : s.cognitiveLoad > 0.5 ? '#FA8C16' : '#4F7CFF'
   }))
 })
 
-const highLoadStudents = computed(() =>
-  students.value.filter(s => s.cognitiveLoad > 0.7)
-)
-
-const lowMasteryStudents = computed(() =>
-  students.value.filter(s => s.avgMastery < 0.6)
-)
+const highLoadStudents = computed(() => students.value.filter((s) => s.cognitiveLoad > 0.7))
 
 const alertCount = computed(() => alerts.value.length)
 const weakKpsTop5 = computed(() => weakKps.value.slice(0, 5))
@@ -211,7 +211,7 @@ async function loadAllData() {
     loadStudents(),
     loadWeakKps(),
     loadMasteryTrend(),
-    loadAlerts(),
+    loadAlerts()
   ])
   loading.value = false
   await nextTick()
@@ -229,7 +229,10 @@ async function loadOverview() {
 async function loadStudents() {
   tableLoading.value = true
   try {
-    students.value = await teacherApi.getStudents({ sortBy: studentsSortField.value, order: studentsSortOrder.value })
+    students.value = await teacherApi.getStudents({
+      sortBy: studentsSortField.value,
+      order: studentsSortOrder.value
+    })
   } catch {
     students.value = getFallbackStudents()
   }
@@ -321,7 +324,7 @@ function initLoadDistChart() {
     grid: { top: 20, right: 20, bottom: 50, left: 50 },
     xAxis: {
       type: 'category',
-      data: dataItems.map(d => d.name),
+      data: dataItems.map((d) => d.name),
       axisLabel: { rotate: 30, fontSize: 11, color: '#8c8c8c' },
       axisTick: { alignWithLabel: true }
     },
@@ -333,36 +336,38 @@ function initLoadDistChart() {
       axisLabel: { fontSize: 11, color: '#8c8c8c' },
       splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
     },
-    series: [{
-      type: 'bar',
-      data: dataItems.map((d) => ({
-        value: d.value,
-        itemStyle: {
-          color: d.color,
-          borderRadius: [6, 6, 0, 0],
-          shadowBlur: 4,
-          shadowColor: d.color + '40',
-          shadowOffsetY: 2
-        }
-      })),
-      barWidth: Math.max(20, Math.min(36, 280 / dataItems.length)),
-      emphasis: {
-        itemStyle: { shadowBlur: 12, shadowOffsetY: 4 }
-      },
-      markLine: {
-        silent: true,
-        symbol: 'none',
-        lineStyle: { color: '#FF4D4F', type: 'dashed', width: 2 },
-        label: {
-          formatter: '警戒线 70%',
-          position: 'end',
-          fontSize: 11,
-          color: '#FF4D4F',
-          fontWeight: 600
+    series: [
+      {
+        type: 'bar',
+        data: dataItems.map((d) => ({
+          value: d.value,
+          itemStyle: {
+            color: d.color,
+            borderRadius: [6, 6, 0, 0],
+            shadowBlur: 4,
+            shadowColor: d.color + '40',
+            shadowOffsetY: 2
+          }
+        })),
+        barWidth: Math.max(20, Math.min(36, 280 / dataItems.length)),
+        emphasis: {
+          itemStyle: { shadowBlur: 12, shadowOffsetY: 4 }
         },
-        data: [{ yAxis: 70 }]
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: '#FF4D4F', type: 'dashed', width: 2 },
+          label: {
+            formatter: '警戒线 70%',
+            position: 'end',
+            fontSize: 11,
+            color: '#FF4D4F',
+            fontWeight: 600
+          },
+          data: [{ yAxis: 70 }]
+        }
       }
-    }]
+    ]
   })
 
   bindResize(chart, el)
@@ -379,9 +384,9 @@ function initTrendChart() {
   const chart = echarts.init(el)
   chartInstances['trend'] = chart
 
-  const dates = masteryTrend.value.map(d => d.date.slice(5))
-  const values = masteryTrend.value.map(d => Math.round(d.avgMastery * 100))
-  const counts = masteryTrend.value.map(d => d.diagnosisCount)
+  const dates = masteryTrend.value.map((d) => d.date.slice(5))
+  const values = masteryTrend.value.map((d) => Math.round(d.avgMastery * 100))
+  const counts = masteryTrend.value.map((d) => d.diagnosisCount)
 
   chart.setOption({
     tooltip: {
@@ -398,7 +403,11 @@ function initTrendChart() {
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { fontSize: 10, color: '#8c8c8c', interval: Math.max(0, Math.floor(dates.length / 8) - 1) },
+      axisLabel: {
+        fontSize: 10,
+        color: '#8c8c8c',
+        interval: Math.max(0, Math.floor(dates.length / 8) - 1)
+      },
       axisLine: { lineStyle: { color: '#e8e8e8' } }
     },
     yAxis: {
@@ -409,37 +418,39 @@ function initTrendChart() {
       axisLabel: { fontSize: 11, color: '#8c8c8c' },
       splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
     },
-    series: [{
-      type: 'line',
-      data: values,
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 4,
-      lineStyle: { color: '#4F7CFF', width: 3 },
-      itemStyle: {
-        color: '#4F7CFF',
-        borderColor: '#fff',
-        borderWidth: 2
-      },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: 'rgba(79,124,255,0.20)' },
-          { offset: 1, color: 'rgba(79,124,255,0.02)' }
-        ])
-      },
-      markLine: {
-        silent: true,
-        symbol: 'none',
-        lineStyle: { color: '#FFD700', type: 'dashed', width: 2 },
-        label: {
-          formatter: '目标 80%',
-          fontSize: 11,
-          color: '#D4A017',
-          fontWeight: 600
+    series: [
+      {
+        type: 'line',
+        data: values,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { color: '#4F7CFF', width: 3 },
+        itemStyle: {
+          color: '#4F7CFF',
+          borderColor: '#fff',
+          borderWidth: 2
         },
-        data: [{ yAxis: 80 }]
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(79,124,255,0.20)' },
+            { offset: 1, color: 'rgba(79,124,255,0.02)' }
+          ])
+        },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: '#FFD700', type: 'dashed', width: 2 },
+          label: {
+            formatter: '目标 80%',
+            fontSize: 11,
+            color: '#D4A017',
+            fontWeight: 600
+          },
+          data: [{ yAxis: 80 }]
+        }
       }
-    }]
+    ]
   })
 
   bindResize(chart, el)
@@ -459,8 +470,8 @@ function bindResize(chart: echarts.ECharts, el: HTMLElement) {
 }
 
 function disposeAllCharts() {
-  Object.values(chartInstances).forEach(c => c?.dispose())
-  resizeObservers.forEach(o => o.disconnect())
+  Object.values(chartInstances).forEach((c) => c?.dispose())
+  resizeObservers.forEach((o) => o.disconnect())
   resizeObservers.length = 0
 }
 
@@ -475,7 +486,9 @@ async function refresh() {
 // ============================================================
 //   格式化
 // ============================================================
-function formatPct(v: number): string { return Math.round(v * 100) + '%' }
+function formatPct(v: number): string {
+  return Math.round(v * 100) + '%'
+}
 function formatLoadLabel(v: number): string {
   const p = Math.round(v * 100)
   if (p > 70) return '偏高⚠'
@@ -513,7 +526,7 @@ function getFallbackStudents(): StudentSummary[] {
     { name: 'huangshan', nickname: '黄山' },
     { name: 'linhai', nickname: '林海' },
     { name: 'maxue', nickname: '马雪' },
-    { name: 'yanglei', nickname: '杨磊' },
+    { name: 'yanglei', nickname: '杨磊' }
   ]
   return names.map((n, i) => ({
     id: String(i + 1),
@@ -527,7 +540,7 @@ function getFallbackStudents(): StudentSummary[] {
     totalTasks: 36,
     weakPointCount: Math.floor(1 + Math.random() * 6),
     subject: '数学',
-    overallScore: Math.floor(30 + Math.random() * 65),
+    overallScore: Math.floor(30 + Math.random() * 65)
   }))
 }
 
@@ -537,7 +550,7 @@ function getFallbackWeakKps(): WeakKpStat[] {
     { knowledgePoint: '神经网络基础', studentCount: 15, avgMastery: 0.42 },
     { knowledgePoint: '损失函数设计', studentCount: 14, avgMastery: 0.35 },
     { knowledgePoint: '反向传播原理', studentCount: 12, avgMastery: 0.45 },
-    { knowledgePoint: '激活函数选择', studentCount: 10, avgMastery: 0.48 },
+    { knowledgePoint: '激活函数选择', studentCount: 10, avgMastery: 0.48 }
   ]
 }
 
@@ -560,12 +573,60 @@ function getFallbackTrend(): MasteryTrendPoint[] {
 
 function getFallbackAlerts(): AlertStudent[] {
   return [
-    { studentId: '1', name: 'zhangsan', nickname: '张三', avgMastery: 0.32, cognitiveLoad: 0.82, reason: 'both', severity: 'danger' },
-    { studentId: '3', name: 'wangwu', nickname: '王五', avgMastery: 0.41, cognitiveLoad: 0.76, reason: 'both', severity: 'danger' },
-    { studentId: '9', name: 'qianyue', nickname: '钱月', avgMastery: 0.55, cognitiveLoad: 0.79, reason: 'highLoad', severity: 'warning' },
-    { studentId: '12', name: 'huangshan', nickname: '黄山', avgMastery: 0.28, cognitiveLoad: 0.45, reason: 'lowMastery', severity: 'warning' },
-    { studentId: '4', name: 'zhaoliu', nickname: '赵六', avgMastery: 0.36, cognitiveLoad: 0.71, reason: 'both', severity: 'danger' },
-    { studentId: '14', name: 'maxue', nickname: '马雪', avgMastery: 0.35, cognitiveLoad: 0.68, reason: 'lowMastery', severity: 'warning' },
+    {
+      studentId: '1',
+      name: 'zhangsan',
+      nickname: '张三',
+      avgMastery: 0.32,
+      cognitiveLoad: 0.82,
+      reason: 'both',
+      severity: 'danger'
+    },
+    {
+      studentId: '3',
+      name: 'wangwu',
+      nickname: '王五',
+      avgMastery: 0.41,
+      cognitiveLoad: 0.76,
+      reason: 'both',
+      severity: 'danger'
+    },
+    {
+      studentId: '9',
+      name: 'qianyue',
+      nickname: '钱月',
+      avgMastery: 0.55,
+      cognitiveLoad: 0.79,
+      reason: 'highLoad',
+      severity: 'warning'
+    },
+    {
+      studentId: '12',
+      name: 'huangshan',
+      nickname: '黄山',
+      avgMastery: 0.28,
+      cognitiveLoad: 0.45,
+      reason: 'lowMastery',
+      severity: 'warning'
+    },
+    {
+      studentId: '4',
+      name: 'zhaoliu',
+      nickname: '赵六',
+      avgMastery: 0.36,
+      cognitiveLoad: 0.71,
+      reason: 'both',
+      severity: 'danger'
+    },
+    {
+      studentId: '14',
+      name: 'maxue',
+      nickname: '马雪',
+      avgMastery: 0.35,
+      cognitiveLoad: 0.68,
+      reason: 'lowMastery',
+      severity: 'warning'
+    }
   ]
 }
 
@@ -580,7 +641,7 @@ function getFallbackStudentDetail(student: StudentSummary): StudentDetail {
       { knowledgePoint: '损失函数设计', mastery: 0.62, level: 'developing', confidence: 0.81 },
       { knowledgePoint: '反向传播原理', mastery: 0.55, level: 'developing', confidence: 0.75 },
       { knowledgePoint: '激活函数选择', mastery: 0.78, level: 'proficient', confidence: 0.88 },
-      { knowledgePoint: '优化器对比', mastery: 0.85, level: 'excellent', confidence: 0.92 },
+      { knowledgePoint: '优化器对比', mastery: 0.85, level: 'excellent', confidence: 0.92 }
     ],
     cognitiveLoad: {
       memoryLoad: 0.62 + Math.random() * 0.2,
@@ -589,9 +650,24 @@ function getFallbackStudentDetail(student: StudentSummary): StudentDetail {
       overall: student.cognitiveLoad
     },
     weakPoints: [
-      { knowledgePoint: '梯度下降算法', reason: '对学习率调整机制理解不足', severity: 'severe', suggestedRemediation: '建议通过可视化工具直观理解梯度下降过程' },
-      { knowledgePoint: '神经网络基础', reason: '对层间连接和权重概念模糊', severity: 'moderate', suggestedRemediation: '推荐观看3Blue1Brown神经网络系列视频' },
-      { knowledgePoint: '损失函数设计', reason: '未能区分不同损失函数的适用场景', severity: 'mild', suggestedRemediation: '练习题：为不同任务选择合适的损失函数' },
+      {
+        knowledgePoint: '梯度下降算法',
+        reason: '对学习率调整机制理解不足',
+        severity: 'severe',
+        suggestedRemediation: '建议通过可视化工具直观理解梯度下降过程'
+      },
+      {
+        knowledgePoint: '神经网络基础',
+        reason: '对层间连接和权重概念模糊',
+        severity: 'moderate',
+        suggestedRemediation: '推荐观看3Blue1Brown神经网络系列视频'
+      },
+      {
+        knowledgePoint: '损失函数设计',
+        reason: '未能区分不同损失函数的适用场景',
+        severity: 'mild',
+        suggestedRemediation: '练习题：为不同任务选择合适的损失函数'
+      }
     ]
   }
 }
@@ -607,13 +683,13 @@ function getRandomDate(daysBack: number): string {
 const loadColorMap: Record<string, string> = {
   memoryLoad: '#FA8C16',
   attentionLoad: '#722ED1',
-  processingLoad: '#52C41A',
+  processingLoad: '#52C41A'
 }
 
 const loadLabelMap: Record<string, string> = {
   memoryLoad: '记忆负荷',
   attentionLoad: '注意力负荷',
-  processingLoad: '加工负荷',
+  processingLoad: '加工负荷'
 }
 
 // ============================================================
@@ -678,8 +754,19 @@ onUnmounted(() => {
           <span class="stat-label">平均掌握度</span>
           <span class="stat-value">{{ formatPct(overview.avgMastery) }}</span>
           <span class="stat-sub">
-            <a-tag :color="overview.avgMastery >= 0.7 ? 'green' : overview.avgMastery >= 0.5 ? 'blue' : 'orange'" size="small">
-              {{ overview.avgMastery >= 0.7 ? '良好' : overview.avgMastery >= 0.5 ? '中等' : '需提升' }}
+            <a-tag
+              :color="
+                overview.avgMastery >= 0.7
+                  ? 'green'
+                  : overview.avgMastery >= 0.5
+                    ? 'blue'
+                    : 'orange'
+              "
+              size="small"
+            >
+              {{
+                overview.avgMastery >= 0.7 ? '良好' : overview.avgMastery >= 0.5 ? '中等' : '需提升'
+              }}
             </a-tag>
           </span>
         </div>
@@ -690,7 +777,16 @@ onUnmounted(() => {
           <span class="stat-label">平均认知负荷</span>
           <span class="stat-value">{{ formatPct(overview.avgCognitiveLoad) }}</span>
           <span class="stat-sub">
-            <a-tag :color="overview.avgCognitiveLoad > 0.7 ? 'red' : overview.avgCognitiveLoad > 0.5 ? 'orange' : 'green'" size="small">
+            <a-tag
+              :color="
+                overview.avgCognitiveLoad > 0.7
+                  ? 'red'
+                  : overview.avgCognitiveLoad > 0.5
+                    ? 'orange'
+                    : 'green'
+              "
+              size="small"
+            >
               {{ formatLoadLabel(overview.avgCognitiveLoad) }}
             </a-tag>
             <span class="load-detail">高负荷 {{ overview.highLoadCount }}人</span>
@@ -715,7 +811,7 @@ onUnmounted(() => {
       <div class="glass-card student-table-card">
         <div class="card-header">
           <h3 class="card-title">
-            <UserOutlined style="margin-right:6px;color:#4F7CFF" />
+            <UserOutlined style="margin-right: 6px; color: #4f7cff" />
             学生列表
           </h3>
           <span class="card-count">共 {{ students.length }} 人</span>
@@ -724,11 +820,21 @@ onUnmounted(() => {
           :dataSource="students"
           :columns="studentColumns"
           :loading="tableLoading"
-          :pagination="{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['8','10','15','20'], showTotal: (total:number) => `共 ${total} 人` }"
+          :pagination="{
+            pageSize: 10,
+            showSizeChanger: true,
+            pageSizeOptions: ['8', '10', '15', '20'],
+            showTotal: (total: number) => `共 ${total} 人`
+          }"
           :scroll="{ x: 700 }"
           rowKey="id"
           size="middle"
-          :customRow="(record: StudentSummary) => ({ style: { cursor: 'pointer' }, onClick: () => openStudentDetail(record) })"
+          :customRow="
+            (record: StudentSummary) => ({
+              style: { cursor: 'pointer' },
+              onClick: () => openStudentDetail(record)
+            })
+          "
           @change="handleTableChange"
           class="student-table"
         />
@@ -738,7 +844,7 @@ onUnmounted(() => {
       <div class="glass-card chart-card">
         <div class="card-header">
           <h3 class="card-title">
-            <BarChartOutlined style="margin-right:6px;color:#FA8C16" />
+            <BarChartOutlined style="margin-right: 6px; color: #fa8c16" />
             认知负荷分布
           </h3>
           <a-tag v-if="highLoadStudents.length > 0" color="red" size="small">
@@ -757,17 +863,13 @@ onUnmounted(() => {
       <div class="glass-card">
         <div class="card-header">
           <h3 class="card-title">
-            <WarningOutlined style="margin-right:6px;color:#FF4D4F" />
+            <WarningOutlined style="margin-right: 6px; color: #ff4d4f" />
             共性薄弱知识点
           </h3>
           <span class="card-count">Top 5</span>
         </div>
         <div class="weak-kp-list">
-          <div
-            v-for="(item, idx) in weakKpsTop5"
-            :key="item.knowledgePoint"
-            class="weak-kp-item"
-          >
+          <div v-for="(item, idx) in weakKpsTop5" :key="item.knowledgePoint" class="weak-kp-item">
             <div class="weak-kp-rank" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</div>
             <div class="weak-kp-info">
               <span class="weak-kp-name">{{ item.knowledgePoint }}</span>
@@ -777,13 +879,20 @@ onUnmounted(() => {
               <div class="weak-kp-bar-bg">
                 <div
                   class="weak-kp-bar-fill"
-                  :style="{ width: Math.round(item.avgMastery * 100) + '%', background: item.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16' }"
+                  :style="{
+                    width: Math.round(item.avgMastery * 100) + '%',
+                    background: item.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16'
+                  }"
                 ></div>
               </div>
               <span class="weak-kp-pct">{{ formatPct(item.avgMastery) }}</span>
             </div>
           </div>
-          <a-empty v-if="weakKpsTop5.length === 0" description="暂无薄弱知识点数据" :imageStyle="{ height: '48px' }" />
+          <a-empty
+            v-if="weakKpsTop5.length === 0"
+            description="暂无薄弱知识点数据"
+            :imageStyle="{ height: '48px' }"
+          />
         </div>
       </div>
 
@@ -791,7 +900,7 @@ onUnmounted(() => {
       <div class="glass-card chart-card">
         <div class="card-header">
           <h3 class="card-title">
-            <LineChartOutlined style="margin-right:6px;color:#52C41A" />
+            <LineChartOutlined style="margin-right: 6px; color: #52c41a" />
             全班掌握度趋势
           </h3>
           <span class="card-count">近30天</span>
@@ -806,61 +915,77 @@ onUnmounted(() => {
     <section class="glass-card alerts-section">
       <div class="card-header">
         <h3 class="card-title">
-          <ExclamationCircleOutlined style="margin-right:6px;color:#FF4D4F" />
+          <ExclamationCircleOutlined style="margin-right: 6px; color: #ff4d4f" />
           预警通知
         </h3>
         <a-badge :count="alertCount" :number-style="{ backgroundColor: '#FF4D4F' }" />
       </div>
       <div v-if="alerts.length > 0" class="alerts-grid">
-        <div
-          v-for="alert in alerts"
-          :key="alert.studentId"
-          class="alert-card"
-          :class="'alert-' + alert.severity"
-          @click="openStudentDetail(students.find(s => s.id === alert.studentId)!)"
-          v-if="students.find(s => s.id === alert.studentId)"
-        >
-          <div class="alert-header">
-            <div class="alert-student">
-              <span class="alert-avatar">
-                {{ (students.find(s => s.id === alert.studentId)?.nickname || alert.name).charAt(0) }}
-              </span>
-              <span class="alert-name">{{ students.find(s => s.id === alert.studentId)?.nickname || alert.name }}</span>
+        <template v-for="alert in alerts" :key="alert.studentId">
+          <div
+            v-if="students.find((s) => s.id === alert.studentId)"
+            class="alert-card"
+            :class="'alert-' + alert.severity"
+            @click="openStudentDetail(students.find((s) => s.id === alert.studentId)!)"
+          >
+            <div class="alert-header">
+              <div class="alert-student">
+                <span class="alert-avatar">
+                  {{
+                    (students.find((s) => s.id === alert.studentId)?.nickname || alert.name).charAt(
+                      0
+                    )
+                  }}
+                </span>
+                <span class="alert-name">{{
+                  students.find((s) => s.id === alert.studentId)?.nickname || alert.name
+                }}</span>
+              </div>
+              <a-tag :color="alert.severity === 'danger' ? 'red' : 'orange'" size="small">
+                {{
+                  alert.reason === 'both'
+                    ? '重点关注'
+                    : alert.reason === 'highLoad'
+                      ? '高负荷'
+                      : '低掌握度'
+                }}
+              </a-tag>
             </div>
-            <a-tag :color="alert.severity === 'danger' ? 'red' : 'orange'" size="small">
-              {{ alert.reason === 'both' ? '重点关注' : alert.reason === 'highLoad' ? '高负荷' : '低掌握度' }}
-            </a-tag>
-          </div>
-          <div class="alert-metrics">
-            <div class="alert-metric">
-              <span class="metric-label">掌握度</span>
-              <span class="metric-value" :style="{ color: alert.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16' }">
-                {{ formatPct(alert.avgMastery) }}
-              </span>
+            <div class="alert-metrics">
+              <div class="alert-metric">
+                <span class="metric-label">掌握度</span>
+                <span
+                  class="metric-value"
+                  :style="{ color: alert.avgMastery < 0.4 ? '#FF4D4F' : '#FA8C16' }"
+                >
+                  {{ formatPct(alert.avgMastery) }}
+                </span>
+              </div>
+              <div class="alert-metric">
+                <span class="metric-label">认知负荷</span>
+                <span
+                  class="metric-value"
+                  :style="{ color: alert.cognitiveLoad > 0.7 ? '#FF4D4F' : '#FA8C16' }"
+                >
+                  {{ formatPct(alert.cognitiveLoad) }}
+                </span>
+              </div>
             </div>
-            <div class="alert-metric">
-              <span class="metric-label">认知负荷</span>
-              <span class="metric-value" :style="{ color: alert.cognitiveLoad > 0.7 ? '#FF4D4F' : '#FA8C16' }">
-                {{ formatPct(alert.cognitiveLoad) }}
-              </span>
+            <div class="alert-reason">
+              <template v-if="alert.reason === 'both'">
+                ⚠ 认知负荷偏高且掌握度不足，建议重点关注
+              </template>
+              <template v-else-if="alert.reason === 'highLoad'">
+                🔴 认知负荷持续偏高，可能超出承受范围
+              </template>
+              <template v-else> 📉 知识点掌握度低于班级平均水平 </template>
             </div>
           </div>
-          <div class="alert-reason">
-            <template v-if="alert.reason === 'both'">
-              ⚠ 认知负荷偏高且掌握度不足，建议重点关注
-            </template>
-            <template v-else-if="alert.reason === 'highLoad'">
-              🔴 认知负荷持续偏高，可能超出承受范围
-            </template>
-            <template v-else>
-              📉 知识点掌握度低于班级平均水平
-            </template>
-          </div>
-        </div>
+        </template>
       </div>
       <a-empty v-else description="暂无预警，全班学情状态良好" :imageStyle="{ height: '48px' }">
         <template #children>
-          <CheckCircleOutlined style="color:#52C41A;font-size:32px;margin-bottom:8px" />
+          <CheckCircleOutlined style="color: #52c41a; font-size: 32px; margin-bottom: 8px" />
         </template>
       </a-empty>
     </section>
@@ -883,7 +1008,9 @@ onUnmounted(() => {
             {{ selectedStudent?.nickname?.charAt(0) || '?' }}
           </span>
           <div>
-            <span class="drawer-header-name">{{ selectedStudent?.nickname || selectedStudent?.name || '—' }}</span>
+            <span class="drawer-header-name">{{
+              selectedStudent?.nickname || selectedStudent?.name || '—'
+            }}</span>
             <span class="drawer-header-sub">学情详情</span>
           </div>
         </div>
@@ -891,14 +1018,23 @@ onUnmounted(() => {
 
       <a-spin :spinning="detailLoading" v-if="studentDetail">
         <div class="drawer-body">
-
           <!-- 基本信息 -->
           <div class="drawer-section">
             <h4 class="drawer-section-title">基本信息</h4>
             <div class="detail-summary-cards">
               <div class="detail-card">
                 <span class="dc-label">综合评分</span>
-                <span class="dc-value" :style="{ color: studentDetail.overallScore >= 80 ? '#52C41A' : studentDetail.overallScore >= 60 ? '#4F7CFF' : '#FF4D4F' }">
+                <span
+                  class="dc-value"
+                  :style="{
+                    color:
+                      studentDetail.overallScore >= 80
+                        ? '#52C41A'
+                        : studentDetail.overallScore >= 60
+                          ? '#4F7CFF'
+                          : '#FF4D4F'
+                  }"
+                >
                   {{ studentDetail.overallScore }}/100
                 </span>
               </div>
@@ -925,15 +1061,39 @@ onUnmounted(() => {
                 <div class="dm-header">
                   <span class="dm-name">{{ item.knowledgePoint }}</span>
                   <a-tag
-                    :color="item.level === 'excellent' ? 'green' : item.level === 'proficient' ? 'blue' : item.level === 'developing' ? 'orange' : 'red'"
+                    :color="
+                      item.level === 'excellent'
+                        ? 'green'
+                        : item.level === 'proficient'
+                          ? 'blue'
+                          : item.level === 'developing'
+                            ? 'orange'
+                            : 'red'
+                    "
                     size="small"
                   >
-                    {{ item.level === 'excellent' ? '优秀' : item.level === 'proficient' ? '熟练' : item.level === 'developing' ? '发展中' : '薄弱' }}
+                    {{
+                      item.level === 'excellent'
+                        ? '优秀'
+                        : item.level === 'proficient'
+                          ? '熟练'
+                          : item.level === 'developing'
+                            ? '发展中'
+                            : '薄弱'
+                    }}
                   </a-tag>
                 </div>
                 <a-progress
                   :percent="Math.round(item.mastery * 100)"
-                  :strokeColor="item.mastery >= 0.8 ? '#52C41A' : item.mastery >= 0.6 ? '#4F7CFF' : item.mastery >= 0.4 ? '#FA8C16' : '#FF4D4F'"
+                  :strokeColor="
+                    item.mastery >= 0.8
+                      ? '#52C41A'
+                      : item.mastery >= 0.6
+                        ? '#4F7CFF'
+                        : item.mastery >= 0.4
+                          ? '#FA8C16'
+                          : '#FF4D4F'
+                  "
                   size="small"
                 />
               </div>
@@ -945,15 +1105,20 @@ onUnmounted(() => {
             <h4 class="drawer-section-title">认知负荷</h4>
             <div class="detail-load-grid">
               <div
-                v-for="(val, key) in (studentDetail.cognitiveLoad as Record<string,number>)"
+                v-for="(val, key) in studentDetail.cognitiveLoad as Record<string, number>"
                 :key="key"
                 v-show="key !== 'overall'"
                 class="detail-load-item"
               >
                 <div class="dl-header">
-                  <span class="dl-dot" :style="{ background: loadColorMap[key] || '#4F7CFF' }"></span>
+                  <span
+                    class="dl-dot"
+                    :style="{ background: loadColorMap[key] || '#4F7CFF' }"
+                  ></span>
                   <span class="dl-name">{{ loadLabelMap[key] || key }}</span>
-                  <a-tag :color="ratingColorFromLoad(val)" size="small">{{ ratingFromLoad(val) }}</a-tag>
+                  <a-tag :color="ratingColorFromLoad(val)" size="small">{{
+                    ratingFromLoad(val)
+                  }}</a-tag>
                 </div>
                 <a-progress
                   :percent="Math.round(val * 100)"
@@ -978,13 +1143,28 @@ onUnmounted(() => {
               >
                 <div class="dw-header">
                   <span class="dw-name">{{ wp.knowledgePoint }}</span>
-                  <a-tag :color="wp.severity === 'severe' ? 'red' : wp.severity === 'moderate' ? 'orange' : 'blue'" size="small">
-                    {{ wp.severity === 'severe' ? '严重' : wp.severity === 'moderate' ? '中等' : '轻度' }}
+                  <a-tag
+                    :color="
+                      wp.severity === 'severe'
+                        ? 'red'
+                        : wp.severity === 'moderate'
+                          ? 'orange'
+                          : 'blue'
+                    "
+                    size="small"
+                  >
+                    {{
+                      wp.severity === 'severe'
+                        ? '严重'
+                        : wp.severity === 'moderate'
+                          ? '中等'
+                          : '轻度'
+                    }}
                   </a-tag>
                 </div>
                 <p class="dw-reason">{{ wp.reason }}</p>
                 <p class="dw-remediation" v-if="wp.suggestedRemediation">
-                  <BulbOutlined style="margin-right:4px" /> {{ wp.suggestedRemediation }}
+                  <BulbOutlined style="margin-right: 4px" /> {{ wp.suggestedRemediation }}
                 </p>
               </div>
             </div>
@@ -1034,14 +1214,14 @@ onUnmounted(() => {
     .header-title {
       font-size: 20px;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #f8fafc;
       margin: 0;
       line-height: 1.2;
     }
 
     .header-subtitle {
       font-size: 13px;
-      color: #94A3B8;
+      color: #94a3b8;
       margin: 2px 0 0;
     }
   }
@@ -1056,8 +1236,12 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 20px;
 
-  @media (max-width: 1024px) { grid-template-columns: repeat(2, 1fr); }
-  @media (max-width: 640px) { grid-template-columns: 1fr; }
+  @media (max-width: 1024px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stat-card {
@@ -1077,10 +1261,22 @@ onUnmounted(() => {
     font-size: clamp(1.25rem, 1.5rem + 0.3vw, 1.75rem);
     flex-shrink: 0;
 
-    &.students-icon { background: rgba(74, 108, 247, 0.15); color: #4A6CF7; }
-    &.mastery-icon { background: rgba(52, 211, 153, 0.15); color: #34D399; }
-    &.load-icon { background: rgba(251, 191, 36, 0.15); color: #FBBF24; }
-    &.completion-icon { background: rgba(167, 139, 250, 0.15); color: #A78BFA; }
+    &.students-icon {
+      background: rgba(74, 108, 247, 0.15);
+      color: #4a6cf7;
+    }
+    &.mastery-icon {
+      background: rgba(52, 211, 153, 0.15);
+      color: #34d399;
+    }
+    &.load-icon {
+      background: rgba(251, 191, 36, 0.15);
+      color: #fbbf24;
+    }
+    &.completion-icon {
+      background: rgba(167, 139, 250, 0.15);
+      color: #a78bfa;
+    }
   }
 
   .stat-body {
@@ -1090,27 +1286,29 @@ onUnmounted(() => {
 
     .stat-label {
       font-size: @font-size-xs;
-      color: #94A3B8;
+      color: #94a3b8;
     }
 
     .stat-value {
       font-size: clamp(1.375rem, 1.625rem + 0.5vw, 1.875rem);
       font-weight: 700;
-      color: #F8FAFC;
+      color: #f8fafc;
       line-height: 1.2;
     }
 
     .stat-sub {
       font-size: @font-size-xs;
-      color: #94A3B8;
+      color: #94a3b8;
       display: flex;
       align-items: center;
       gap: 0.5rem;
 
       .load-detail {
         font-size: 0.6875rem;
-        color: #FF4D4F;
-        &::before { content: '· '; }
+        color: #ff4d4f;
+        &::before {
+          content: '· ';
+        }
       }
     }
   }
@@ -1125,7 +1323,9 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 20px;
 
-  @media (max-width: 1024px) { grid-template-columns: 1fr; }
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 // ================================================================
@@ -1149,7 +1349,7 @@ onUnmounted(() => {
   .card-title {
     font-size: clamp(0.875rem, 0.9375rem + 0.2vw, 1.0625rem);
     font-weight: 600;
-    color: #F8FAFC;
+    color: #f8fafc;
     margin: 0;
     display: flex;
     align-items: center;
@@ -1157,7 +1357,7 @@ onUnmounted(() => {
 
   .card-count {
     font-size: @font-size-xs;
-    color: #94A3B8;
+    color: #94a3b8;
   }
 }
 
@@ -1176,7 +1376,7 @@ onUnmounted(() => {
       background: rgba(255, 255, 255, 0.04);
       font-weight: 600;
       font-size: 12px;
-      color: #94A3B8;
+      color: #94a3b8;
       padding: 10px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
@@ -1184,7 +1384,7 @@ onUnmounted(() => {
     .ant-table-tbody > tr > td {
       padding: 10px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      color: #E2E8F0;
+      color: #e2e8f0;
     }
 
     .ant-table-tbody > tr:hover > td {
@@ -1198,13 +1398,13 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-weight: 500;
-  color: #F8FAFC;
+  color: #f8fafc;
 
   .student-avatar-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #4F7CFF;
+    background: #4f7cff;
     flex-shrink: 0;
   }
 }
@@ -1250,17 +1450,19 @@ onUnmounted(() => {
 
   .completion-pct {
     font-size: 12px;
-    color: #E2E8F0;
+    color: #e2e8f0;
     font-weight: 500;
     min-width: 34px;
   }
 }
 
 .action-link {
-  color: #D4A373;
+  color: #d4a373;
   cursor: pointer;
   font-size: 13px;
-  &:hover { color: #FAEDCD; }
+  &:hover {
+    color: #faedcd;
+  }
 }
 
 // ================================================================
@@ -1302,11 +1504,22 @@ onUnmounted(() => {
     color: #fff;
     flex-shrink: 0;
 
-    &.rank-1 { background: #FF4D4F; }
-    &.rank-2 { background: #FF7A45; }
-    &.rank-3 { background: #FA8C16; }
-    &.rank-4 { background: #FFC53D; }
-    &.rank-5 { background: #FFEC3D; color: #0A0D14; }
+    &.rank-1 {
+      background: #ff4d4f;
+    }
+    &.rank-2 {
+      background: #ff7a45;
+    }
+    &.rank-3 {
+      background: #fa8c16;
+    }
+    &.rank-4 {
+      background: #ffc53d;
+    }
+    &.rank-5 {
+      background: #ffec3d;
+      color: #0a0d14;
+    }
   }
 
   .weak-kp-info {
@@ -1319,13 +1532,13 @@ onUnmounted(() => {
     .weak-kp-name {
       font-size: 13px;
       font-weight: 500;
-      color: #E2E8F0;
+      color: #e2e8f0;
       .ellipsis();
     }
 
     .weak-kp-students {
       font-size: 11px;
-      color: #FF4D4F;
+      color: #ff4d4f;
     }
   }
 
@@ -1353,7 +1566,7 @@ onUnmounted(() => {
     .weak-kp-pct {
       font-size: 12px;
       font-weight: 600;
-      color: #FF4D4F;
+      color: #ff4d4f;
       min-width: 34px;
       text-align: right;
     }
@@ -1383,13 +1596,19 @@ onUnmounted(() => {
   &.alert-danger {
     background: rgba(248, 113, 113, 0.08);
     border-color: rgba(248, 113, 113, 0.25);
-    &:hover { box-shadow: 0 2px 12px rgba(248,113,113,0.15); border-color: #F87171; }
+    &:hover {
+      box-shadow: 0 2px 12px rgba(248, 113, 113, 0.15);
+      border-color: #f87171;
+    }
   }
 
   &.alert-warning {
     background: rgba(251, 191, 36, 0.08);
     border-color: rgba(251, 191, 36, 0.25);
-    &:hover { box-shadow: 0 2px 12px rgba(251,191,36,0.15); border-color: #FBBF24; }
+    &:hover {
+      box-shadow: 0 2px 12px rgba(251, 191, 36, 0.15);
+      border-color: #fbbf24;
+    }
   }
 
   .alert-header {
@@ -1407,7 +1626,7 @@ onUnmounted(() => {
         width: 28px;
         height: 28px;
         border-radius: 50%;
-        background: #4F7CFF;
+        background: #4f7cff;
         color: #fff;
         display: flex;
         align-items: center;
@@ -1419,7 +1638,7 @@ onUnmounted(() => {
       .alert-name {
         font-weight: 500;
         font-size: 14px;
-        color: #F8FAFC;
+        color: #f8fafc;
       }
     }
   }
@@ -1436,7 +1655,7 @@ onUnmounted(() => {
 
       .metric-label {
         font-size: 11px;
-        color: #94A3B8;
+        color: #94a3b8;
       }
 
       .metric-value {
@@ -1448,10 +1667,10 @@ onUnmounted(() => {
 
   .alert-reason {
     font-size: 12px;
-    color: #94A3B8;
+    color: #94a3b8;
     line-height: 1.5;
     padding-top: 8px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
 }
 
@@ -1467,7 +1686,7 @@ onUnmounted(() => {
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #4F7CFF, #722ED1);
+    background: linear-gradient(135deg, #4f7cff, #722ed1);
     color: #fff;
     display: flex;
     align-items: center;
@@ -1480,13 +1699,13 @@ onUnmounted(() => {
     display: block;
     font-size: 16px;
     font-weight: 600;
-    color: #F8FAFC;
+    color: #f8fafc;
   }
 
   .drawer-header-sub {
     display: block;
     font-size: 12px;
-    color: #94A3B8;
+    color: #94a3b8;
   }
 }
 
@@ -1502,12 +1721,14 @@ onUnmounted(() => {
 .drawer-section {
   margin-bottom: 20px;
 
-  &:last-child { margin-bottom: 0; }
+  &:last-child {
+    margin-bottom: 0;
+  }
 
   .drawer-section-title {
     font-size: 14px;
     font-weight: 600;
-    color: #F8FAFC;
+    color: #f8fafc;
     margin: 0 0 10px;
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -1529,7 +1750,7 @@ onUnmounted(() => {
     .dc-label {
       display: block;
       font-size: 11px;
-      color: #94A3B8;
+      color: #94a3b8;
       margin-bottom: 4px;
     }
 
@@ -1537,7 +1758,7 @@ onUnmounted(() => {
       display: block;
       font-size: 18px;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #f8fafc;
     }
   }
 }
@@ -1557,7 +1778,7 @@ onUnmounted(() => {
       .dm-name {
         font-size: 13px;
         font-weight: 500;
-        color: #E2E8F0;
+        color: #e2e8f0;
       }
     }
   }
@@ -1586,7 +1807,7 @@ onUnmounted(() => {
         flex: 1;
         font-size: 13px;
         font-weight: 500;
-        color: #E2E8F0;
+        color: #e2e8f0;
       }
     }
 
@@ -1595,7 +1816,7 @@ onUnmounted(() => {
       text-align: right;
       font-size: 12px;
       font-weight: 600;
-      color: #94A3B8;
+      color: #94a3b8;
       margin-top: 2px;
     }
   }
@@ -1613,15 +1834,15 @@ onUnmounted(() => {
 
     &.severity-severe {
       background: rgba(248, 113, 113, 0.08);
-      border-color: #F87171;
+      border-color: #f87171;
     }
     &.severity-moderate {
       background: rgba(251, 191, 36, 0.08);
-      border-color: #FBBF24;
+      border-color: #fbbf24;
     }
     &.severity-mild {
       background: rgba(74, 108, 247, 0.08);
-      border-color: #4A6CF7;
+      border-color: #4a6cf7;
     }
 
     .dw-header {
@@ -1633,20 +1854,20 @@ onUnmounted(() => {
       .dw-name {
         font-size: 13px;
         font-weight: 500;
-        color: #E2E8F0;
+        color: #e2e8f0;
       }
     }
 
     .dw-reason {
       font-size: 12px;
-      color: #94A3B8;
+      color: #94a3b8;
       margin: 0 0 4px;
       line-height: 1.5;
     }
 
     .dw-remediation {
       font-size: 12px;
-      color: #D4A373;
+      color: #d4a373;
       margin: 0;
       display: flex;
       align-items: flex-start;

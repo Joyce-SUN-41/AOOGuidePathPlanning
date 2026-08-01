@@ -19,7 +19,16 @@ export const userApi = {
   },
 
   /** 用户登出 */
-  logout() {
-    return Promise.resolve()
+  async logout() {
+    try {
+      await request.post('/auth/logout')
+    } catch {
+      // 即使服务端登出失败，也清理本地状态
+    } finally {
+      // 清理本地存储的 token 和用户信息
+      localStorage.removeItem('oat_token')
+      localStorage.removeItem('oat_user')
+      localStorage.removeItem('oat_remember')
+    }
   }
 }

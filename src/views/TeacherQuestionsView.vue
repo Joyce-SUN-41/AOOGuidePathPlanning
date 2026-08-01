@@ -33,7 +33,7 @@ const form = reactive<QuestionForm>({
     { id: 'A', text: '', weight: 1.0 },
     { id: 'B', text: '', weight: 0.0 },
     { id: 'C', text: '', weight: 0.0 },
-    { id: 'D', text: '', weight: 0.0 },
+    { id: 'D', text: '', weight: 0.0 }
   ],
   correct_option_id: 'A',
   expected_time_sec: 30,
@@ -76,11 +76,6 @@ function onPageChange(page: number) {
   loadQuestions()
 }
 
-// 获取知识点名称
-function getKpName(kpId: string): string {
-  return knowledgePoints.value.find(k => k.id === kpId)?.name || kpId.substring(0, 8)
-}
-
 // 难度颜色
 function getDifficultyColor(level: number): string {
   const colors: Record<number, string> = { 1: 'green', 2: 'cyan', 3: 'blue', 4: 'orange', 5: 'red' }
@@ -103,7 +98,7 @@ function openCreate() {
       { id: 'A', text: '', weight: 1.0 },
       { id: 'B', text: '', weight: 0.0 },
       { id: 'C', text: '', weight: 0.0 },
-      { id: 'D', text: '', weight: 0.0 },
+      { id: 'D', text: '', weight: 0.0 }
     ],
     correct_option_id: 'A',
     expected_time_sec: 30,
@@ -124,7 +119,7 @@ function openEdit(q: QuestionItem) {
     difficulty: q.difficulty,
     type: q.type,
     title: q.title,
-    options: q.options.map(o => ({ ...o })),
+    options: q.options.map((o) => ({ ...o })),
     correct_option_id: q.correct_option_id,
     expected_time_sec: q.expected_time_sec,
     explanation: q.explanation || ''
@@ -134,9 +129,18 @@ function openEdit(q: QuestionItem) {
 
 // 提交
 async function handleSubmit() {
-  if (!form.title.trim()) { message.warning('请输入题目标题'); return }
-  if (!form.kp_ids.length) { message.warning('请选择关联知识点'); return }
-  if (form.options.some(o => !o.text.trim())) { message.warning('请填写所有选项文本'); return }
+  if (!form.title.trim()) {
+    message.warning('请输入题目标题')
+    return
+  }
+  if (!form.kp_ids.length) {
+    message.warning('请选择关联知识点')
+    return
+  }
+  if (form.options.some((o) => !o.text.trim())) {
+    message.warning('请填写所有选项文本')
+    return
+  }
 
   try {
     if (isEditing.value) {
@@ -205,7 +209,7 @@ onMounted(() => {
           style="width: 160px"
           allow-clear
           @change="loadQuestions"
-          :options="['人工智能导论'].map(s => ({ value: s, label: s }))"
+          :options="['人工智能导论'].map((s) => ({ value: s, label: s }))"
         />
         <a-select
           v-model:value="filterDifficulty"
@@ -213,7 +217,7 @@ onMounted(() => {
           style="width: 120px"
           allow-clear
           @change="loadQuestions"
-          :options="difficultyLevels.map(d => ({ value: d, label: `Lv${d}` }))"
+          :options="difficultyLevels.map((d) => ({ value: d, label: `Lv${d}` }))"
         />
         <a-select
           v-model:value="filterKpId"
@@ -222,20 +226,27 @@ onMounted(() => {
           allow-clear
           show-search
           @change="loadQuestions"
-          :options="knowledgePoints.map(kp => ({ value: kp.id, label: kp.name }))"
-          :filter-option="(input: string, option: any) => option.label.toLowerCase().includes(input.toLowerCase())"
+          :options="knowledgePoints.map((kp) => ({ value: kp.id, label: kp.name }))"
+          :filter-option="
+            (input: string, option: any) => option.label.toLowerCase().includes(input.toLowerCase())
+          "
         />
         <a-tag color="blue">共 {{ total }} 道题目</a-tag>
       </a-space>
     </div>
 
     <a-spin :spinning="loading">
-
       <!-- ========== 题目列表 ========== -->
       <div class="qb-list">
         <a-table
           :data-source="questions"
-          :pagination="{ current: currentPage, pageSize, total, showSizeChanger: false, onChange: onPageChange }"
+          :pagination="{
+            current: currentPage,
+            pageSize,
+            total,
+            showSizeChanger: false,
+            onChange: onPageChange
+          }"
           row-key="id"
           size="middle"
         >
@@ -252,14 +263,18 @@ onMounted(() => {
           <a-table-column title="关联知识点" :width="200">
             <template #default="{ record }">
               <a-space v-if="record.kp_names?.length" :size="4" wrap>
-                <a-tag v-for="name in record.kp_names" :key="name" color="geekblue" size="small">{{ name }}</a-tag>
+                <a-tag v-for="name in record.kp_names" :key="name" color="geekblue" size="small">{{
+                  name
+                }}</a-tag>
               </a-space>
               <span v-else class="text-muted">—</span>
             </template>
           </a-table-column>
           <a-table-column title="难度" data-index="difficulty" :width="80" align="center">
             <template #default="{ record }">
-              <a-tag :color="getDifficultyColor(record.difficulty)">Lv{{ record.difficulty }}</a-tag>
+              <a-tag :color="getDifficultyColor(record.difficulty)"
+                >Lv{{ record.difficulty }}</a-tag
+              >
             </template>
           </a-table-column>
           <a-table-column title="题型" data-index="type" :width="80" align="center">
@@ -267,7 +282,12 @@ onMounted(() => {
               <span>{{ record.type === 'single' ? '单选' : '多选' }}</span>
             </template>
           </a-table-column>
-          <a-table-column title="正确答案" data-index="correct_option_id" :width="80" align="center">
+          <a-table-column
+            title="正确答案"
+            data-index="correct_option_id"
+            :width="80"
+            align="center"
+          >
             <template #default="{ record }">
               <a-tag color="success">{{ record.correct_option_id }}</a-tag>
             </template>
@@ -287,7 +307,9 @@ onMounted(() => {
             <template #default="{ record }">
               <a-space>
                 <a-button type="link" size="small" @click="openEdit(record)">编辑</a-button>
-                <a-button type="link" danger size="small" @click="handleDelete(record)">删除</a-button>
+                <a-button type="link" danger size="small" @click="handleDelete(record)"
+                  >删除</a-button
+                >
               </a-space>
             </template>
           </a-table-column>
@@ -314,12 +336,20 @@ onMounted(() => {
           </a-col>
           <a-col :span="8">
             <a-form-item label="难度等级" required>
-              <a-select v-model:value="form.difficulty" :options="difficultyLevels.map(d => ({ value: d, label: `Lv${d}` }))" />
+              <a-select
+                v-model:value="form.difficulty"
+                :options="difficultyLevels.map((d) => ({ value: d, label: `Lv${d}` }))"
+              />
             </a-form-item>
           </a-col>
           <a-col :span="8">
             <a-form-item label="预计用时(秒)">
-              <a-input-number v-model:value="form.expected_time_sec" :min="5" :max="600" style="width: 100%" />
+              <a-input-number
+                v-model:value="form.expected_time_sec"
+                :min="5"
+                :max="600"
+                style="width: 100%"
+              />
             </a-form-item>
           </a-col>
         </a-row>
@@ -332,7 +362,13 @@ onMounted(() => {
           </a-col>
           <a-col :span="12">
             <a-form-item label="题型">
-              <a-select v-model:value="form.type" :options="[{ value: 'single', label: '单选题' }, { value: 'multiple', label: '多选题' }]" />
+              <a-select
+                v-model:value="form.type"
+                :options="[
+                  { value: 'single', label: '单选题' },
+                  { value: 'multiple', label: '多选题' }
+                ]"
+              />
             </a-form-item>
           </a-col>
         </a-row>
@@ -343,8 +379,11 @@ onMounted(() => {
             mode="multiple"
             placeholder="选择关联的知识点"
             style="width: 100%"
-            :options="knowledgePoints.map(kp => ({ value: kp.id, label: kp.name }))"
-            :filter-option="(input: string, option: any) => option.label.toLowerCase().includes(input.toLowerCase())"
+            :options="knowledgePoints.map((kp) => ({ value: kp.id, label: kp.name }))"
+            :filter-option="
+              (input: string, option: any) =>
+                option.label.toLowerCase().includes(input.toLowerCase())
+            "
           />
         </a-form-item>
 
@@ -354,15 +393,23 @@ onMounted(() => {
 
         <a-form-item label="选项列表" required>
           <div class="options-editor">
-            <div v-for="(opt, idx) in form.options" :key="opt.id" class="option-row">
-              <a-tag :color="opt.id === form.correct_option_id ? 'success' : 'default'" class="option-id">
+            <div v-for="opt in form.options" :key="opt.id" class="option-row">
+              <a-tag
+                :color="opt.id === form.correct_option_id ? 'success' : 'default'"
+                class="option-id"
+              >
                 {{ opt.id }}
               </a-tag>
-              <a-input v-model:value="opt.text" :placeholder="`选项 ${opt.id} 内容`" style="flex: 1" />
+              <a-input
+                v-model:value="opt.text"
+                :placeholder="`选项 ${opt.id} 内容`"
+                style="flex: 1"
+              />
               <a-radio
                 :checked="opt.id === form.correct_option_id"
                 @change="form.correct_option_id = opt.id"
-              >正确答案</a-radio>
+                >正确答案</a-radio
+              >
             </div>
           </div>
         </a-form-item>
@@ -395,8 +442,17 @@ export default {
   align-items: flex-start;
   margin-bottom: 20px;
 }
-.page-title { font-size: 22px; font-weight: 700; color: #F8FAFC; margin: 0; }
-.page-subtitle { color: #94A3B8; font-size: 13px; margin: 4px 0 0; }
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0;
+}
+.page-subtitle {
+  color: #94a3b8;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
 
 .filter-bar {
   margin-bottom: 16px;
@@ -413,9 +469,17 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
-.qb-title { font-weight: 500; }
-.text-muted { color: #94A3B8; font-size: 12px; }
-.text-secondary { color: #94A3B8; font-size: 12px; }
+.qb-title {
+  font-weight: 500;
+}
+.text-muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.text-secondary {
+  color: #94a3b8;
+  font-size: 12px;
+}
 
 /* ========== 选项编辑器 ========== */
 .options-editor {
@@ -434,5 +498,7 @@ export default {
   font-weight: 600;
 }
 
-.qb-form { margin-top: 8px; }
+.qb-form {
+  margin-top: 8px;
+}
 </style>

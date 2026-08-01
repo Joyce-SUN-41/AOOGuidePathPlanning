@@ -1,6 +1,6 @@
 """AOO 路径优化 API — 触发优化 & 轮询状态
 
-POST /api/v1/aoo/optimize        — 提交优化任务 (异步 Celery 执行)
+POST /api/v1/aoo/optimize        — 提交优化任务 (异步 Celery + 同步兜底)
 GET  /api/v1/aoo/status/{task_id} — 轮询任务进度/结果 (建议 1-2 秒间隔)
 
 状态流转:
@@ -9,13 +9,17 @@ GET  /api/v1/aoo/status/{task_id} — 轮询任务进度/结果 (建议 1-2 秒�
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db
+from app.models.diagnosis import DiagnosisRecord
 from app.models.learning_path import LearningPath
 from app.models.user import User
 from app.schemas.aoo_optimize import (
@@ -55,27 +59,98 @@ router = APIRouter(prefix="/aoo", tags=["AOO Optimization"])
     summary="触发 AOO 路径优化",
     description=(
         "基于学生诊断数据和掌握度水平，运行 AOO 算法生成最优学习路径。"
+        "前端只需传入 diagnosis_id，后端从诊断数据库自动补全 student_id/mastery_levels/cognitive_load。"
         "请求返回 task_id，前端通过 GET /status/{task_id} 轮询进度。"
     ),
 )
 async def optimize_path(
     request: AOOOptimizeRequest,
     current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ):
     """触发 AOO 优化任务
 
-    - 权限: 学生只能为自己的数据创建任务
-    - 异步模式: Celery worker 后台执行，前端轮询 status 接口
+    - 前端只需传入 diagnosis_id，其余字段从诊断数据库自动补全
+    - Celery 优先；Celery 不可用时通过后台线程同步执行兜底
     """
-    # 权限校验: student_id 必须与当前登录用户一致 (学生角色)
-    # 教师角色可跳过此校验（通过 student_id 指定查询目标）
-    if str(current_user.id) != request.student_id and current_user.role != "teacher":
+    # ── 第一步: 从诊断数据库自动补全缺失字段 ──
+    diagnosis_record = None
+    need_db = (
+        not request.student_id
+        or not request.mastery_levels
+        or request.cognitive_load is None
+    )
+
+    if need_db:
+        try:
+            diag_id = uuid.UUID(request.diagnosis_id)
+            stmt = select(DiagnosisRecord).where(DiagnosisRecord.id == diag_id)
+            result = await session.execute(stmt)
+            diagnosis_record = result.scalar_one_or_none()
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无效的 diagnosis_id: {request.diagnosis_id}",
+            )
+        except Exception as exc:
+            logger.warning("诊断记录查询失败: %s", exc)
+
+        if diagnosis_record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到诊断记录 diagnosis_id={request.diagnosis_id}，请先完成认知诊断",
+            )
+
+    # ── 自动补全 student_id ──
+    if not request.student_id:
+        request.student_id = str(diagnosis_record.student_id)
+
+    # ── 权限校验: 学生只能操作自己的数据 ──
+    if str(current_user.id) != str(request.student_id) and current_user.role != "teacher":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只能为自己的诊断数据创建优化任务",
         )
 
-    # 提取超参配置
+    # ── 自动补全 mastery_levels ──
+    if not request.mastery_levels:
+        raw_mastery = diagnosis_record.mastery_levels or {}
+        extracted = {}
+        for kp_id, data in raw_mastery.items():
+            if isinstance(data, dict):
+                extracted[kp_id] = float(data.get("mastery", 0.5))
+            else:
+                extracted[kp_id] = float(data)
+        request.mastery_levels = extracted
+        if not request.mastery_levels:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="诊断记录中无 mastery_levels 数据，请重新完成认知诊断",
+            )
+
+    # ── 自动补全 cognitive_load ──
+    if request.cognitive_load is None:
+        request.cognitive_load = (
+            diagnosis_record.cognitive_load_index
+            if diagnosis_record and diagnosis_record.cognitive_load_index is not None
+            else 0.5
+        )
+
+    # ── 最终校验 ──
+    if not request.student_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 student_id")
+    if not request.mastery_levels:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 mastery_levels")
+    if request.cognitive_load is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 cognitive_load")
+
+    logger.info(
+        "AOO 优化请求: diagnosis=%s student=%s kps=%d load=%.2f",
+        request.diagnosis_id, request.student_id,
+        len(request.mastery_levels), request.cognitive_load,
+    )
+
+    # ── 第二步: 提取超参配置 ──
     config_dict = None
     if request.config:
         config_dict = request.config.model_dump(exclude_none=True)
@@ -87,40 +162,74 @@ async def optimize_path(
             "beta": 0.4,
         }
 
-    # 提交 Celery 异步任务
+    # ── 第三步: 提交任务 (Celery 优先, 同步兜底) ──
+    submitter_id = str(current_user.id)  # noqa: F841  # 预留, 供后续审计使用
+
+    celery_available = False
     try:
-        celery_task = run_aoo_optimization.delay(
+        # 先检查 Celery Worker 是否在线 (ping 验证)
+        inspect = run_aoo_optimization.app.control.inspect(timeout=2)
+        workers = inspect.ping()
+        celery_available = bool(workers)
+    except Exception:
+        celery_available = False
+
+    # 尝试 Celery
+    if celery_available:
+        try:
+            celery_task = run_aoo_optimization.delay(
+                diagnosis_id=request.diagnosis_id,
+                student_id=str(request.student_id),
+                mastery_levels=request.mastery_levels,
+                cognitive_load=request.cognitive_load,
+                config=config_dict,
+            )
+
+            logger.info("Celery 任务已提交: task_id=%s", celery_task.id)
+            return ResponseBase(
+                message="优化任务已提交",
+                data=AOOOptimizeResponse(
+                    task_id=celery_task.id,
+                    status="queued",
+                    progress=0,
+                    result=None,
+                    error_message=None,
+                ),
+            )
+        except Exception as celery_exc:
+            logger.warning("Celery 不可用, 使用同步执行兜底: %s", celery_exc)
+    else:
+        logger.info("Celery Worker 离线, 直接使用同步执行")
+
+    # ── 同步兜底 ──
+    from app.tasks.aoo_optimization import run_aoo_optimization_sync
+
+    try:
+        sync_task_id = run_aoo_optimization_sync(
             diagnosis_id=request.diagnosis_id,
-            student_id=request.student_id,
+            student_id=str(request.student_id),
             mastery_levels=request.mastery_levels,
             cognitive_load=request.cognitive_load,
             config=config_dict,
         )
-    except Exception as exc:
-        logger.error("Celery 任务提交失败: %s", exc)
+
+        logger.info("AOO 同步执行已启动: task_id=%s", sync_task_id)
+        return ResponseBase(
+            message="同步优化执行已启动",
+            data=AOOOptimizeResponse(
+                task_id=sync_task_id,
+                status="queued",
+                progress=0,
+                result=None,
+                error_message=None,
+            ),
+        )
+    except Exception as sync_exc:
+        logger.exception("同步执行启动失败")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="任务队列不可用，请稍后重试 (Celery Worker 未启动)",
+            detail=f"AOO 优化服务暂时不可用: {str(sync_exc)}",
         )
-
-    task_id = celery_task.id
-
-    logger.info(
-        "AOO 优化任务已入队: task_id=%s student=%s diagnosis=%s kps=%d",
-        task_id, request.student_id, request.diagnosis_id,
-        len(request.mastery_levels),
-    )
-
-    return ResponseBase(
-        message="优化任务已提交",
-        data=AOOOptimizeResponse(
-            task_id=task_id,
-            status="queued",
-            progress=0,
-            result=None,
-            error_message=None,
-        ),
-    )
 
 
 # ============================================================
@@ -153,6 +262,31 @@ async def get_optimize_status(
 
     建议前端以 1-2 秒间隔轮询, 支持绘制实时收敛曲线。
     """
+    try:
+        return await _get_optimize_status_inner(task_id)
+    except Exception as exc:
+        logger.exception(
+            "AOO 状态查询异常: task_id=%s error=%s", task_id, exc
+        )
+        return ResponseBase(
+            data=AOOTaskStatusResponse(
+                task_id=task_id,
+                status="failed",
+                progress=0,
+                current_iteration=0,
+                max_iterations=500,
+                current_best_fitness=None,
+                convergence_data=None,
+                result=None,
+                error=f"状态查询服务异常: {str(exc)[:200]}",
+                created_at=None,
+                updated_at=None,
+            ),
+        )
+
+
+async def _get_optimize_status_inner(task_id: str):
+    """状态查询核心逻辑"""
     now = datetime.now(tz=timezone.utc)
 
     # ── 1. 从 Redis 读取状态 ──
@@ -177,7 +311,28 @@ async def get_optimize_status(
         progress_data=progress_data,
     )
 
-    # ── 5. 超时检测 (>10分钟自动标记失败) ──
+    # ── 5. 超时检测 ──
+
+    # 5a. Pending 超时 (>15秒无进度, Celery Worker 可能未启动)
+    if actual_status == "pending":
+        pending_seconds = (
+            (now - created_at).total_seconds()
+            if created_at else 0
+        )
+        # 检查是否有 Celery 结果 (PENDING 状态可能表示 Celery Worker 未运行)
+        try:
+            celery_state = AsyncResult(task_id, app=run_aoo_optimization.app).state
+            celery_never_started = celery_state and celery_state not in ("PENDING", "STARTED", "SUCCESS", "FAILURE")
+        except Exception:
+            celery_never_started = False
+
+        if pending_seconds > 15 and not celery_never_started:
+            logger.warning(
+                "Celery 任务超时未启动 (pending >15s): task_id=%s, 建议前端使用同步兜底",
+                task_id,
+            )
+
+    # 5b. Processing 超时 (>10分钟自动标记失败)
     if actual_status == "processing" and is_task_timed_out(task_id):
         logger.warning(
             "AOO 任务超时 (>10min): task_id=%s created_at=%s",
@@ -237,7 +392,7 @@ async def get_optimize_status(
         )
 
         # 失败状态下也返回已累积的收敛数据，方便调试
-        conv_data = _build_convergence_point(convergence_points) if convergence_points else None
+        conv_data = _build_convergence_point_safe(convergence_points)
 
         return ResponseBase(
             data=AOOTaskStatusResponse(
@@ -275,8 +430,6 @@ async def get_optimize_status(
         )
         raw_progress = progress_data.get("progress", 0) if progress_data else 0
 
-        converged = convergence_points[-1].get("best_fitness") == 1.0 if convergence_points else False
-
         return ResponseBase(
             data=AOOTaskStatusResponse(
                 task_id=task_id,
@@ -285,7 +438,7 @@ async def get_optimize_status(
                 current_iteration=current_iter,
                 max_iterations=max_iters,
                 current_best_fitness=best_f,
-                convergence_data=_build_convergence_point(convergence_points),
+                convergence_data=_build_convergence_point_safe(convergence_points),
                 result=None,
                 error=None,
                 created_at=created_at,
@@ -308,13 +461,20 @@ async def get_optimize_status(
         optimize_result = None
         result_data = get_task_result(task_id)
         if result_data and result_data.get("result"):
-            optimize_result = _parse_optimize_result(result_data["result"])
-            conv_data = _build_convergence_point_from_complete(
-                result_data["result"].get("convergence_data")
-            )
+            try:
+                optimize_result = _parse_optimize_result(result_data["result"])
+                conv_data = _build_convergence_point_from_complete(
+                    result_data["result"].get("convergence_data")
+                )
+            except Exception as parse_exc:
+                logger.warning(
+                    "Redis 结果解析失败, 降级到收敛快照: task_id=%s error=%s",
+                    task_id, parse_exc,
+                )
+                conv_data = _build_convergence_point_safe(convergence_points)
         else:
             # 降级: 从完整收敛快照构建
-            conv_data = _build_convergence_point(convergence_points)
+            conv_data = _build_convergence_point_safe(convergence_points)
 
         # 如果 Redis 中无结果, 从数据库加载 (兜底)
         if optimize_result is None:
@@ -405,6 +565,27 @@ def _build_convergence_point(
         best_fitness=[s["best_fitness"] for s in snapshots],
         avg_fitness=[s["avg_fitness"] for s in snapshots],
     )
+
+
+def _build_convergence_point_safe(
+    snapshots: list,
+) -> Optional[ConvergencePoint]:
+    """安全版 convergence 构建 — 过滤畸形数据，避免 KeyError 导致 500"""
+    if not snapshots:
+        return None
+
+    valid_snapshots = [
+        s for s in snapshots
+        if isinstance(s, dict)
+        and "iteration" in s
+        and "best_fitness" in s
+        and "avg_fitness" in s
+    ]
+
+    if not valid_snapshots:
+        return None
+
+    return _build_convergence_point(valid_snapshots)
 
 
 def _build_convergence_point_from_complete(
@@ -546,8 +727,14 @@ def _parse_optimize_result(raw: dict) -> AOOOptimizeResult:
         total_estimated_hours=bp_raw.get("total_estimated_hours", 0),
     )
 
-    # 解析适应度详情
-    fd_raw = raw.get("fitness_detail", {})
+    # 解析适应度详情 (Redis 中为数组, 取最佳路径对应的第一个)
+    fd_raw_list = raw.get("fitness_detail", [])
+    if isinstance(fd_raw_list, list) and len(fd_raw_list) > 0:
+        fd_raw = fd_raw_list[0]
+    elif isinstance(fd_raw_list, dict):
+        fd_raw = fd_raw_list
+    else:
+        fd_raw = {}
     fitness_detail = PathFitnessDetail(
         total_fitness=fd_raw.get("total_fitness", 0),
         learning_effect=fd_raw.get("learning_effect", 0),
@@ -583,8 +770,12 @@ def _parse_optimize_result(raw: dict) -> AOOOptimizeResult:
                 total_minutes=day_data.get("total_minutes", 0),
                 avg_difficulty=day_data.get("avg_difficulty", 0),
             ))
+        # 归一化 path_type: 空值或不合法值默认为 "balanced"
+        raw_path_type = alt.get("path_type", "")
+        if raw_path_type not in ("efficiency", "balanced", "robust"):
+            raw_path_type = "balanced"
         alt_paths.append(AlternativePath(
-            path_type=alt.get("path_type", "alternative"),
+            path_type=raw_path_type,
             days=alt_days,
             total_days=alt.get("total_days", 0),
             total_tasks=alt.get("total_tasks", 0),

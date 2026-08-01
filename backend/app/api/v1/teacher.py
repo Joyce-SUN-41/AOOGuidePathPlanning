@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -381,7 +382,7 @@ async def get_student_detail(
     _ensure_teacher(current_user)
 
     student_result = await db.execute(
-        select(User).where(User.id == int(student_id), User.role == "student")
+        select(User).where(User.id == uuid.UUID(student_id), User.role == "student")
     )
     student = student_result.scalar_one_or_none()
     if not student:
@@ -486,22 +487,158 @@ async def get_dashboard_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """一次性返回所有仪表盘所需数据（减少前端请求次数）"""
+    """一次性返回所有仪表盘所需数据（聚合 overview / students / weakKps / masteryTrend / alerts）"""
     _ensure_teacher(current_user)
 
-    # 复用以上各端点逻辑
-    # ... 简化实现，返回基本结构
+    # ── 1. 学生基础查询 ──
+    student_result = await db.execute(
+        select(User).where(User.role == "student")
+    )
+    students = student_result.scalars().all()
+    student_ids = [s.id for s in students]
+
+    if not students:
+        return ResponseBase(data={
+            "overview": {"totalStudents": 0, "avgMastery": 0, "avgCognitiveLoad": 0,
+                         "avgPathCompletion": 0, "highLoadCount": 0, "lowMasteryCount": 0},
+            "students": [], "weakKps": [], "masteryTrend": [], "alerts": [],
+        })
+
+    # ── 2. 批量获取诊断和路径 ──
+    all_diag_result = await db.execute(
+        select(DiagnosisRecord)
+        .where(DiagnosisRecord.student_id.in_(student_ids))
+        .order_by(DiagnosisRecord.created_at.desc())
+    )
+    all_diags = all_diag_result.scalars().all()
+
+    all_path_result = await db.execute(
+        select(LearningPath)
+        .where(LearningPath.student_id.in_(student_ids))
+        .order_by(LearningPath.created_at.desc())
+    )
+    all_paths = all_path_result.scalars().all()
+
+    # 每个学生取最新一条诊断和路径
+    student_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    for d in all_diags:
+        if d.student_id not in student_diag:
+            student_diag[d.student_id] = d
+
+    student_path: Dict[uuid.UUID, LearningPath] = {}
+    for p in all_paths:
+        if p.student_id not in student_path:
+            student_path[p.student_id] = p
+
+    # ── 3. 聚合 overview 指标 ──
+    scores = [d.overall_score for d in student_diag.values() if d.overall_score is not None]
+    loads: List[float] = []
+    for d in student_diag.values():
+        cl = d.cognitive_load or {}
+        if isinstance(cl, dict):
+            ov = cl.get("overall", 0)
+        elif hasattr(cl, "overall"):
+            ov = cl.overall
+        else:
+            ov = 0
+        loads.append(float(ov))
+
+    completions = [
+        (p.path_data or {}).get("completionPercent", 0) for p in student_path.values()
+    ]
+
+    overview = {
+        "totalStudents": len(students),
+        "avgMastery": round(sum(scores) / len(scores) / 100, 2) if scores else 0.0,
+        "avgCognitiveLoad": round(sum(loads) / len(loads), 2) if loads else 0.0,
+        "avgPathCompletion": round(sum(completions) / len(completions), 1) if completions else 0,
+        "highLoadCount": sum(1 for v in loads if v > 0.7),
+        "lowMasteryCount": sum(1 for v in scores if v < 60),
+    }
+
+    # ── 4. 学生列表 ──
+    student_items = []
+    for s in students:
+        diag = student_diag.get(s.id)
+        path = student_path.get(s.id)
+        student_items.append(_student_summary(s, diag, path))
+
+    # ── 5. 薄弱知识点聚合 ──
+    kp_agg: Dict[str, Dict[str, Any]] = {}
+    for d in student_diag.values():
+        weak_points = d.weak_points or []
+        if isinstance(weak_points, list):
+            for wp in weak_points:
+                if isinstance(wp, dict):
+                    kp_name = wp.get("knowledgePoint", wp.get("knowledge_point", ""))
+                    mastery = wp.get("mastery", wp.get("currentMastery", 0.4))
+                else:
+                    kp_name = getattr(wp, "knowledge_point", getattr(wp, "knowledgePoint", ""))
+                    mastery = getattr(wp, "mastery", getattr(wp, "currentMastery", 0.4))
+                if not kp_name:
+                    continue
+                if kp_name not in kp_agg:
+                    kp_agg[kp_name] = {"count": 0, "mastery_sum": 0.0}
+                kp_agg[kp_name]["count"] += 1
+                kp_agg[kp_name]["mastery_sum"] += float(mastery)
+
+    weak_kps = sorted(
+        [
+            {"knowledgePoint": n, "studentCount": d["count"],
+             "avgMastery": round(d["mastery_sum"] / d["count"], 2)}
+            for n, d in kp_agg.items()
+        ],
+        key=lambda x: x["studentCount"], reverse=True,
+    )[:5]
+
+    # ── 6. 掌握度趋势 (按日期聚合) ──
+    date_map: Dict[str, List[float]] = {}
+    for d in all_diags:
+        if not d.created_at:
+            continue
+        date_key = d.created_at.strftime("%Y-%m-%d")
+        date_map.setdefault(date_key, []).append(d.overall_score or 0)
+
+    mastery_trend = sorted(
+        [
+            {"date": k, "avgMastery": round(sum(v) / len(v) / 100, 2) if v else 0,
+             "diagnosisCount": len(v)}
+            for k, v in date_map.items()
+        ],
+        key=lambda x: x["date"],
+    )[-30:]
+
+    # ── 7. 预警列表 ──
+    alerts: List[Dict[str, Any]] = []
+    for s in students:
+        diag = student_diag.get(s.id)
+        if not diag:
+            continue
+        cl = diag.cognitive_load or {}
+        overall_load = (
+            cl.get("overall", 0) if isinstance(cl, dict)
+            else (cl.overall if hasattr(cl, "overall") else 0)
+        )
+        mastery = (diag.overall_score or 0) / 100
+        if float(overall_load) > 0.7 or mastery < 0.4:
+            reason = (
+                "both" if (float(overall_load) > 0.7 and mastery < 0.4)
+                else "highLoad" if float(overall_load) > 0.7
+                else "lowMastery"
+            )
+            alerts.append({
+                "studentId": str(s.id), "name": s.username,
+                "nickname": s.nickname or s.username,
+                "avgMastery": round(mastery, 2),
+                "cognitiveLoad": round(float(overall_load), 2),
+                "reason": reason,
+                "severity": "danger" if reason == "both" else "warning",
+            })
+
     return ResponseBase(data={
-        "overview": {
-            "totalStudents": 0,
-            "avgMastery": 0,
-            "avgCognitiveLoad": 0,
-            "avgPathCompletion": 0,
-            "highLoadCount": 0,
-            "lowMasteryCount": 0,
-        },
-        "students": [],
-        "weakKps": [],
-        "masteryTrend": [],
-        "alerts": [],
+        "overview": overview,
+        "students": student_items,
+        "weakKps": weak_kps,
+        "masteryTrend": mastery_trend,
+        "alerts": alerts,
     })

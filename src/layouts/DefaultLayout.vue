@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, h } from 'vue'
+import { ref, computed, h, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import type { MenuClickEventHandler } from 'ant-design-vue/es/menu/src/interface'
+import { HomeOutlined, InfoCircleOutlined } from '@ant-design/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,8 +20,8 @@ const menuItems = [
 
 /** 面包屑 */
 const breadcrumbs = computed(() => {
-  const matched = route.matched.filter((item) => item.meta?.title)
-  return matched.map((item) => item.meta?.title as string)
+  const matched = route.matched.filter((item) => item.meta?.['title'])
+  return matched.map((item) => item.meta?.['title'] as string)
 })
 
 /** 菜单点击 */
@@ -29,9 +30,6 @@ const handleMenuClick: MenuClickEventHandler = ({ key }) => {
 }
 
 // 监听路由变化，更新选中菜单
-import { watch } from 'vue'
-import { HomeOutlined, InfoCircleOutlined } from '@ant-design/icons-vue'
-
 watch(
   () => route.path,
   (path) => {
@@ -50,9 +48,7 @@ watch(
       breakpoint="lg"
     >
       <div class="logo">
-        <span v-if="!appStore.collapsed" class="logo-text">
-          {{ $t ? 'AOOG' : 'AOOG' }}
-        </span>
+        <span v-if="!appStore.collapsed" class="logo-text"> AOOG </span>
         <span v-else class="logo-text-mini">AG</span>
       </div>
       <a-menu
@@ -74,11 +70,7 @@ watch(
             class="trigger"
             @click="appStore.toggleCollapsed"
           />
-          <menu-fold-outlined
-            v-else
-            class="trigger"
-            @click="appStore.toggleCollapsed"
-          />
+          <menu-fold-outlined v-else class="trigger" @click="appStore.toggleCollapsed" />
           <a-breadcrumb class="breadcrumb">
             <a-breadcrumb-item v-for="(item, index) in breadcrumbs" :key="index">
               {{ item }}

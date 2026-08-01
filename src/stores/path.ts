@@ -4,7 +4,6 @@ import type {
   LearningPath,
   LearningTask,
   AlternativePath,
-  GeneratePathRequest,
   TaskStatus,
   GanttTask,
   DailyTaskView
@@ -175,12 +174,10 @@ export const usePathStore = defineStore(
      * 触发 AOO 异步生成学习路径
      *
      * @param diagnosisId 诊断结果 ID
-     * @param preferences  偏好设置（最大天数、重点领域、学习强度）
      * @returns 是否成功触发
      */
     async function generatePath(
-      diagnosisId: string,
-      preferences?: GeneratePathRequest['preferences']
+      diagnosisId: string
     ): Promise<boolean> {
       // 防止重复触发
       if (isGenerating.value && optimizationStatus.value !== 'idle') {
@@ -195,16 +192,17 @@ export const usePathStore = defineStore(
 
       try {
         // 1. 提交生成请求（异步任务）
+        // 后端根据 diagnosis 自动补全 mastery_levels, student_id 等字段
         const response = await pathApi.generate({
           diagnosisId,
-          preferences
-        })
+        } as any)
 
         taskId.value = response.taskId
         optimizationStatus.value = 'queued'
         generationProgress.value = 5
 
-        message.info(`AOO 引擎已启动，预计 ${response.estimatedSeconds} 秒完成分析`)
+        const estimatedSeconds = (response as any).estimatedSeconds || 30
+        message.info(`AOO 引擎已启动，预计 ${estimatedSeconds} 秒完成分析`)
 
         // 2. 开始轮询任务状态
         startPolling()
@@ -252,15 +250,7 @@ export const usePathStore = defineStore(
             generationProgress.value = 100
 
             if (status.result) {
-              currentPath.value = status.result as unknown as LearningPath
-              // 尝试保存 AOO 收敛数据（若 API 返回）
-              const result = status.result as Record<string, unknown>
-              if (result.convergence) {
-                convergenceData.value = result.convergence as AOOConvergenceData
-              }
-            }
-            if (status.alternativePaths) {
-              alternativePaths.value = status.alternativePaths
+              _applyResult(status.result as unknown as Record<string, unknown>)
             }
 
             message.success('学习路径生成完毕！查看你的专属学习计划')
@@ -285,6 +275,11 @@ export const usePathStore = defineStore(
           case 'pending':
           case 'queued':
             optimizationStatus.value = status.status
+            // 无进度时的动画效果: 缓慢增长到 ~15% 单次最大 1s 轮询期间的增量
+            generationProgress.value = Math.min(
+              generationProgress.value + 3,
+              15
+            )
             // 继续轮询
             _pollTimer = setTimeout(_poll, POLL_INTERVAL)
             break
@@ -310,6 +305,125 @@ export const usePathStore = defineStore(
       }
     }
 
+    /**
+     * 将 AOO 引擎返回的原始结果转换为 LearningPath 格式。
+     *
+     * 注意：后端任务状态端点（AOOTaskStatusResponse.result）的真实类型是
+     * AOOOptimizeResult，其 JSON 结构为：
+     *   {
+     *     bestPath:      { days: PathDay[], totalDays, totalTasks, totalEstimatedHours, totalFitness },
+     *     convergenceData: AOOConvergenceData,   ← 字段名不是 convergence！
+     *     alternativePaths: AlternativePath_BE[], ← 嵌套在 result 内部，不在顶层
+     *     fitnessDetail, paretoFront, executionTime  ← 前端未使用
+     *   }
+     *
+     * 此函数负责将所有 data 转换为前端 LearningPath + convergenceData + alternativePaths。
+     */
+    function _applyResult(raw: any): void {
+      const bp = raw.bestPath as any | undefined
+      if (!bp) return
+
+      // 按天构建 dailyTasks: LearningTask[][]
+      const days = (bp.days || []) as any[]
+      const dailyTasks: LearningTask[][] = days.map((day) => {
+        return ((day.tasks || []) as any[]).map((task, order): LearningTask => ({
+          id: `task-${day.day}-${order}`,
+          dayIndex: day.day as number,
+          orderIndex: order + 1,
+          title: (task.name || task.kp_name || task.knowledgePoint || task.knowledge_point || '') as string,
+          description: `学习 ${(task.name || task.kp_name || task.knowledgePoint || task.knowledge_point || '')}`,
+          knowledgePoint: (task.knowledgePoint || task.knowledge_point || '') as string,
+          estimatedMinutes: (task.duration || 15) as number,
+          difficulty: (task.difficulty || 1) as LearningTask['difficulty'],
+          resources: (task.resources || []) as any[],
+        }))
+      })
+
+      const difficultyCurve = days.map((d) => (d.avgDifficulty ?? d.avg_difficulty ?? 1) as number)
+
+      currentPath.value = {
+        id: taskId.value || '',
+        taskId: taskId.value || '',
+        diagnosisId: (raw.diagnosisId || raw.diagnosis_id || '') as string,
+        userId: '',
+        createdAt: new Date().toISOString(),
+        totalDays: (bp.totalDays || bp.total_days || 0) as number,
+        totalTasks: (bp.totalTasks || bp.total_tasks || 0) as number,
+        totalEstimatedHours: (bp.totalEstimatedHours || bp.total_estimated_hours || 0) as number,
+        difficultyCurve,
+        dailyTasks,
+        metadata: {
+          algorithm: 'AOO',
+          optimizationScore: Math.round(((bp.totalFitness || bp.total_fitness || 0) as number) * 100),
+          generationTime: 0,
+        },
+      }
+
+      // 收敛数据：后端 AOOTaskStatusResponse.result 的真实字段是 convergenceData
+      const convergence = (raw.convergenceData || raw.convergence_data || raw.convergence) as AOOConvergenceData | undefined
+      if (convergence?.iterations?.length) {
+        convergenceData.value = convergence
+      }
+
+      // 备选路径：后端 AOOOptimizeResult 中嵌套为 result.alternativePaths，
+      // 前端之前误从顶层 status.alternativePaths 读取，现统一在此处理
+      const rawAlts = (raw.alternativePaths || raw.alternative_paths) as any[] | undefined
+      if (rawAlts?.length) {
+        alternativePaths.value = rawAlts.map(_transformAlternativePath)
+      }
+    }
+
+    /**
+     * 将后端 AOOOptimizeResult.alternative_paths 中的单条备选路径
+     * （{ pathType, days: PathDay[], totalDays, totalTasks, totalEstimatedHours, fitness }）
+     * 转换为前端 AlternativePath 格式（含 dailyTasks: LearningTask[][] 等）。
+     */
+    function _transformAlternativePath(raw: any): AlternativePath {
+      const days = (raw.days || []) as any[]
+      const dailyTasks: LearningTask[][] = days.map((day) => {
+        return ((day.tasks || []) as any[]).map((task, order): LearningTask => ({
+          id: `alt-${day.day}-${order}`,
+          dayIndex: day.day as number,
+          orderIndex: order + 1,
+          title: (task.name || task.kp_name || '') as string,
+          description: `学习 ${(task.name || task.kp_name || '')}`,
+          knowledgePoint: (task.knowledgePoint || task.knowledge_point || '') as string,
+          estimatedMinutes: (task.duration || 15) as number,
+          difficulty: (task.difficulty || 1) as LearningTask['difficulty'],
+          resources: (task.resources || []) as any[],
+        }))
+      })
+
+      // 根据 pathType 映射前端 label / description
+      // 注意：label 必须与 PathView.vue 的 variantLabels 一致
+      //（['当前方案', '速成冲刺', '稳扎稳打', '查漏补缺']）
+      const pathType = (raw.pathType || raw.path_type || 'balanced') as string
+      const typeLabelMap: Record<string, { type: AlternativePath['type']; label: string; description: string }> = {
+        efficiency: { type: 'intensive', label: '速成冲刺', description: '最短时间覆盖最多知识点，适合考前突击' },
+        balanced:   { type: 'balanced',  label: '稳扎稳打', description: '学习效果与认知负荷的最佳平衡' },
+        robust:     { type: 'light',     label: '查漏补缺', description: '低负荷、高巩固，聚焦薄弱点逐个击破' },
+      }
+      const meta = typeLabelMap[pathType] || typeLabelMap['balanced']
+
+      return {
+        // id 必须稳定：PathView 通过 id 调用 selectAlternativePath，
+        // 使用 Date.now() 会导致每次转换后 id 变化、切换失效。
+        id: (raw.id as string) || `alt-${pathType}`,
+        taskId: (raw.taskId || '') as string,
+        type: meta!.type,
+        label: meta!.label,
+        description: meta!.description,
+        totalDays: (raw.totalDays || raw.total_days || 0) as number,
+        totalTasks: (raw.totalTasks || raw.total_tasks || 0) as number,
+        totalEstimatedHours: (raw.totalEstimatedHours || raw.total_estimated_hours || 0) as number,
+        dailyTasks,
+        highlights: [],
+        targetAudience: '',
+        philosophy: '',
+        features: [],
+      }
+    }
+
     /** 从 API 获取当前活跃路径（页面刷新恢复） */
     async function fetchCurrentPath(): Promise<void> {
       try {
@@ -324,6 +438,18 @@ export const usePathStore = defineStore(
           currentPath.value = path
           optimizationStatus.value = 'completed'
           taskId.value = path.taskId
+
+          // 页面刷新恢复：备选方案与寻优回放数据随路径记录一并下发，
+          // 这里必须回填，否则「速成冲刺 / 稳扎稳打 / 查漏补缺」标签页
+          // 和收敛回放图在刷新后会消失。
+          const rawAlts = (path as any).alternativePaths as any[] | undefined
+          if (rawAlts?.length) {
+            alternativePaths.value = rawAlts.map(_transformAlternativePath)
+          }
+          const conv = (path as any).convergenceData as AOOConvergenceData | undefined
+          if (conv?.iterations?.length) {
+            convergenceData.value = conv
+          }
         } else {
           // API 返回 null（无路径），清除可能的过期持久化数据
           clearPath()
@@ -352,29 +478,56 @@ export const usePathStore = defineStore(
       try {
         await pathApi.selectPath(pathId)
         const selected = alternativePaths.value.find((p) => p.id === pathId)
-        if (selected) {
+        if (selected && currentPath.value) {
+          // 从备选路径的 dailyTasks 重新计算 difficultyCurve
+          const difficultyCurve = selected.dailyTasks.map((day) => {
+            if (day.length === 0) return 1
+            return Math.round(day.reduce((s, t) => s + t.difficulty, 0) / day.length)
+          })
+
           // 将备选方案提升为当前路径
           currentPath.value = {
-            ...currentPath.value!,
-            ...selected,
-            id: selected.id
-          } as unknown as LearningPath
+            ...currentPath.value,
+            id: selected.id,
+            totalDays: selected.totalDays,
+            totalTasks: selected.totalTasks,
+            totalEstimatedHours: selected.totalEstimatedHours,
+            dailyTasks: selected.dailyTasks,
+            difficultyCurve,
+            metadata: {
+              algorithm: 'AOO',
+              optimizationScore: 0,  // 备选路径无原始收敛数据
+              generationTime: 0,
+            },
+          }
+
           message.success('已切换到新方案')
           return true
         }
         return false
       } catch (e) {
         console.error('[PathStore] 切换备选路径失败:', e)
+        // 之前静默失败，用户点击后毫无反馈，这里明确提示后端返回的原因
+        const detail =
+          (e as { response?: { data?: { detail?: string; message?: string } } })
+            ?.response?.data?.detail ??
+          (e as { response?: { data?: { message?: string } } })?.response?.data
+            ?.message
+        message.error(detail ? `切换方案失败：${detail}` : '切换方案失败，请稍后重试')
         return false
       }
     }
 
-    /** 获取备选方案列表 */
+    /** 获取备选方案列表（速成冲刺 / 稳扎稳打 / 查漏补缺） */
     async function fetchAlternatives(): Promise<void> {
       if (!taskId.value) return
       try {
         const alts = await pathApi.getAlternatives(taskId.value)
-        alternativePaths.value = alts
+        // 后端返回的是 AOO 原始结构（pathType/days/...），
+        // 必须经过 _transformAlternativePath 才能被 UI 渲染。
+        if (Array.isArray(alts) && alts.length) {
+          alternativePaths.value = alts.map(_transformAlternativePath)
+        }
       } catch (e) {
         console.error('[PathStore] 获取备选路径失败:', e)
       }
@@ -466,7 +619,7 @@ export const usePathStore = defineStore(
       key: 'oat_path_store',
       storage: localStorage,
       // 持久化路径结果，但不保存生成中的瞬时状态
-      pick: ['currentPath', 'alternativePaths', 'taskId']
+      paths: ['currentPath', 'alternativePaths', 'taskId']
     }
   }
 )

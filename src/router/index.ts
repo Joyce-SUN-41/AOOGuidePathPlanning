@@ -15,6 +15,8 @@ const DashboardView = () => import('@/views/DashboardView.vue')
 const TeacherDashboardView = () => import('@/views/TeacherDashboardView.vue')
 const TeacherKnowledgeView = () => import('@/views/TeacherKnowledgeView.vue')
 const TeacherQuestionsView = () => import('@/views/TeacherQuestionsView.vue')
+const AboutView = () => import('@/views/AboutView.vue')
+const RecordsView = () => import('@/views/RecordsView.vue')
 const NotFoundView = () => import('@/views/NotFoundView.vue')
 
 /**
@@ -136,6 +138,25 @@ const routes: RouteRecordRaw[] = [
           icon: 'FileTextOutlined',
           roles: ['teacher']
         }
+      },
+      {
+        path: 'about',
+        name: 'About',
+        component: AboutView,
+        meta: {
+          title: '关于',
+          icon: 'InfoCircleOutlined'
+        }
+      },
+      {
+        path: 'records',
+        name: 'Records',
+        component: RecordsView,
+        meta: {
+          title: '我的记录',
+          icon: 'HistoryOutlined',
+          roles: ['student']
+        }
       }
     ]
   },
@@ -163,9 +184,9 @@ const router = createRouter({
 /** 免登录白名单 */
 const WHITE_LIST = ['/login', '/register']
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   // 设置页面标题
-  const title = to.meta.title as string
+  const title = to.meta['title'] as string
   document.title = title ? `${title} - 燕麦智导` : '燕麦智导'
 
   // 白名单页面直接放行
@@ -196,7 +217,7 @@ router.beforeEach((to, from, next) => {
   }
 
   // 角色权限检查
-  const requiredRoles = (to.meta.roles as UserRole[] | undefined) || []
+  const requiredRoles = (to.meta['roles'] as UserRole[] | undefined) || []
   if (requiredRoles.length > 0) {
     const userRole = userStore.role
     if (!userRole || !requiredRoles.includes(userRole)) {

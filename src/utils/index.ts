@@ -23,7 +23,10 @@ export const formatDate = (date: Date | string | number, fmt = 'yyyy-MM-dd HH:mm
   for (const k in o) {
     if (new RegExp(`(${k})`).test(result)) {
       const val = o[k]!
-      result = result.replace(RegExp.$1, RegExp.$1.length === 1 ? String(val) : String(val).padStart(2, '0'))
+      result = result.replace(
+        RegExp.$1,
+        RegExp.$1.length === 1 ? String(val) : String(val).padStart(2, '0')
+      )
     }
   }
   return result

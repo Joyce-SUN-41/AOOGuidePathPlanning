@@ -46,7 +46,7 @@ def _get_engine():
     """获取或创建异步数据库引擎 (单例, 供 Celery worker 使用)"""
     global _engine
     if _engine is None:
-        db_url = settings.DATABASE_URL
+        db_url = settings.effective_database_url
         _engine = create_async_engine(
             db_url,
             echo=False,
@@ -199,12 +199,15 @@ class OptimizationService:
     # ============================================================
 
     async def _load_knowledge_point_metas(self) -> List[KnowledgePoint]:
-        """从数据库加载所有知识点的 ORM 对象"""
+        """从数据库加载所有知识点的 ORM 对象（含前置依赖关系）"""
         engine = _get_engine()
         async with AsyncSession(engine) as session:
             result = await session.execute(
                 select(KnowledgePoint)
-                .options(selectinload(KnowledgePoint.children))
+                .options(
+                    selectinload(KnowledgePoint.children),
+                    selectinload(KnowledgePoint.incoming_edges),
+                )
                 .order_by(KnowledgePoint.created_at)
             )
             return list(result.scalars().all())
@@ -242,12 +245,16 @@ class OptimizationService:
     @staticmethod
     def _kp_to_meta(kp: KnowledgePoint) -> Dict[str, Any]:
         """将 ORM 对象转换为 FitnessCalculator 所需的 dict 格式"""
+        # 从 incoming_edges 关系获取前置知识点ID列表
+        prereq_ids = [
+            str(edge.source_kp_id) for edge in (kp.incoming_edges or [])
+        ]
         return {
             "id": str(kp.id),
             "name": kp.name,
             "difficulty": float(kp.difficulty_level),
             "layer": kp.layer or "core",
-            "prerequisites": getattr(kp, "_prerequisite_ids", []) or [],
+            "prerequisites": prereq_ids,
             "estimated_hours": 1.0,  # 数据库中暂无此字段, 默认 1 小时
             "subject": kp.subject,
         }

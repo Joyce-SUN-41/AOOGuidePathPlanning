@@ -99,7 +99,7 @@ instance.interceptors.response.use(
  * 获取 token
  * 直接从 pinia-plugin-persistedstate 持久化存储读取，避免循环依赖
  */
-function getToken(): string | null {
+export function getToken(): string | null {
   try {
     const raw = localStorage.getItem('oat_user_store')
     if (raw) {

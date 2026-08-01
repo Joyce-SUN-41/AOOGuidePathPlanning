@@ -47,5 +47,5 @@ if __name__ == "__main__":
 
     print("✅ setup_env() 环境注入成功")
     print(f"   .venv_pkgs 存在: {TARGET_PKGS.exists()}, 子目录数: {len(list(TARGET_PKGS.glob('*'))) if TARGET_PKGS.exists() else 0}")
-    print(f"   DB:  {settings.DATABASE_URL.replace(settings.POSTGRES_PASSWORD, '***')}")
+    print(f"   DB:  {settings.effective_database_url.replace(settings.POSTGRES_PASSWORD, '***')}")
     print(f"   Redis: {settings.redis_url}")

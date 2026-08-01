@@ -33,7 +33,9 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': {
           target: proxyTarget,
-          changeOrigin: true
+          changeOrigin: true,
+          timeout: 120000,       // LLM 调用可能耗时较长
+          proxyTimeout: 120000,  // 后端响应超时 2 分钟
         }
       }
     },

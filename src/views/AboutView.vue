@@ -3,8 +3,18 @@ import { ref } from 'vue'
 
 /** 技术栈列表 */
 const techStack = ref([
-  { name: 'Vue 3', version: '3.4', description: '渐进式 JavaScript 框架', icon: 'https://cn.vuejs.org/logo.svg' },
-  { name: 'Vite', version: '5.3', description: '下一代前端构建工具', icon: 'https://vitejs.dev/logo.svg' },
+  {
+    name: 'Vue 3',
+    version: '3.4',
+    description: '渐进式 JavaScript 框架',
+    icon: 'https://cn.vuejs.org/logo.svg'
+  },
+  {
+    name: 'Vite',
+    version: '5.3',
+    description: '下一代前端构建工具',
+    icon: 'https://vitejs.dev/logo.svg'
+  },
   { name: 'TypeScript', version: '5.5', description: 'JavaScript 的超集', icon: '' },
   { name: 'Pinia', version: '2.1', description: 'Vue 状态管理', icon: '' },
   { name: 'Ant Design Vue', version: '4.2', description: '企业级 UI 组件库', icon: '' },
@@ -33,19 +43,10 @@ const techStack = ref([
     <a-divider />
 
     <!-- 技术栈 -->
-    <a-typography-title :level="4">
-      技术栈一览
-    </a-typography-title>
+    <a-typography-title :level="4"> 技术栈一览 </a-typography-title>
 
     <a-row :gutter="[16, 16]">
-      <a-col
-        v-for="tech in techStack"
-        :key="tech.name"
-        :xs="24"
-        :sm="12"
-        :md="8"
-        :lg="8"
-      >
+      <a-col v-for="tech in techStack" :key="tech.name" :xs="24" :sm="12" :md="8" :lg="8">
         <a-card :bordered="false" class="tech-card">
           <a-card-meta>
             <template #title>
@@ -65,17 +66,10 @@ const techStack = ref([
     <a-divider />
 
     <!-- 项目结构 -->
-    <a-typography-title :level="4">
-      项目结构
-    </a-typography-title>
+    <a-typography-title :level="4"> 项目结构 </a-typography-title>
 
     <a-card :bordered="false">
-      <a-tree
-        :tree-data="treeData"
-        default-expand-all
-        :show-line="true"
-        :show-icon="true"
-      >
+      <a-tree :tree-data="treeData" default-expand-all :show-line="true" :show-icon="true">
         <template #icon="{ dataRef }">
           <FolderOutlined v-if="dataRef?.isDir" style="color: #faad14" />
           <FileOutlined v-else style="color: #1677ff" />
@@ -102,40 +96,76 @@ export default {
           key: 'src',
           isDir: true,
           children: [
-            { title: 'api/', key: 'api', isDir: true, children: [
-              { title: 'index.ts (Axios封装)', key: 'api-index', isDir: false },
-              { title: 'modules/', key: 'api-modules', isDir: true, children: [
-                { title: 'user.ts (用户API)', key: 'api-user', isDir: false }
-              ]}
-            ]},
+            {
+              title: 'api/',
+              key: 'api',
+              isDir: true,
+              children: [
+                { title: 'index.ts (Axios封装)', key: 'api-index', isDir: false },
+                {
+                  title: 'modules/',
+                  key: 'api-modules',
+                  isDir: true,
+                  children: [{ title: 'user.ts (用户API)', key: 'api-user', isDir: false }]
+                }
+              ]
+            },
             { title: 'assets/', key: 'assets', isDir: true },
-            { title: 'components/', key: 'components', isDir: true, children: [
-              { title: 'GlobalLoading.vue', key: 'comp-loading', isDir: false }
-            ]},
-            { title: 'composables/', key: 'composables', isDir: true, children: [
-              { title: 'useECharts.ts', key: 'comp-echarts', isDir: false }
-            ]},
-            { title: 'layouts/', key: 'layouts', isDir: true, children: [
-              { title: 'DefaultLayout.vue', key: 'layout-default', isDir: false }
-            ]},
-            { title: 'router/', key: 'router', isDir: true, children: [
-              { title: 'index.ts (路由配置)', key: 'router-index', isDir: false }
-            ]},
-            { title: 'stores/', key: 'stores', isDir: true, children: [
-              { title: 'app.ts (全局状态)', key: 'store-app', isDir: false },
-              { title: 'counter.ts (计数器)', key: 'store-counter', isDir: false }
-            ]},
-            { title: 'types/', key: 'types', isDir: true, children: [
-              { title: 'index.ts (类型定义)', key: 'types-index', isDir: false }
-            ]},
-            { title: 'utils/', key: 'utils', isDir: true, children: [
-              { title: 'index.ts (工具函数)', key: 'utils-index', isDir: false }
-            ]},
-            { title: 'views/', key: 'views', isDir: true, children: [
-              { title: 'HomeView.vue', key: 'view-home', isDir: false },
-              { title: 'AboutView.vue', key: 'view-about', isDir: false },
-              { title: 'NotFoundView.vue', key: 'view-404', isDir: false }
-            ]},
+            {
+              title: 'components/',
+              key: 'components',
+              isDir: true,
+              children: [{ title: 'GlobalLoading.vue', key: 'comp-loading', isDir: false }]
+            },
+            {
+              title: 'composables/',
+              key: 'composables',
+              isDir: true,
+              children: [{ title: 'useECharts.ts', key: 'comp-echarts', isDir: false }]
+            },
+            {
+              title: 'layouts/',
+              key: 'layouts',
+              isDir: true,
+              children: [{ title: 'DefaultLayout.vue', key: 'layout-default', isDir: false }]
+            },
+            {
+              title: 'router/',
+              key: 'router',
+              isDir: true,
+              children: [{ title: 'index.ts (路由配置)', key: 'router-index', isDir: false }]
+            },
+            {
+              title: 'stores/',
+              key: 'stores',
+              isDir: true,
+              children: [
+                { title: 'app.ts (全局状态)', key: 'store-app', isDir: false },
+                { title: 'counter.ts (计数器)', key: 'store-counter', isDir: false }
+              ]
+            },
+            {
+              title: 'types/',
+              key: 'types',
+              isDir: true,
+              children: [{ title: 'index.ts (类型定义)', key: 'types-index', isDir: false }]
+            },
+            {
+              title: 'utils/',
+              key: 'utils',
+              isDir: true,
+              children: [{ title: 'index.ts (工具函数)', key: 'utils-index', isDir: false }]
+            },
+            {
+              title: 'views/',
+              key: 'views',
+              isDir: true,
+              children: [
+                { title: 'HomeView.vue', key: 'view-home', isDir: false },
+                { title: 'AboutView.vue', key: 'view-about', isDir: false },
+                { title: 'NotFoundView.vue', key: 'view-404', isDir: false }
+              ]
+            },
             { title: 'App.vue', key: 'app', isDir: false },
             { title: 'main.ts', key: 'main', isDir: false }
           ]

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -247,9 +247,10 @@ async def get_overview(
         path_data = path.path_data or {}
         total_tasks = path_data.get("totalTasks", 0)
         total_estimated_hours = path_data.get("totalEstimatedHours", 0)
-        # 假设已完成约 35%
-        completed_tasks = int(total_tasks * 0.35)
-        total_study_minutes = int(total_estimated_hours * 60 * 0.35)
+        # 从 path_data 获取真实完成数量，而非硬编码百分比
+        completed_tasks = path_data.get("completedTasks", 0)
+        percent = completed_tasks / total_tasks if total_tasks > 0 else 0
+        total_study_minutes = int(total_estimated_hours * 60 * percent)
 
     if diag:
         mastery = diag.mastery_levels or {}
@@ -261,13 +262,55 @@ async def get_overview(
         if path is None:
             total_study_minutes = int(diag.average_time_spent * diag.total_questions)
 
+    # 真实计数：已完成诊断数 / 学习路径数
+    diag_count_result = await db.execute(
+        select(func.count(DiagnosisRecord.id)).where(
+            DiagnosisRecord.student_id == current_user.id
+        )
+    )
+    total_diagnoses = diag_count_result.scalar() or 0
+
+    path_count_result = await db.execute(
+        select(func.count(LearningPath.id)).where(
+            LearningPath.student_id == current_user.id
+        )
+    )
+    total_paths = path_count_result.scalar() or 0
+
+    # 计算连续学习天数 (基于诊断记录日期)
+    from datetime import date, timedelta
+    all_diag_dates_result = await db.execute(
+        select(DiagnosisRecord.created_at)
+        .where(DiagnosisRecord.student_id == current_user.id)
+        .order_by(desc(DiagnosisRecord.created_at))
+    )
+    diag_dates_set = set()
+    for (created_at,) in all_diag_dates_result:
+        if created_at:
+            diag_dates_set.add(created_at.date())
+
+    streak = 0
+    today = date.today()
+    check_date = today
+    while check_date in diag_dates_set:
+        streak += 1
+        check_date -= timedelta(days=1)
+    # 如果今天还没有，但从昨天就开始连续学习，也算连续
+    if streak == 0 and today - timedelta(days=1) in diag_dates_set:
+        check_date = today - timedelta(days=1)
+        while check_date in diag_dates_set:
+            streak += 1
+            check_date -= timedelta(days=1)
+
     overview_data = {
         "totalStudyMinutes": total_study_minutes,
         "completedTasks": completed_tasks,
         "totalTasks": total_tasks,
         "masteredKPs": mastered_kps,
         "totalKPs": total_kps,
-        "streakDays": min(7, 3 + (1 if diag else 0)),
+        "streakDays": streak,
+        "totalDiagnoses": total_diagnoses,
+        "totalPaths": total_paths,
         "lastStudyDate": diag.created_at.strftime("%Y-%m-%d") if diag and diag.created_at else "",
     }
 

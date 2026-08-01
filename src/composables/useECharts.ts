@@ -1,7 +1,7 @@
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import type { Ref } from 'vue'
 import * as echarts from 'echarts'
-import type { EChartsOption, ECharts } from 'echarts'
+import type { EChartsOption, EChartsType } from 'echarts'
 import { debounce } from '@/utils'
 
 /**
@@ -9,7 +9,7 @@ import { debounce } from '@/utils'
  * 自动管理图表实例生命周期，响应式更新配置
  */
 export function useECharts(containerRef: Ref<HTMLElement | undefined>) {
-  const chartInstance = ref<ECharts | null>(null)
+  const chartInstance = ref<EChartsType | null>(null)
 
   /** 初始化图表 */
   const initChart = () => {

@@ -66,12 +66,30 @@ export const pathApi = {
     return request.get<LearningPath | null>('/learning-paths/current')
   },
 
-  /** 获取备选路径方案（从 AOO 任务结果的 alternative_paths 提取） */
+  /** 获取备选路径方案（速成冲刺 / 稳扎稳打 / 查漏补缺）
+   *
+   * 后端暂未独立提供该端点，通过状态接口降级获取。
+   * 注意：备选方案位于 `result.alternativePaths`，不在响应顶层，
+   * 早期实现读取顶层字段导致永远拿到空数组、标签页无法显示。
+   */
   getAlternatives(taskId: string): Promise<AlternativePath[]> {
-    // 后端暂未独立提供该端点，通过状态接口降级获取
-    return request
-      .get<TaskStatusResponse>(`/aoo/status/${taskId}`)
-      .then((resp) => (resp as unknown as TaskStatusResponse).alternativePaths ?? [])
+    return request.get<TaskStatusResponse>(`/aoo/status/${taskId}`).then((resp) => {
+      const r = resp as unknown as Record<string, any>
+      return (r?.['result']?.['alternativePaths'] ?? r?.['alternativePaths'] ?? []) as AlternativePath[]
+    })
+  },
+
+  /** 获取寻优过程回放数据（收敛曲线 + 每代种群快照）
+   *
+   * 同样位于 `result.convergenceData`；状态响应顶层的 convergenceData
+   * 只是「当前代」的单点快照，不含 iterations 数组，不能用于回放。
+   */
+  getConvergence(taskId: string): Promise<Record<string, unknown> | null> {
+    return request.get<TaskStatusResponse>(`/aoo/status/${taskId}`).then((resp) => {
+      const r = resp as unknown as Record<string, any>
+      const conv = r?.['result']?.['convergenceData']
+      return conv?.['iterations']?.length ? conv : null
+    })
   },
 
   /** 切换到备选路径方案 */
@@ -81,9 +99,14 @@ export const pathApi = {
     } as unknown as Record<string, unknown>)
   },
 
-  /** 获取学习路径历史 */
+  /** 获取学习路径历史（后端返回 { items, total }，此处拍平为数组） */
   getHistory(): Promise<LearningPath[]> {
-    return request.get<LearningPath[]>('/learning-paths/history')
+    return request
+      .get<{ items?: LearningPath[] } | LearningPath[]>('/learning-paths/history')
+      .then((resp) => {
+        if (Array.isArray(resp)) return resp
+        return (resp as { items?: LearningPath[] })?.items ?? []
+      })
   },
 
   /** 删除学习路径 */

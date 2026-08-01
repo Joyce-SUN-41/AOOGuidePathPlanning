@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     print("✅ bootstrap 环境注入成功！")
     print(f"   sys.path 前3项: {sys.path[:3]}")
-    print(f"   Postgres 连接: {settings.DATABASE_URL.replace(settings.POSTGRES_PASSWORD, '***')}")
+    print(f"   Postgres 连接: {settings.effective_database_url.replace(settings.POSTGRES_PASSWORD, '***')}")
     print(f"   Redis 连接:    {settings.redis_url}")
 
     # 第二个参数 onwards 作为子命令执行（类似 python -m）

@@ -14,7 +14,13 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """创建用户（注册）"""
-    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    password: str = Field(
+        ...,
+        min_length=8,
+        max_length=128,
+        description="密码 (至少8位，含大小写字母和数字)",
+        json_schema_extra={"example": "SecurePass123"},
+    )
     nickname: Optional[str] = Field(None, max_length=50, description="昵称（显示名称）")
     email: Optional[EmailStr] = Field(None, description="邮箱（选填）")
     role: Optional[str] = Field("student", description="角色: student | teacher")
@@ -33,7 +39,7 @@ class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=3, max_length=50)
     nickname: Optional[str] = Field(None, max_length=50)
     email: Optional[EmailStr] = None
-    password: Optional[str] = Field(None, min_length=6, max_length=128)
+    password: Optional[str] = Field(None, min_length=8, max_length=128)
     role: Optional[str] = None
     is_active: Optional[bool] = None
 

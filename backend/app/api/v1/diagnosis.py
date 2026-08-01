@@ -40,6 +40,7 @@ async def get_questions(
     count: int = Query(default=15, ge=5, le=30, description="题目数量"),
     subject: str = Query(default="人工智能导论", description="学科"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """获取诊断题库, 优先从数据库读取, 降级到内置 Mock 数据"""
     # 尝试从 DB 加载
@@ -81,7 +82,7 @@ async def get_questions(
 
 @router.post(
     "/submit",
-    response_model=ResponseBase,
+    response_model=ResponseBase[DiagnosisResultResponse],
     summary="提交诊断测验结果",
 )
 async def submit_diagnosis(
@@ -140,45 +141,52 @@ async def submit_diagnosis(
         kp_name_map=kp_name_map,
     )
 
-    # 5. 触发异步 AOO 路径规划
+    # 5. 触发异步 AOO 路径规划 (Celery 优先, 同步兜底)
     diagnosis_id = str(record.id)
+    student_id_str = str(student_id) if not isinstance(student_id, str) else student_id
+    cognitive_load_overall = getattr(cognitive_load, "overall", 0.0)
     try:
         from app.tasks.diagnosis import trigger_aoo_path_planning
-        trigger_aoo_path_planning.delay(diagnosis_id=diagnosis_id)
+        trigger_aoo_path_planning.delay(
+            diagnosis_id=diagnosis_id,
+            student_id=student_id_str,
+            mastery_levels=mastery_levels,
+            cognitive_load=cognitive_load_overall,
+        )
         logger.info(
-            "AOO path planning triggered for diagnosis_id=%s", diagnosis_id
+            "AOO path planning triggered for diagnosis_id=%s, "
+            "student=%s, kps=%d, load=%.2f",
+            diagnosis_id, student_id_str,
+            len(mastery_levels), cognitive_load_overall,
         )
     except Exception as exc:
         logger.warning(
-            "Failed to trigger AOO task (Celery may be offline): %s", exc
+            "Celery 不可用, 使用同步执行兜底触发 AOO: %s", exc
         )
+        # ── 同步兜底: 后台线程执行 AOO 优化 ──
+        try:
+            from app.tasks.aoo_optimization import run_aoo_optimization_sync
+            sync_id = run_aoo_optimization_sync(
+                diagnosis_id=diagnosis_id,
+                student_id=student_id_str,
+                mastery_levels=mastery_levels,
+                cognitive_load=cognitive_load_overall,
+            )
+            logger.info(
+                "AOO sync path planning started: task_id=%s diagnosis=%s",
+                sync_id, diagnosis_id,
+            )
+        except Exception as sync_exc:
+            logger.error(
+                "AOO 同步执行也失败, 平台将以无路径状态返回: %s", sync_exc
+            )
 
-    # 6. 构建响应
-    weak_kp_ids = [
-        kp_id for kp_id, v in mastery_levels.items() if v < 0.6
-    ]
-
-    # 雷达图原始数据
-    radar_data_raw = {
-        diagnosis_service._get_kp_name(kp_id, kp_name_map): v
-        for kp_id, v in mastery_levels.items()
-    }
-
-    # 构建完整响应 (优先返回富文本)
+    # 6. 构建完整响应
     result_response = diagnosis_service.build_response(record)
 
     return ResponseBase(
         message="诊断完成",
-        data={
-            # 简化字段 (兼容旧 API)
-            "mastery_levels": mastery_levels,
-            "cognitive_load": cognitive_load.overall,
-            "weak_points": weak_kp_ids,
-            "diagnosis_id": diagnosis_id,
-            "radar_data": radar_data_raw,
-            # 完整响应
-            "result": result_response.model_dump(mode="json"),
-        },
+        data=result_response,
     )
 
 
@@ -186,14 +194,14 @@ async def submit_diagnosis(
 
 @router.get(
     "/latest",
-    response_model=ResponseBase[DiagnosisResultResponse],
+    response_model=ResponseBase[Optional[DiagnosisResultResponse]],
     summary="获取最新诊断结果",
 )
 async def get_latest_diagnosis(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前学生的最新诊断结果"""
+    """获取当前学生的最新诊断结果；若从未诊断则返回 null(200)"""
     result = await db.execute(
         select(DiagnosisRecord)
         .where(DiagnosisRecord.student_id == current_user.id)
@@ -203,12 +211,27 @@ async def get_latest_diagnosis(
     record = result.scalar_one_or_none()
 
     if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到诊断记录, 请先完成一次诊断测验",
-        )
+        return ResponseBase[Optional[DiagnosisResultResponse]](data=None)
 
-    return ResponseBase(data=diagnosis_service.build_response(record))
+    return ResponseBase[Optional[DiagnosisResultResponse]](
+        data=diagnosis_service.build_response(record)
+    )
+
+
+# ── GET /history — 获取诊断历史列表(兼容路径，必须放在 /{diagnosis_id} 之前) ─
+
+@router.get(
+    "/history",
+    response_model=ResponseBase[DiagnosisHistoryResponse],
+    summary="获取诊断历史列表(兼容路径)",
+)
+async def get_diagnosis_history_compat(
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=10, ge=1, le=50, description="每页数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_diagnosis_history(page, page_size, db, current_user)
 
 
 # ── GET /{diagnosis_id} — 获取诊断详情 ─────────────────
@@ -301,15 +324,45 @@ async def get_diagnosis_history(
     )
 
 
-@router.get(
-    "/history",
-    response_model=ResponseBase[DiagnosisHistoryResponse],
-    summary="获取诊断历史列表(兼容路径)",
+# ── DELETE /{diagnosis_id} — 删除诊断记录 ─────────────────
+
+@router.delete(
+    "/{diagnosis_id}",
+    response_model=ResponseBase,
+    summary="删除诊断记录",
 )
-async def get_diagnosis_history_compat(
-    page: int = Query(default=1, ge=1, description="页码"),
-    page_size: int = Query(default=10, ge=1, le=50, description="每页数量"),
+async def delete_diagnosis(
+    diagnosis_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await get_diagnosis_history(page, page_size, db, current_user)
+    """删除指定诊断记录 (仅本人)"""
+    try:
+        uid = uuid.UUID(diagnosis_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的诊断 ID 格式",
+        )
+
+    result = await db.execute(
+        select(DiagnosisRecord).where(DiagnosisRecord.id == uid)
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="诊断记录不存在",
+        )
+
+    if str(record.student_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权删除他人的诊断记录",
+        )
+
+    await db.delete(record)
+    await db.commit()
+
+    return ResponseBase(message="诊断记录已删除")

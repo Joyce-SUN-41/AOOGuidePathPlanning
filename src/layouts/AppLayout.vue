@@ -1,9 +1,30 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, h, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
+import { dashboardApi } from '@/api/modules/dashboard'
+import eventBus from '@/utils/eventBus'
 import type { UserRole } from '@/types'
+import {
+  BulbOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  DownOutlined,
+  UserOutlined,
+  SettingOutlined,
+  LogoutOutlined,
+  IdcardOutlined,
+  HomeOutlined,
+  ExperimentOutlined,
+  NodeIndexOutlined,
+  RobotOutlined,
+  DashboardOutlined,
+  TeamOutlined,
+  ApartmentOutlined,
+  FileTextOutlined,
+  HistoryOutlined
+} from '@ant-design/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -12,25 +33,97 @@ const userStore = useUserStore()
 
 // ========== 侧边栏 ==========
 
-/** 侧边栏宽度（展开 / 折叠） */
-const siderWidth = computed(() => (appStore.collapsed ? 64 : 220))
+/** 图标组件映射（用于侧边栏 <component :is> 渲染） */
+const iconComponents: Record<string, any> = {
+  HomeOutlined,
+  ExperimentOutlined,
+  NodeIndexOutlined,
+  RobotOutlined,
+  DashboardOutlined,
+  TeamOutlined,
+  ApartmentOutlined,
+  FileTextOutlined,
+  HistoryOutlined
+}
 
 // ========== 顶部菜单 ==========
 
 /** 当前选中的顶级菜单 */
 const selectedKeys = ref<string[]>([route.path])
 
-/** 菜单项（根据角色动态过滤） */
+/** 菜单项（根据角色动态过滤）
+ *  顶层 a-menu 使用 Ant Design items 属性，icon 需要是 VNode 或渲染函数 */
 const menuItems = computed(() => {
-  const allItems = [
-    { key: '/home', icon: 'HomeOutlined', label: '首页', roles: [] as UserRole[] },
-    { key: '/diagnose', icon: 'ExperimentOutlined', label: '认知诊断', roles: ['student'] as UserRole[] },
-    { key: '/path', icon: 'NodeIndexOutlined', label: '我的路径', roles: ['student'] as UserRole[] },
-    { key: '/chat', icon: 'RobotOutlined', label: '智能问答', roles: ['student'] as UserRole[] },
-    { key: '/dashboard', icon: 'DashboardOutlined', label: '学情看板', roles: ['student'] as UserRole[] },
-    { key: '/teacher', icon: 'TeamOutlined', label: '教师仪表盘', roles: ['teacher'] as UserRole[] },
-    { key: '/teacher/knowledge', icon: 'ApartmentOutlined', label: '知识点管理', roles: ['teacher'] as UserRole[] },
-    { key: '/teacher/questions', icon: 'FileTextOutlined', label: '题库管理', roles: ['teacher'] as UserRole[] }
+  const allItems: Array<{
+    key: string
+    icon: any
+    iconKey: string
+    label: string
+    roles: UserRole[]
+  }> = [
+    {
+      key: '/home',
+      icon: () => h(HomeOutlined),
+      iconKey: 'HomeOutlined',
+      label: '首页',
+      roles: []
+    },
+    {
+      key: '/diagnose',
+      icon: () => h(ExperimentOutlined),
+      iconKey: 'ExperimentOutlined',
+      label: '认知诊断',
+      roles: ['student']
+    },
+    {
+      key: '/path',
+      icon: () => h(NodeIndexOutlined),
+      iconKey: 'NodeIndexOutlined',
+      label: '我的路径',
+      roles: ['student']
+    },
+    {
+      key: '/chat',
+      icon: () => h(RobotOutlined),
+      iconKey: 'RobotOutlined',
+      label: '智能问答',
+      roles: ['student']
+    },
+    {
+      key: '/dashboard',
+      icon: () => h(DashboardOutlined),
+      iconKey: 'DashboardOutlined',
+      label: '学情看板',
+      roles: ['student']
+    },
+    {
+      key: '/records',
+      icon: () => h(HistoryOutlined),
+      iconKey: 'HistoryOutlined',
+      label: '我的记录',
+      roles: ['student']
+    },
+    {
+      key: '/teacher',
+      icon: () => h(TeamOutlined),
+      iconKey: 'TeamOutlined',
+      label: '教师仪表盘',
+      roles: ['teacher']
+    },
+    {
+      key: '/teacher/knowledge',
+      icon: () => h(ApartmentOutlined),
+      iconKey: 'ApartmentOutlined',
+      label: '知识点管理',
+      roles: ['teacher']
+    },
+    {
+      key: '/teacher/questions',
+      icon: () => h(FileTextOutlined),
+      iconKey: 'FileTextOutlined',
+      label: '题库管理',
+      roles: ['teacher']
+    }
   ]
 
   return allItems.filter((item) => {
@@ -49,7 +142,7 @@ watch(
   () => route.path,
   (path) => {
     // 匹配当前路由对应的顶级菜单 key (最长匹配优先, 避免 /teacher 覆盖 /teacher/knowledge)
-    let bestMatch: typeof menuItems.value[0] | undefined
+    let bestMatch: (typeof menuItems.value)[0] | undefined
     let bestLen = 0
     for (const item of menuItems.value) {
       if (path.startsWith(item.key) && item.key.length > bestLen) {
@@ -63,6 +156,54 @@ watch(
   },
   { immediate: true }
 )
+
+// ========== 学习统计(实时) ==========
+const totalDiagnoses = ref<number>(0)
+const totalPaths = ref<number>(0)
+
+async function loadStats() {
+  try {
+    const data = await dashboardApi.getOverview()
+    totalDiagnoses.value = data.totalDiagnoses ?? 0
+    totalPaths.value = data.totalPaths ?? 0
+  } catch (e) {
+    // 统计加载失败不影响布局, 保留上次值
+  }
+}
+
+// 进入应用即加载; 路由切换(诊断完成/路径生成或删除后)刷新统计
+onMounted(loadStats)
+watch(
+  () => route.path,
+  (path) => {
+    if (
+      path.startsWith('/diagnose') ||
+      path.startsWith('/path') ||
+      path.startsWith('/records')
+    ) {
+      loadStats()
+    }
+  }
+)
+
+// 停留在同一页面内删除诊断/路径时不会触发路由变化，
+// 这里额外监听全局事件，保证「学习统计」实时刷新。
+const unsubscribers: Array<() => void> = []
+onMounted(() => {
+  unsubscribers.push(
+    eventBus.on('stats:refresh', loadStats),
+    eventBus.on('diagnosis:changed', loadStats),
+    eventBus.on('path:changed', loadStats)
+  )
+})
+onUnmounted(() => {
+  unsubscribers.forEach((fn) => fn())
+  unsubscribers.length = 0
+})
+
+function goToRecords(tab: 'diagnosis' | 'path') {
+  router.push({ path: '/records', query: { tab } })
+}
 
 // ========== 用户下拉 ==========
 
@@ -175,7 +316,7 @@ function handleLogout() {
               :title="item.label"
               @click="router.push(item.key)"
             >
-              <component :is="item.icon" />
+              <component :is="iconComponents[item.iconKey]" />
             </div>
           </div>
 
@@ -191,7 +332,7 @@ function handleLogout() {
                   :class="{ active: selectedKeys[0] === item.key }"
                   @click="router.push(item.key)"
                 >
-                  <component :is="item.icon" class="link-icon" />
+                  <component :is="iconComponents[item.iconKey]" class="link-icon" />
                   <span class="link-label">{{ item.label }}</span>
                 </div>
               </div>
@@ -200,12 +341,12 @@ function handleLogout() {
             <div class="sider-section">
               <div class="sider-section-title">学习统计</div>
               <div class="stat-cards">
-                <div class="stat-card">
-                  <div class="stat-value">12</div>
+                <div class="stat-card" @click="goToRecords('diagnosis')" style="cursor: pointer">
+                  <div class="stat-value">{{ totalDiagnoses }}</div>
                   <div class="stat-label">已完成诊断</div>
                 </div>
-                <div class="stat-card">
-                  <div class="stat-value">3</div>
+                <div class="stat-card" @click="goToRecords('path')" style="cursor: pointer">
+                  <div class="stat-value">{{ totalPaths }}</div>
                   <div class="stat-label">学习路径</div>
                 </div>
               </div>
@@ -238,48 +379,6 @@ function handleLogout() {
     </a-layout>
   </a-layout>
 </template>
-
-<script lang="ts">
-import {
-  BulbOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  DownOutlined,
-  UserOutlined,
-  SettingOutlined,
-  LogoutOutlined,
-  IdcardOutlined,
-  HomeOutlined,
-  ExperimentOutlined,
-  NodeIndexOutlined,
-  RobotOutlined,
-  DashboardOutlined,
-  TeamOutlined,
-  ApartmentOutlined,
-  FileTextOutlined
-} from '@ant-design/icons-vue'
-
-export default {
-  components: {
-    BulbOutlined,
-    MenuFoldOutlined,
-    MenuUnfoldOutlined,
-    DownOutlined,
-    UserOutlined,
-    SettingOutlined,
-    LogoutOutlined,
-    IdcardOutlined,
-    HomeOutlined,
-    ExperimentOutlined,
-    NodeIndexOutlined,
-    RobotOutlined,
-    DashboardOutlined,
-    TeamOutlined,
-    ApartmentOutlined,
-    FileTextOutlined
-  }
-}
-</script>
 
 <style scoped>
 /* ============================================================
@@ -326,25 +425,30 @@ export default {
   width: 36px;
   height: 36px;
   background: linear-gradient(135deg, rgba(212, 163, 115, 0.25), rgba(212, 163, 115, 0.08));
-  border: 1px solid rgba(212, 163, 115, 0.20);
+  border: 1px solid rgba(212, 163, 115, 0.2);
   border-radius: 10px;
   font-size: 20px;
-  color: #D4A373;
+  color: #d4a373;
   animation: logo-pulse 3s ease-in-out infinite;
 }
 
 @keyframes logo-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(212, 163, 115, 0.15); }
-  50% { box-shadow: 0 0 18px rgba(212, 163, 115, 0.30); }
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(212, 163, 115, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(212, 163, 115, 0.3);
+  }
 }
 
 .logo-title {
   font-size: 18px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   letter-spacing: 1px;
   white-space: nowrap;
-  background: linear-gradient(135deg, #F8FAFC, #D4A373);
+  background: linear-gradient(135deg, #f8fafc, #d4a373);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -360,7 +464,7 @@ export default {
 }
 
 .top-menu :deep(.ant-menu-item) {
-  color: #64748B !important;
+  color: #64748b !important;
   border-radius: 6px 6px 0 0;
   margin: 0 4px !important;
   padding: 0 18px !important;
@@ -370,13 +474,13 @@ export default {
 }
 
 .top-menu :deep(.ant-menu-item:hover) {
-  color: #F8FAFC !important;
+  color: #f8fafc !important;
   background: rgba(255, 255, 255, 0.06) !important;
 }
 
 .top-menu :deep(.ant-menu-item-selected) {
-  color: #D4A373 !important;
-  background: rgba(212, 163, 115, 0.10) !important;
+  color: #d4a373 !important;
+  background: rgba(212, 163, 115, 0.1) !important;
   font-weight: 600;
 }
 
@@ -411,7 +515,7 @@ export default {
 }
 
 .user-name {
-  color: #F8FAFC;
+  color: #f8fafc;
   font-size: 14px;
   font-weight: 500;
   max-width: 100px;
@@ -428,19 +532,19 @@ export default {
 }
 
 .user-role-badge.teacher {
-  background: rgba(251, 191, 36, 0.20);
-  color: #FBBF24;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
   border: 1px solid rgba(251, 191, 36, 0.25);
 }
 
 .user-role-badge.student {
-  background: rgba(52, 211, 153, 0.20);
-  color: #34D399;
+  background: rgba(52, 211, 153, 0.2);
+  color: #34d399;
   border: 1px solid rgba(52, 211, 153, 0.25);
 }
 
 .user-arrow {
-  color: #F8FAFC0;
+  color: #f8fafc;
   font-size: 10px;
 }
 
@@ -453,7 +557,7 @@ export default {
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  color: #64748B;
+  color: #64748b;
   font-size: 16px;
   cursor: pointer;
   transition: all 0.25s;
@@ -461,7 +565,7 @@ export default {
 
 .collapse-trigger:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: #F8FAFC;
+  color: #f8fafc;
 }
 
 /* ============================================================
@@ -476,7 +580,7 @@ export default {
    侧边栏 — 深色毛玻璃
    ============================================================ */
 .app-sider {
-  background: rgba(10, 13, 20, 0.60) !important;
+  background: rgba(10, 13, 20, 0.6) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
@@ -511,19 +615,19 @@ export default {
   height: 40px;
   border-radius: 10px;
   font-size: 18px;
-  color: #F8FAFC0;
+  color: #f8fafc;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .sider-icon-item:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: #00D4FF;
+  color: #00d4ff;
 }
 
 .sider-icon-item.active {
   background: rgba(212, 163, 115, 0.12);
-  color: #D4A373;
+  color: #d4a373;
 }
 
 /* 展开状态 */
@@ -534,7 +638,7 @@ export default {
 .sider-section-title {
   font-size: 12px;
   font-weight: 600;
-  color: #F8FAFC0;
+  color: #f8fafc;
   text-transform: uppercase;
   letter-spacing: 1px;
   padding: 0 8px;
@@ -554,19 +658,19 @@ export default {
   padding: 9px 12px;
   border-radius: 8px;
   cursor: pointer;
-  color: #64748B;
+  color: #64748b;
   font-size: 13px;
   transition: all 0.2s;
 }
 
 .quick-link-item:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: #F8FAFC;
+  color: #f8fafc;
 }
 
 .quick-link-item.active {
   background: rgba(212, 163, 115, 0.12);
-  color: #D4A373;
+  color: #d4a373;
   font-weight: 600;
 }
 
@@ -591,14 +695,14 @@ export default {
 .stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: #D4A373;
+  color: #d4a373;
   line-height: 1;
   font-family: 'JetBrains Mono', monospace;
 }
 
 .stat-label {
   font-size: 12px;
-  color: #F8FAFC0;
+  color: #f8fafc;
   margin-top: 6px;
 }
 
@@ -627,7 +731,7 @@ export default {
 }
 
 .footer-content {
-  color: #F8FAFC0;
+  color: #f8fafc;
   font-size: 13px;
 }
 

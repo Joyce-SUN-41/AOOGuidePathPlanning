@@ -5,7 +5,7 @@ import type {
   DiagnosisBrief,
   MasteryItem,
   WeakPoint,
-  CognitiveLoadProfile,
+  CognitiveLoadProfile
 } from '@/types'
 import { diagnosisApi } from '@/api/modules/diagnosis'
 
@@ -50,12 +50,14 @@ export const useDiagnosisStore = defineStore(
 
     /** 认知负荷 */
     const cognitiveLoad = computed<CognitiveLoadProfile>(() => {
-      return currentDiagnosis.value?.cognitiveLoad ?? {
-        memoryLoad: 0,
-        attentionLoad: 0,
-        processingLoad: 0,
-        overall: 0,
-      }
+      return (
+        currentDiagnosis.value?.cognitiveLoad ?? {
+          memoryLoad: 0,
+          attentionLoad: 0,
+          processingLoad: 0,
+          overall: 0
+        }
+      )
     })
 
     /** 薄弱点列表 */
@@ -78,7 +80,7 @@ export const useDiagnosisStore = defineStore(
         excellent: levels.filter((m) => m.level === 'excellent').length,
         proficient: levels.filter((m) => m.level === 'proficient').length,
         developing: levels.filter((m) => m.level === 'developing').length,
-        weak: levels.filter((m) => m.level === 'weak').length,
+        weak: levels.filter((m) => m.level === 'weak').length
       }
     })
 
@@ -86,7 +88,7 @@ export const useDiagnosisStore = defineStore(
     const masteryRadarData = computed<{ name: string; value: number }[]>(() => {
       return masteryLevels.value.map((m) => ({
         name: m.knowledgePoint,
-        value: Math.round(m.mastery * 100),
+        value: Math.round(m.mastery * 100)
       }))
     })
 
@@ -98,9 +100,9 @@ export const useDiagnosisStore = defineStore(
       error.value = null
       try {
         const result = await diagnosisApi.getLatest()
-        if (result) {
-          currentDiagnosis.value = result
-        }
+        // 必须无条件赋值：接口返回 null 表示用户已无诊断记录（例如刚被删除），
+        // 此时若保留旧值，持久化的陈旧快照会让「学情看板」继续渲染已删除的数据。
+        currentDiagnosis.value = result ?? null
       } catch (e) {
         console.warn('[DiagnosisStore] 获取最新诊断失败:', e)
         error.value = '获取诊断数据失败'
@@ -160,14 +162,14 @@ export const useDiagnosisStore = defineStore(
       fetchLatestDiagnosis,
       fetchById,
       fetchHistory,
-      clear,
+      clear
     }
   },
   {
     persist: {
       key: 'oat_diagnosis_store',
       storage: localStorage,
-      pick: ['currentDiagnosis'],
-    },
+      paths: ['currentDiagnosis']
+    }
   }
 )

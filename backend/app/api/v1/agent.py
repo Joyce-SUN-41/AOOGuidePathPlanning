@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from app.api.deps import get_current_user
+from app.models.user import User
 from app.schemas.agent import (
     AgentChatRequest,
     AgentChatResponse,
@@ -25,14 +27,18 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
     summary="调用讯飞星辰 Agent 对话",
     description="支持 JSON 一次性返回或 SSE 流式返回。",
 )
-async def agent_chat(request: AgentChatRequest):
+async def agent_chat(
+    request: AgentChatRequest,
+    current_user: User = Depends(get_current_user),
+):
     service = get_agent_service()
+    user_id = request.user_id or str(current_user.id)
 
     if request.stream:
         stream = service.chat_stream(
             session_id=request.session_id,
             message=request.message,
-            user_id=request.user_id,
+            user_id=user_id,
         )
         return StreamingResponse(
             stream,
@@ -47,7 +53,7 @@ async def agent_chat(request: AgentChatRequest):
     response = await service.chat(
         session_id=request.session_id,
         message=request.message,
-        user_id=request.user_id,
+        user_id=user_id,
     )
     return ResponseBase(data=response)
 
@@ -59,11 +65,13 @@ async def agent_chat(request: AgentChatRequest):
 )
 async def get_agent_history(
     session_id: str,
-    user_id: str = Query(..., description="学生/用户 ID"),
     limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
 ):
     service = get_agent_service()
-    history = await service.get_history(session_id=session_id, user_id=user_id, limit=limit)
+    history = await service.get_history(
+        session_id=session_id, user_id=str(current_user.id), limit=limit
+    )
     return ResponseBase(data=history)
 
 
@@ -73,10 +81,10 @@ async def get_agent_history(
     summary="查询用户会话列表",
 )
 async def list_agent_sessions(
-    user_id: str = Query(..., description="学生/用户 ID"),
+    current_user: User = Depends(get_current_user),
 ):
     service = get_agent_service()
-    sessions = await service.list_user_sessions(user_id=user_id)
+    sessions = await service.list_user_sessions(user_id=str(current_user.id))
     return ResponseBase(data=sessions)
 
 
@@ -87,10 +95,12 @@ async def list_agent_sessions(
 )
 async def delete_agent_session(
     session_id: str,
-    user_id: str = Query(..., description="学生/用户 ID"),
+    current_user: User = Depends(get_current_user),
 ):
     service = get_agent_service()
-    deleted = await service.delete_session(session_id=session_id, user_id=user_id)
+    deleted = await service.delete_session(
+        session_id=session_id, user_id=str(current_user.id)
+    )
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -106,7 +116,9 @@ async def delete_agent_session(
     response_model=ResponseBase[AgentHealthResponse],
     summary="Agent 配置检查",
 )
-async def agent_health():
+async def agent_health(
+    current_user: User = Depends(get_current_user),
+):
     service = get_agent_service()
     client = service.client
     data = AgentHealthResponse(

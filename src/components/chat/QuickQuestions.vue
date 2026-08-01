@@ -2,12 +2,7 @@
   <div class="quick-questions" v-if="questions.length > 0">
     <div class="qq-label">试试这些问题</div>
     <div class="qq-grid">
-      <div
-        v-for="q in questions"
-        :key="q.id"
-        class="qq-item"
-        @click="$emit('select', q.text)"
-      >
+      <div v-for="q in questions" :key="q.id" class="qq-item" @click="$emit('select', q.text)">
         <component v-if="q.icon" :is="iconMap[q.icon]" class="qq-icon" />
         <span>{{ q.text }}</span>
       </div>
@@ -21,7 +16,7 @@ import {
   QuestionCircleOutlined,
   ExperimentOutlined,
   BookOutlined,
-  ThunderboltOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons-vue'
 import type { QuickQuestion } from '@/types/rag'
 import type { Component } from 'vue'
@@ -39,7 +34,7 @@ const iconMap: Record<string, Component> = {
   question: QuestionCircleOutlined,
   experiment: ExperimentOutlined,
   book: BookOutlined,
-  thunderbolt: ThunderboltOutlined,
+  thunderbolt: ThunderboltOutlined
 }
 </script>
 
@@ -70,7 +65,7 @@ const iconMap: Record<string, Component> = {
   padding: 7px 16px;
   border-radius: 20px;
   background: rgba(212, 163, 115, 0.08);
-  color: #D4A373;
+  color: #d4a373;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.25s ease;
@@ -79,14 +74,14 @@ const iconMap: Record<string, Component> = {
 
   &:hover {
     background: rgba(212, 163, 115, 0.16);
-    border-color: rgba(212, 163, 115, 0.30);
+    border-color: rgba(212, 163, 115, 0.3);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(212, 163, 115, 0.10);
+    box-shadow: 0 4px 12px rgba(212, 163, 115, 0.1);
   }
 
   &:active {
     transform: translateY(0);
-    background: rgba(212, 163, 115, 0.20);
+    background: rgba(212, 163, 115, 0.2);
   }
 }
 

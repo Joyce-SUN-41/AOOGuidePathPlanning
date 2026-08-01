@@ -14,6 +14,7 @@ class RAGQueryRequest(BaseModel):
     max_tokens: int = Field(default=1024, ge=64, le=4096, description="最大生成 token 数")
     student_id: Optional[str] = Field(default=None, description="学生 ID（可选）")
     subject: Optional[str] = Field(default=None, description="学科过滤（可选）")
+    skip_retrieval: bool = Field(default=False, description="跳过知识库检索，直接使用大模型回答")
 
 
 class RAGSource(BaseModel):

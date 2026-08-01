@@ -11,7 +11,6 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from app.core.config import settings
@@ -22,6 +21,12 @@ from app.services.rag.embedder import EmbedderConfig, FallingBackEmbedder
 from app.services.rag.vector_store import SearchHit, VectorStore, VectorStoreConfig
 
 logger = logging.getLogger(__name__)
+
+# 单次 LLM 调用的最大等待时间（秒）。
+# 必须显著小于前端 axios 的 120s 超时，
+# 这样超时可以在后端被捕获并转成可读提示，
+# 而不是让浏览器抛出 "timeout of 120000ms exceeded"。
+LLM_CALL_TIMEOUT: float = 90.0
 
 
 # ============================================================================
@@ -149,6 +154,28 @@ class RAGPromptBuilder:
         """同 build，但 messages 不含 system（stream 模式兼容）"""
         return cls.build(question, hits, max_context_chars)
 
+    @staticmethod
+    def normalize_roles(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """将 system 角色消息降级为 user 消息（部分模型不支持 system 角色）
+
+        讯飞 generalv3 (Pro) / MaaS 部署模型对 system role 支持有限，
+        将其内容合并到首条 user 消息前可避免 400 错误。
+        """
+        out: List[Dict[str, str]] = []
+        for m in messages:
+            if m.get("role") == "system":
+                # 合并到前一条 user，或作为新的 user 插入
+                if out and out[-1].get("role") == "user":
+                    out[-1] = {
+                        "role": "user",
+                        "content": f"{m['content']}\n\n{m['content']}",
+                    }
+                else:
+                    out.append({"role": "user", "content": m["content"]})
+            else:
+                out.append(m)
+        return out
+
 
 # ============================================================================
 # 知识库核心服务
@@ -162,7 +189,7 @@ class KnowledgeBase:
     1. 文档加载 (PDF/TXT/MD)
     2. 文档分块 (递归字符分割 + Markdown 标题感知)
     3. 向量化 (Spark API → BGE → 哈希降级)
-    4. 向量存储 (ChromaDB 持久化)
+    4. 向量存储 (NumPy + JSON 持久化)
     5. 语义检索 (Top-K + 相似度阈值)
     6. RAG 问答 (检索 → 构建 Prompt → LLM 生成)
 
@@ -209,6 +236,13 @@ class KnowledgeBase:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    @property
+    def vector_store(self) -> VectorStore:
+        """公开向量存储实例，供外部检查文档数量"""
+        if not self._vector_store:
+            raise RuntimeError("VectorStore not initialized")
+        return self._vector_store
+
     async def initialize(self) -> None:
         """初始化所有子组件"""
         if self._initialized:
@@ -220,31 +254,52 @@ class KnowledgeBase:
 
             logger.info("Initializing KnowledgeBase...")
 
-            # Embedder
-            embedder_config = EmbedderConfig(
-                api_key=settings.XF_API_KEY,
-                api_secret=settings.XF_API_SECRET,
-                app_id=settings.XF_APP_ID,
-            )
-            self._embedder = FallingBackEmbedder(embedder_config)
-
-            # Vector Store
-            self._vector_store = VectorStore(self.vector_config)
-            self._vector_store.initialize()
-
-            # LLM Client
-            from app.services.llm.spark_client import SparkClient
-
+            # LLM Client —— 优先创建，直连问答不依赖检索组件
             self._llm_client = SparkClient(
                 api_key=settings.XF_API_KEY,
                 api_secret=settings.XF_API_SECRET,
                 app_id=settings.XF_APP_ID,
+                api_url=settings.XF_API_URL,
+                api_password=settings.XF_API_PASSWORD,
                 model=settings.XF_MODEL,
             )
 
+            # Embedder（检索增强用，失败不阻塞直连问答）
+            try:
+                embedder_config = EmbedderConfig(
+                    api_key=settings.XF_API_KEY,
+                    api_secret=settings.XF_API_SECRET,
+                    app_id=settings.XF_APP_ID,
+                )
+                self._embedder = FallingBackEmbedder(embedder_config)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Embedder init skipped (直连问答不受影响): %s", e)
+                self._embedder = None
+
+            # Vector Store (NumPy + JSON, 无外部依赖)
+            try:
+                self._vector_store = VectorStore(self.vector_config)
+                self._vector_store.initialize()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("VectorStore init skipped (检索不可用): %s", e)
+                self._vector_store = None
+
             self._initialized = True
-            logger.info("KnowledgeBase initialized | collection=%s | docs=%d",
-                        self.vector_config.collection_name, self._vector_store.count())
+            logger.info(
+                "KnowledgeBase initialized | llm=%s | embedder=%s | vector=%s",
+                bool(self._llm_client),
+                bool(self._embedder),
+                bool(self._vector_store),
+            )
+
+            # 预热嵌入器（仅当可用时）：主动触发一次空文本向量化，
+            # 使 Spark/BGE 的"不可用"短路标志在初始化阶段就确立，
+            # 避免首条真实 query 卡在网络超时。失败不影响直连问答。
+            if self._embedder is not None:
+                try:
+                    await self._embedder.embed(["__warmup__"])
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Embedder warmup skipped: %s", e)
 
     async def close(self) -> None:
         """释放资源"""
@@ -398,6 +453,104 @@ class KnowledgeBase:
         raw = f"{chunk.metadata.get('file_path', '')}:{chunk.chunk_index}"
         return hashlib.md5(raw.encode()).hexdigest()[:12]
 
+    # ---- 直连 LLM（跳过知识库检索） ----
+
+    async def direct_chat(
+        self,
+        question: str,
+        temperature: float = 0.5,
+        max_tokens: int = 1024,
+    ) -> RAGQueryResult:
+        """直接调用大模型回答，不经过检索增强"""
+        if not self._llm_client:
+            raise RuntimeError("LLM 客户端未初始化，无法直连问答")
+
+        query_id = str(uuid.uuid4())[:8]
+        system_prompt = (
+            "你是一个专业的 AI 助手，名为「燕麦智导」。"
+            "请用中文简洁、准确地回答用户的问题。"
+            "如果问题超出你的知识范围，请如实说明。"
+            "回答应结构清晰，适当使用要点列表。"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question},
+        ]
+        # 部分模型不支持 system 角色，降级为 user
+        # normalize_roles 定义在 RAGPromptBuilder 上，KnowledgeBase 自身没有该方法
+        messages = RAGPromptBuilder.normalize_roles(messages)
+
+        logger.info("[direct_chat] 直连 LLM | id=%s | q=%s", query_id, question[:60])
+
+        # 预检：LLM 客户端是否已配置
+        if not self._llm_client.is_configured:
+            msg = (
+                "LLM 服务未配置，请检查环境变量: "
+                "REST 模式需 XF_API_URL + XF_API_PASSWORD；"
+                "WebSocket 模式需 XF_APP_ID + XF_API_KEY + XF_API_SECRET + XF_ASSISTANT_ID"
+            )
+            logger.warning("[direct_chat] %s", msg)
+            return RAGQueryResult(
+                answer=f"AI 服务未配置：{msg}",
+                sources=[],
+                confidence=0.0,
+                retrieval_count=0,
+                model=self._llm_client.model or "",
+                query_id=query_id,
+            )
+
+        try:
+            response = await asyncio.wait_for(
+                self._llm_client.chat(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ),
+                timeout=LLM_CALL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[direct_chat] LLM 调用超时 (%.0fs)", LLM_CALL_TIMEOUT)
+            return RAGQueryResult(
+                answer=(
+                    f"AI 生成超时（超过 {LLM_CALL_TIMEOUT:.0f} 秒）。"
+                    "可能是模型服务繁忙，请稍后重试或缩短问题长度。"
+                ),
+                sources=[],
+                confidence=0.0,
+                retrieval_count=0,
+                model=self._llm_client.model or "",
+                query_id=query_id,
+            )
+        except Exception as e:
+            logger.error("[direct_chat] LLM 调用失败: %s", e)
+            return RAGQueryResult(
+                answer=f"AI 服务暂时不可用: {e}",
+                sources=[],
+                confidence=0.0,
+                retrieval_count=0,
+                model=self._llm_client.model or "",
+                query_id=query_id,
+            )
+
+        token_usage = None
+        if response.usage:
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+
+        return RAGQueryResult(
+            answer=response.content,
+            sources=[],
+            confidence=0.7,
+            retrieval_count=0,
+            model=self._llm_client.model or "",
+            token_usage=token_usage,
+            query_id=query_id,
+        )
+
     # ---- 检索 ----
 
     async def retrieve(
@@ -478,18 +631,53 @@ class KnowledgeBase:
 
         # Step 2: 构建 Prompt
         messages, sources = RAGPromptBuilder.build(question, retrieval.hits)
+        # 部分模型不支持 system 角色，降级为 user
+        messages = RAGPromptBuilder.normalize_roles(messages)
 
         # Step 3: LLM 生成
+        if not self._llm_client.is_configured:
+            msg = (
+                "LLM 服务未配置，请检查环境变量: "
+                "REST 模式需 XF_API_URL + XF_API_PASSWORD；"
+                "WebSocket 模式需 XF_APP_ID + XF_API_KEY + XF_API_SECRET + XF_ASSISTANT_ID"
+            )
+            logger.warning("[RAG query] %s", msg)
+            return RAGQueryResult(
+                answer=f"AI 服务未配置：{msg}",
+                sources=sources,
+                confidence=0.0,
+                retrieval_count=retrieval.count,
+                query_id=query_id,
+            )
+
         try:
-            response = await self._llm_client.chat(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+            # 必须设置超时上限：前端 axios 在 120s 处硬性中断，
+            # 若后端一直挂着等待 LLM，用户只会看到无意义的
+            # "timeout of 120000ms exceeded"。这里提前失败并给出可读原因。
+            response = await asyncio.wait_for(
+                self._llm_client.chat(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ),
+                timeout=LLM_CALL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error("LLM call timed out after %.0fs in RAG query", LLM_CALL_TIMEOUT)
+            return RAGQueryResult(
+                answer=(
+                    f"AI 生成超时（超过 {LLM_CALL_TIMEOUT:.0f} 秒）。"
+                    "可能是模型服务繁忙，请稍后重试或缩短问题长度。"
+                ),
+                sources=sources,
+                confidence=0.0,
+                retrieval_count=retrieval.count,
+                query_id=query_id,
             )
         except Exception as e:
             logger.error("LLM call failed in RAG query: %s", e)
             return RAGQueryResult(
-                answer="AI 服务暂时不可用，请稍后重试。",
+                answer=f"AI 服务暂时不可用: {e}",
                 sources=sources,
                 confidence=0.0,
                 retrieval_count=retrieval.count,
@@ -645,7 +833,12 @@ async def get_knowledge_base() -> KnowledgeBase:
 
     if _knowledge_base_instance is None:
         _knowledge_base_instance = KnowledgeBase()
-        await _knowledge_base_instance.initialize()
+        try:
+            await _knowledge_base_instance.initialize()
+        except Exception:
+            # 初始化失败时重置，让下次请求可以重试
+            _knowledge_base_instance = None
+            raise
 
     return _knowledge_base_instance
 

@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import { message } from 'ant-design-vue'
 import {
   ExperimentOutlined,
   ClockCircleOutlined,
@@ -21,7 +20,6 @@ import {
   BookOutlined
 } from '@ant-design/icons-vue'
 import { diagnosisApi } from '@/api/modules/diagnosis'
-import { pathApi } from '@/api/modules/path'
 import type {
   DiagnosisQuestion,
   DiagnosisAnswer,
@@ -34,180 +32,210 @@ import type {
 const router = useRouter()
 
 // ═══════════════════════════════════════════
-// Mock 题库（15 道题，5 个知识点，每个知识点 3 题）
+// Mock 题库（15 道题，5 个 AI 通识知识点，每个知识点 3 题）
 // ═══════════════════════════════════════════
 const MOCK_QUESTIONS: DiagnosisQuestion[] = [
-  // ===== 知识点 1：一元二次方程 =====
+  // ===== 知识点 1：人工智能基础概念 =====
   {
-    id: 'q1', topic: 'k1_一元二次方程', difficulty: 1,
-    title: '方程 x² - 5x + 6 = 0 的解是？',
+    id: 'q1',
+    topic: 'k1_人工智能基础概念',
+    difficulty: 1,
+    title: '人工智能（AI）这一概念诞生于哪一年的什么会议？',
     options: [
-      { id: 'a', text: 'x = 2 或 x = 3', weight: 1 },
-      { id: 'b', text: 'x = -2 或 x = -3', weight: 0 },
-      { id: 'c', text: 'x = 1 或 x = 6', weight: 0 },
-      { id: 'd', text: 'x = -1 或 x = -6', weight: 0 }
+      { id: 'a', text: '1956年 达特茅斯会议', weight: 1 },
+      { id: 'b', text: '1960年 纽约会议', weight: 0 },
+      { id: 'c', text: '1972年 斯德哥尔摩会议', weight: 0 },
+      { id: 'd', text: '1980年 东京会议', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q2', topic: 'k1_一元二次方程', difficulty: 2,
-    title: '若方程 2x² + kx + 3 = 0 有两个相等的实数根，则 k 的值为？',
+    id: 'q2',
+    topic: 'k1_人工智能基础概念',
+    difficulty: 2,
+    title: '根据课程内容，人工智能最本质的属性是什么？',
     options: [
-      { id: 'a', text: 'k = ±2√3', weight: 0 },
-      { id: 'b', text: 'k = ±2√6', weight: 1 },
-      { id: 'c', text: 'k = ±√6', weight: 0 },
-      { id: 'd', text: 'k = ±3√2', weight: 0 }
+      { id: 'a', text: '意识与自由意志', weight: 0 },
+      { id: 'b', text: '能力（学习、判断、理解等大脑能力）', weight: 1 },
+      { id: 'c', text: '情感与创造力', weight: 0 },
+      { id: 'd', text: '自我复制与进化', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q3', topic: 'k1_一元二次方程', difficulty: 3,
-    title: '关于 x 的方程 (m-1)x² + 2mx + (m+1) = 0，当方程有两个不相等的实数根时，m 的取值范围是？',
+    id: 'q3',
+    topic: 'k1_人工智能基础概念',
+    difficulty: 3,
+    title: '下列哪位人物提出了"图灵测试"，为判断机器是否具有智能设立了标准？',
     options: [
-      { id: 'a', text: 'm > 1/2 且 m ≠ 1', weight: 1 },
-      { id: 'b', text: 'm > 1/2', weight: 0 },
-      { id: 'c', text: 'm < 1/2', weight: 0 },
-      { id: 'd', text: 'm ≠ 1', weight: 0 }
-    ],
-    type: 'single'
-  },
-
-  // ===== 知识点 2：函数图像与性质 =====
-  {
-    id: 'q4', topic: 'k2_函数图像与性质', difficulty: 1,
-    title: '一次函数 y = 2x - 3 的图像不经过哪个象限？',
-    options: [
-      { id: 'a', text: '第一象限', weight: 0 },
-      { id: 'b', text: '第二象限', weight: 1 },
-      { id: 'c', text: '第三象限', weight: 0 },
-      { id: 'd', text: '第四象限', weight: 0 }
-    ],
-    type: 'single'
-  },
-  {
-    id: 'q5', topic: 'k2_函数图像与性质', difficulty: 2,
-    title: '二次函数 y = x² - 4x + 7 的顶点坐标是？',
-    options: [
-      { id: 'a', text: '(2, 3)', weight: 1 },
-      { id: 'b', text: '(-2, 3)', weight: 0 },
-      { id: 'c', text: '(2, 11)', weight: 0 },
-      { id: 'd', text: '(-2, 11)', weight: 0 }
-    ],
-    type: 'single'
-  },
-  {
-    id: 'q6', topic: 'k2_函数图像与性质', difficulty: 3,
-    title: '若函数 f(x) = ax² + bx + c 的图像关于直线 x = 1 对称，且过点 (0, 2) 和 (3, 5)，则 f(2) 的值为？',
-    options: [
-      { id: 'a', text: '4', weight: 0 },
-      { id: 'b', text: '3', weight: 1 },
-      { id: 'c', text: '5', weight: 0 },
-      { id: 'd', text: '6', weight: 0 }
+      { id: 'a', text: '阿兰·图灵 (Alan Turing)', weight: 1 },
+      { id: 'b', text: '杰弗里·辛顿 (Geoffrey Hinton)', weight: 0 },
+      { id: 'c', text: '约翰·麦卡锡 (John McCarthy)', weight: 0 },
+      { id: 'd', text: '诺姆·乔姆斯基 (Noam Chomsky)', weight: 0 }
     ],
     type: 'single'
   },
 
-  // ===== 知识点 3：三角函数 =====
+  // ===== 知识点 2：机器学习基础 =====
   {
-    id: 'q7', topic: 'k3_三角函数', difficulty: 1,
-    title: 'sin²30° + cos²30° 的值为？',
+    id: 'q4',
+    topic: 'k2_机器学习基础',
+    difficulty: 1,
+    title: '机器学习的三大范式不包括以下哪个？',
     options: [
-      { id: 'a', text: '1', weight: 1 },
-      { id: 'b', text: '0', weight: 0 },
-      { id: 'c', text: '1/2', weight: 0 },
-      { id: 'd', text: '√3/2', weight: 0 }
+      { id: 'a', text: '监督学习', weight: 0 },
+      { id: 'b', text: '无监督学习', weight: 0 },
+      { id: 'c', text: '知识驱动学习', weight: 1 },
+      { id: 'd', text: '强化学习', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q8', topic: 'k3_三角函数', difficulty: 2,
-    title: '在 △ABC 中，a = 3, b = 5, sinA = 1/3，则 sinB 等于？',
+    id: 'q5',
+    topic: 'k2_机器学习基础',
+    difficulty: 2,
+    title: '模型在训练集上表现很好但在测试集上表现较差，这种现象叫什么？',
     options: [
-      { id: 'a', text: '5/9', weight: 1 },
-      { id: 'b', text: '3/5', weight: 0 },
-      { id: 'c', text: '1/5', weight: 0 },
-      { id: 'd', text: '1/3', weight: 0 }
+      { id: 'a', text: '过拟合 (Overfitting)', weight: 1 },
+      { id: 'b', text: '欠拟合 (Underfitting)', weight: 0 },
+      { id: 'c', text: '梯度消失', weight: 0 },
+      { id: 'd', text: '数据泄露', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q9', topic: 'k3_三角函数', difficulty: 3,
-    title: '函数 y = 2sin(2x + π/6) 的最小正周期是？',
+    id: 'q6',
+    topic: 'k2_机器学习基础',
+    difficulty: 3,
+    title: 'K-means 聚类算法属于哪种学习范式？',
     options: [
-      { id: 'a', text: 'π', weight: 1 },
-      { id: 'b', text: '2π', weight: 0 },
-      { id: 'c', text: 'π/2', weight: 0 },
-      { id: 'd', text: '4π', weight: 0 }
-    ],
-    type: 'single'
-  },
-
-  // ===== 知识点 4：数列 =====
-  {
-    id: 'q10', topic: 'k4_数列', difficulty: 1,
-    title: '等差数列 {aₙ} 中，a₁ = 2，d = 3，则 a₁₀ 的值为？',
-    options: [
-      { id: 'a', text: '29', weight: 1 },
-      { id: 'b', text: '32', weight: 0 },
-      { id: 'c', text: '27', weight: 0 },
-      { id: 'd', text: '30', weight: 0 }
-    ],
-    type: 'single'
-  },
-  {
-    id: 'q11', topic: 'k4_数列', difficulty: 2,
-    title: '等比数列 {aₙ} 中，a₂ = 6，a₄ = 54，则公比 q 为？',
-    options: [
-      { id: 'a', text: '3', weight: 1 },
-      { id: 'b', text: '2', weight: 0 },
-      { id: 'c', text: '6', weight: 0 },
-      { id: 'd', text: '9', weight: 0 }
-    ],
-    type: 'single'
-  },
-  {
-    id: 'q12', topic: 'k4_数列', difficulty: 3,
-    title: '已知数列 {aₙ} 的前 n 项和 Sₙ = n² + 2n，则 a₅ 的值为？',
-    options: [
-      { id: 'a', text: '11', weight: 1 },
-      { id: 'b', text: '15', weight: 0 },
-      { id: 'c', text: '9', weight: 0 },
-      { id: 'd', text: '13', weight: 0 }
+      { id: 'a', text: '监督学习', weight: 0 },
+      { id: 'b', text: '无监督学习', weight: 1 },
+      { id: 'c', text: '半监督学习', weight: 0 },
+      { id: 'd', text: '强化学习', weight: 0 }
     ],
     type: 'single'
   },
 
-  // ===== 知识点 5：概率与统计 =====
+  // ===== 知识点 3：深度学习与神经网络 =====
   {
-    id: 'q13', topic: 'k5_概率与统计', difficulty: 1,
-    title: '抛掷一枚均匀硬币两次，恰好一次正面向上的概率是？',
+    id: 'q7',
+    topic: 'k3_深度学习与神经网络',
+    difficulty: 1,
+    title: '神经网络的基本计算单元是什么？',
     options: [
-      { id: 'a', text: '1/2', weight: 1 },
-      { id: 'b', text: '1/4', weight: 0 },
-      { id: 'c', text: '3/4', weight: 0 },
-      { id: 'd', text: '1/3', weight: 0 }
+      { id: 'a', text: '感知机 / 神经元', weight: 1 },
+      { id: 'b', text: '决策树', weight: 0 },
+      { id: 'c', text: '支持向量', weight: 0 },
+      { id: 'd', text: '聚类中心', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q14', topic: 'k5_概率与统计', difficulty: 2,
-    title: '一组数据 x₁, x₂, ..., xₙ 的方差为 4，若每个数据都乘以 3，则新数据的方差为？',
+    id: 'q8',
+    topic: 'k3_深度学习与神经网络',
+    difficulty: 2,
+    title: '以下哪个激活函数解决了梯度消失问题且计算效率高？',
     options: [
-      { id: 'a', text: '36', weight: 1 },
-      { id: 'b', text: '12', weight: 0 },
-      { id: 'c', text: '4', weight: 0 },
-      { id: 'd', text: '6', weight: 0 }
+      { id: 'a', text: 'ReLU (Rectified Linear Unit)', weight: 1 },
+      { id: 'b', text: 'Sigmoid', weight: 0 },
+      { id: 'c', text: 'Tanh', weight: 0 },
+      { id: 'd', text: 'Softmax', weight: 0 }
     ],
     type: 'single'
   },
   {
-    id: 'q15', topic: 'k5_概率与统计', difficulty: 3,
-    title: '某班 40 名学生数学成绩的均值为 78 分，标准差为 8 分。若将每个人的成绩都加 5 分，则新成绩的标准差为？',
+    id: 'q9',
+    topic: 'k3_深度学习与神经网络',
+    difficulty: 3,
+    title: 'CNN（卷积神经网络）中，池化层（Pooling）的主要作用是什么？',
     options: [
-      { id: 'a', text: '8 分', weight: 1 },
-      { id: 'b', text: '13 分', weight: 0 },
-      { id: 'c', text: '5 分', weight: 0 },
-      { id: 'd', text: '3 分', weight: 0 }
+      { id: 'a', text: '增加特征数量', weight: 0 },
+      { id: 'b', text: '降维并保留主要特征，减少计算量', weight: 1 },
+      { id: 'c', text: '学习非线性映射', weight: 0 },
+      { id: 'd', text: '将特征图转换为一维向量', weight: 0 }
+    ],
+    type: 'single'
+  },
+
+  // ===== 知识点 4：自然语言处理与大模型 =====
+  {
+    id: 'q10',
+    topic: 'k4_自然语言处理与大模型',
+    difficulty: 1,
+    title: 'Transformer 架构的核心机制是什么？',
+    options: [
+      { id: 'a', text: '自注意力机制 (Self-Attention)', weight: 1 },
+      { id: 'b', text: '循环连接 (Recurrent Connection)', weight: 0 },
+      { id: 'c', text: '卷积核 (Convolution Kernel)', weight: 0 },
+      { id: 'd', text: '全连接层 (Fully Connected Layer)', weight: 0 }
+    ],
+    type: 'single'
+  },
+  {
+    id: 'q11',
+    topic: 'k4_自然语言处理与大模型',
+    difficulty: 2,
+    title: 'BERT 模型与 GPT 模型在训练方式上的主要区别是什么？',
+    options: [
+      { id: 'a', text: 'BERT是双向编码器，GPT是单向自回归解码器', weight: 1 },
+      { id: 'b', text: 'BERT使用CNN，GPT使用RNN', weight: 0 },
+      { id: 'c', text: '两者训练方式完全相同', weight: 0 },
+      { id: 'd', text: 'BERT不需要预训练', weight: 0 }
+    ],
+    type: 'single'
+  },
+  {
+    id: 'q12',
+    topic: 'k4_自然语言处理与大模型',
+    difficulty: 3,
+    title: '以下哪项技术用于对齐大语言模型与人类价值观？',
+    options: [
+      { id: 'a', text: 'RLHF (基于人类反馈的强化学习)', weight: 1 },
+      { id: 'b', text: '数据增强', weight: 0 },
+      { id: 'c', text: 'Dropout', weight: 0 },
+      { id: 'd', text: 'Batch Normalization', weight: 0 }
+    ],
+    type: 'single'
+  },
+
+  // ===== 知识点 5：AI伦理与前沿应用 =====
+  {
+    id: 'q13',
+    topic: 'k5_AI伦理与前沿应用',
+    difficulty: 1,
+    title: '以下哪项是AI伦理的核心原则之一？',
+    options: [
+      { id: 'a', text: '公平性 (Fairness)', weight: 1 },
+      { id: 'b', text: '最大化利润', weight: 0 },
+      { id: 'c', text: '最小化代码量', weight: 0 },
+      { id: 'd', text: '追求最高准确率', weight: 0 }
+    ],
+    type: 'single'
+  },
+  {
+    id: 'q14',
+    topic: 'k5_AI伦理与前沿应用',
+    difficulty: 2,
+    title: 'Stable Diffusion 和 DALL-E 属于哪种AI技术？',
+    options: [
+      { id: 'a', text: '扩散模型 / 文生图模型', weight: 1 },
+      { id: 'b', text: '语音识别模型', weight: 0 },
+      { id: 'c', text: '推荐系统模型', weight: 0 },
+      { id: 'd', text: '时间序列预测模型', weight: 0 }
+    ],
+    type: 'single'
+  },
+  {
+    id: 'q15',
+    topic: 'k5_AI伦理与前沿应用',
+    difficulty: 3,
+    title: '联邦学习 (Federated Learning) 的核心优势是什么？',
+    options: [
+      { id: 'a', text: '保护数据隐私，数据不出本地即可协同训练模型', weight: 1 },
+      { id: 'b', text: '大幅减少模型参数量', weight: 0 },
+      { id: 'c', text: '不需要任何标注数据', weight: 0 },
+      { id: 'd', text: '训练速度比集中式快 100 倍', weight: 0 }
     ],
     type: 'single'
   }
@@ -237,11 +265,11 @@ let gaugeChart: echarts.ECharts | null = null
 
 // 知识点名称映射
 const KP_MAP: Record<string, string> = {
-  'k1_一元二次方程': '一元二次方程',
-  'k2_函数图像与性质': '函数图像与性质',
-  'k3_三角函数': '三角函数',
-  'k4_数列': '数列',
-  'k5_概率与统计': '概率与统计'
+  k1_人工智能基础概念: '人工智能基础概念',
+  k2_机器学习基础: '机器学习基础',
+  k3_深度学习与神经网络: '深度学习与神经网络',
+  k4_自然语言处理与大模型: '自然语言处理与大模型',
+  k5_AI伦理与前沿应用: 'AI伦理与前沿应用'
 }
 
 // ═══════════════════════════════════════════
@@ -256,7 +284,6 @@ const progress = computed(() => {
   return Math.round((currentIndex.value / totalQuestions.value) * 100)
 })
 const answeredCount = computed(() => answers.value.length)
-const canGoNext = computed(() => currentIndex.value < totalQuestions.value - 1)
 const isLastQuestion = computed(() => currentIndex.value >= totalQuestions.value - 1)
 
 /** 题目难度标签颜色 */
@@ -279,8 +306,10 @@ async function loadQuestions() {
   errorMessage.value = ''
   try {
     const data = await diagnosisApi.getQuestions()
-    if (data && data.length >= 10) {
-      questions.value = shuffleArray(data).slice(0, 15)
+    // API 返回 QuestionsResponse { questions: [...], total, subject, estimated_duration_min }
+    const qList = data.questions
+    if (Array.isArray(qList) && qList.length >= 10) {
+      questions.value = shuffleArray(qList).slice(0, 15)
     } else {
       throw new Error('题库不足')
     }
@@ -295,8 +324,10 @@ async function loadQuestions() {
 function shuffleArray<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]]
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = a[j]!
+    a[j] = a[i]!
+    a[i] = tmp
   }
   return a
 }
@@ -308,6 +339,15 @@ function startQuiz() {
   showFeedback.value = false
   selectedOption.value = null
   pageMode.value = 'answering'
+  questionStartTime.value = Date.now()
+}
+
+/** 返回上一题（模板中不能写多条语句，抽成方法） */
+function goPrevQuestion() {
+  if (currentIndex.value <= 0) return
+  currentIndex.value--
+  selectedOption.value = null
+  showFeedback.value = false
   questionStartTime.value = Date.now()
 }
 
@@ -326,7 +366,7 @@ function selectOption(optionId: string) {
   // 记录答案
   answers.value.push({
     questionId: q.id,
-    selectedOptionIds: [optionId],
+    selectedOption: optionId,
     timeSpent: Math.round(elapsed * 10) / 10
   })
 
@@ -364,13 +404,18 @@ async function submitAnswers() {
   try {
     const result = await diagnosisApi.submit({
       answers: answers.value,
-      subject: '数学',
-      grade: '高中'
+      subject: '人工智能导论',
+      grade: '大学'
     })
     diagnosisResult.value = result
   } catch {
     // 后端不可用时本地计算 Mock 结果
-    diagnosisResult.value = computeMockResult()
+    try {
+      diagnosisResult.value = computeMockResult()
+    } catch (mockError) {
+      console.error('Mock 诊断计算失败:', mockError)
+      diagnosisResult.value = createFallbackResult()
+    }
   }
 
   pageMode.value = 'report'
@@ -378,8 +423,12 @@ async function submitAnswers() {
   // 渲染图表（DOM 就绪后）
   await nextTick()
   setTimeout(() => {
-    renderRadarChart()
-    renderGaugeChart()
+    try {
+      renderRadarChart()
+      renderGaugeChart()
+    } catch (chartError) {
+      console.error('图表渲染失败:', chartError)
+    }
   }, 100)
 }
 
@@ -388,11 +437,11 @@ function computeMockResult(): DiagnosisResult {
   const kpStats = new Map<string, { correct: number; total: number; totalTime: number }>()
 
   for (let i = 0; i < answers.value.length; i++) {
-    const ans = answers.value[i]
+    const ans = answers.value[i]!
     const q = questions.value.find((q) => q.id === ans.questionId)
     if (!q) continue
 
-    const selectedOpt = q.options.find((o) => o.id === ans.selectedOptionIds[0])
+    const selectedOpt = q.options.find((o) => o.id === ans.selectedOption)
     const correct = selectedOpt?.weight === 1
 
     const existing = kpStats.get(q.topic) || { correct: 0, total: 0, totalTime: 0 }
@@ -423,18 +472,18 @@ function computeMockResult(): DiagnosisResult {
 
     if (level === 'weak' || level === 'developing') {
       const reasons: Record<string, string> = {
-        'k1_一元二次方程': '判别式运用不熟练，含参方程求解思路不清晰',
-        'k2_函数图像与性质': '二次函数对称性与顶点坐标计算掌握不足',
-        'k3_三角函数': '正弦定理灵活运用需要加强，周期判断有误',
-        'k4_数列': '通项公式与前 n 项和的关系理解不够深入',
-        'k5_概率与统计': '方差平移变换性质记忆混淆'
+        k1_一元二次方程: '判别式运用不熟练，含参方程求解思路不清晰',
+        k2_函数图像与性质: '二次函数对称性与顶点坐标计算掌握不足',
+        k3_三角函数: '正弦定理灵活运用需要加强，周期判断有误',
+        k4_数列: '通项公式与前 n 项和的关系理解不够深入',
+        k5_概率与统计: '方差平移变换性质记忆混淆'
       }
       const suggestions: Record<string, string> = {
-        'k1_一元二次方程': '建议从判别式的几何意义出发，结合根的分布进行专项训练',
-        'k2_函数图像与性质': '建议通过描点法和函数图像变换进行操练',
-        'k3_三角函数': '建议结合单位圆理解正弦定理，系统整理三角恒等式',
-        'k4_数列': '建议从递推关系的角度理解 Sₙ 与 aₙ 的联系，多做转化练习',
-        'k5_概率与统计': '建议对比均值与方差的线性变换规则，建立清晰记忆模型'
+        k1_一元二次方程: '建议从判别式的几何意义出发，结合根的分布进行专项训练',
+        k2_函数图像与性质: '建议通过描点法和函数图像变换进行操练',
+        k3_三角函数: '建议结合单位圆理解正弦定理，系统整理三角恒等式',
+        k4_数列: '建议从递推关系的角度理解 Sₙ 与 aₙ 的联系，多做转化练习',
+        k5_概率与统计: '建议对比均值与方差的线性变换规则，建立清晰记忆模型'
       }
       weakPoints.push({
         knowledgePoint: KP_MAP[topic] || topic,
@@ -458,9 +507,9 @@ function computeMockResult(): DiagnosisResult {
   const timeVariance = allTimes.reduce((s, t) => s + (t - avgTime) ** 2, 0) / allTimes.length
 
   // 错误率
-  const errorCount = answers.value.filter((a, i) => {
+  const errorCount = answers.value.filter((a) => {
     const q = questions.value.find((qq) => qq.id === a.questionId)
-    const opt = q?.options.find((o) => o.id === a.selectedOptionIds[0])
+    const opt = q?.options.find((o) => o.id === a.selectedOption)
     return opt?.weight !== 1
   }).length
   const errorRate = errorCount / answers.value.length
@@ -478,13 +527,16 @@ function computeMockResult(): DiagnosisResult {
   }
 
   const overallScore = Math.round(
-    masteryLevels.reduce((s, m) => s + m.mastery, 0) / masteryLevels.length * 100
+    (masteryLevels.reduce((s, m) => s + m.mastery, 0) / masteryLevels.length) * 100
   )
 
   const summaries: Record<string, string> = {
-    excellent: '你的整体知识掌握非常扎实，认知负荷处于健康水平。建议保持当前的学习节奏，适当挑战更高难度的内容。',
-    proficient: '你具备了良好的知识基础，部分知识点尚有提升空间。建议针对薄弱环节进行专项训练，进一步提升综合解题能力。',
-    developing: '你的知识体系正在构建中，存在明显的薄弱环节。建议从基础概念出发，逐步加深理解，配合适量练习巩固知识点。',
+    excellent:
+      '你的整体知识掌握非常扎实，认知负荷处于健康水平。建议保持当前的学习节奏，适当挑战更高难度的内容。',
+    proficient:
+      '你具备了良好的知识基础，部分知识点尚有提升空间。建议针对薄弱环节进行专项训练，进一步提升综合解题能力。',
+    developing:
+      '你的知识体系正在构建中，存在明显的薄弱环节。建议从基础概念出发，逐步加深理解，配合适量练习巩固知识点。',
     weak: '当前多个知识点掌握程度较低，认知负荷偏高。建议回归课本基础，先夯实核心概念，再逐步提升难度。'
   }
 
@@ -496,16 +548,49 @@ function computeMockResult(): DiagnosisResult {
 
   return {
     id: `mock-${Date.now()}`,
-    userId: 0,
+    userId: '0',
     createdAt: new Date().toISOString(),
-    subject: '数学',
-    grade: '高中',
+    subject: '人工智能导论',
+    grade: '大学',
     masteryLevels,
     cognitiveLoad,
     learningStyle: overallScore >= 70 ? '视觉-逻辑型' : '循序渐进型',
     weakPoints,
     overallScore,
-    summary: summaries[summaryKey]
+    summary: summaries[summaryKey] ?? ''
+  }
+}
+
+/** 兜底诊断结果（当所有计算路径都失败时保证页面有内容渲染） */
+function createFallbackResult(): DiagnosisResult {
+  const now = new Date().toISOString()
+  return {
+    id: `fallback-${Date.now()}`,
+    userId: '0',
+    createdAt: now,
+    subject: '人工智能导论',
+    grade: '大学',
+    masteryLevels: [
+      { knowledgePoint: '基础知识', mastery: 0.65, level: 'developing', confidence: 0.7 }
+    ],
+    cognitiveLoad: {
+      memoryLoad: 0.5,
+      attentionLoad: 0.5,
+      processingLoad: 0.5,
+      overall: 0.5
+    },
+    learningStyle: '循序渐进型',
+    weakPoints: [
+      {
+        knowledgePoint: '基础知识',
+        reason: '系统暂时无法计算详细诊断，请稍后重试',
+        severity: 'moderate',
+        suggestedRemediation: '建议重新进行一次诊断评估'
+      }
+    ],
+    overallScore: 65,
+    summary:
+      '系统诊断遇到问题，以上为粗略评估结果。建议稍后重新进行完整诊断以获得更精准的分析报告。'
   }
 }
 
@@ -551,7 +636,7 @@ function renderRadarChart() {
     legend: {
       bottom: 0,
       data: ['掌握度'],
-      textStyle: { color: '#595959', fontSize: 12 }
+      textStyle: { color: '#94A3B8', fontSize: 12 }
     },
     radar: {
       center: ['50%', '50%'],
@@ -561,7 +646,7 @@ function renderRadarChart() {
         max: 1
       })),
       axisName: {
-        color: '#262626',
+        color: '#94A3B8',
         fontSize: 12,
         fontWeight: 500
       },
@@ -584,7 +669,10 @@ function renderRadarChart() {
             areaStyle: {
               color: {
                 type: 'linear',
-                x: 0, y: 0, x2: 0, y2: 1,
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
                 colorStops: [
                   { offset: 0, color: 'rgba(74, 144, 217, 0.5)' },
                   { offset: 1, color: 'rgba(74, 144, 217, 0.1)' }
@@ -661,10 +749,10 @@ function renderGaugeChart() {
             color: 'auto'
           }
         },
-        axisTick: { distance: -18, length: 6, lineStyle: { width: 1, color: '#999' } },
-        splitLine: { distance: -22, length: 18, lineStyle: { width: 2, color: '#999' } },
+        axisTick: { distance: -18, length: 6, lineStyle: { width: 1, color: '#475569' } },
+        splitLine: { distance: -22, length: 18, lineStyle: { width: 2, color: '#475569' } },
         axisLabel: {
-          color: '#595959',
+          color: '#94A3B8',
           distance: 25,
           fontSize: 11,
           formatter: (value: number) => `${value}%`
@@ -677,7 +765,7 @@ function renderGaugeChart() {
           fontWeight: 'bold',
           offsetCenter: [0, '65%'],
           formatter: '{value}%',
-          color: '#262626'
+          color: '#F8FAFC'
         },
         data: [{ value: loadPct, name: '认知负荷' }]
       }
@@ -797,8 +885,10 @@ watch(pageMode, (mode) => {
           <a-alert type="info" :show-icon="false">
             <template #message>
               <div class="tips-content">
-                <BulbOutlined style="color: #4A90D9" />
-                <span>每题作答后自动进入下一题，请认真思考后选择。系统将根据你的答题时间和正确率综合评估学习状态。</span>
+                <BulbOutlined style="color: #4a90d9" />
+                <span
+                  >每题作答后自动进入下一题，请认真思考后选择。系统将根据你的答题时间和正确率综合评估学习状态。</span
+                >
               </div>
             </template>
           </a-alert>
@@ -822,9 +912,7 @@ watch(pageMode, (mode) => {
           <span class="progress-text">
             第 <strong>{{ currentIndex + 1 }}</strong> / {{ totalQuestions }} 题
           </span>
-          <span class="answered-text">
-            已答 {{ answeredCount }} 题
-          </span>
+          <span class="answered-text"> 已答 {{ answeredCount }} 题 </span>
         </div>
         <a-progress
           :percent="progress"
@@ -837,7 +925,12 @@ watch(pageMode, (mode) => {
 
       <!-- 题目卡片 -->
       <transition name="slide-fade" mode="out-in">
-        <a-card v-if="currentQuestion" :key="currentQuestion.id" class="question-card" :bordered="false">
+        <a-card
+          v-if="currentQuestion"
+          :key="currentQuestion.id"
+          class="question-card"
+          :bordered="false"
+        >
           <!-- 题目头部标签 -->
           <div class="question-meta">
             <a-tag :color="difficultyColor(currentQuestion.difficulty)" class="difficulty-tag">
@@ -872,7 +965,10 @@ watch(pageMode, (mode) => {
               <span v-if="showFeedback && opt.weight === 1" class="option-icon-correct">
                 <CheckCircleOutlined />
               </span>
-              <span v-else-if="showFeedback && selectedOption === opt.id && opt.weight !== 1" class="option-icon-wrong">
+              <span
+                v-else-if="showFeedback && selectedOption === opt.id && opt.weight !== 1"
+                class="option-icon-wrong"
+              >
                 <CloseCircleOutlined />
               </span>
             </div>
@@ -898,11 +994,11 @@ watch(pageMode, (mode) => {
 
       <!-- 底部操作栏 -->
       <div class="quiz-footer">
-        <a-button v-if="currentIndex > 0 && !showFeedback" @click="currentIndex--; selectedOption = null">
+        <a-button v-if="currentIndex > 0 && !showFeedback" @click="goPrevQuestion">
           上一题
         </a-button>
         <div class="footer-spacer" />
-        <span v-if="isLastQuestion && answers.value.length >= totalQuestions" class="quiz-ready-text">
+        <span v-if="isLastQuestion && answers.length >= totalQuestions" class="quiz-ready-text">
           <CheckCircleOutlined style="color: #52c41a" />
           全部作答完成，即将提交...
         </span>
@@ -931,8 +1027,8 @@ watch(pageMode, (mode) => {
         </div>
         <h1 class="report-title">诊断报告</h1>
         <p class="report-meta">
-          {{ diagnosisResult.subject }} · {{ diagnosisResult.grade }} ·
-          完成时间 {{ new Date(diagnosisResult.createdAt).toLocaleString('zh-CN') }}
+          {{ diagnosisResult.subject }} · {{ diagnosisResult.grade }} · 完成时间
+          {{ new Date(diagnosisResult.createdAt).toLocaleString('zh-CN') }}
         </p>
         <div class="report-score-badge">
           <span class="score-number">{{ diagnosisResult.overallScore }}</span>
@@ -940,7 +1036,7 @@ watch(pageMode, (mode) => {
         </div>
       </div>
 
-      <!-- 📊 图表行 -->
+      <!-- 图表行 -->
       <a-row :gutter="16" class="report-charts-row">
         <!-- 知识掌握度雷达图 -->
         <a-col :xs="24" :lg="14">
@@ -956,9 +1052,7 @@ watch(pageMode, (mode) => {
         <a-col :xs="24" :lg="10">
           <a-card class="chart-card" :bordered="false" title="认知负荷指数">
             <template #extra>
-              <a-tag
-                :color="loadLevelText(diagnosisResult.cognitiveLoad.overall).color"
-              >
+              <a-tag :color="loadLevelText(diagnosisResult.cognitiveLoad.overall).color">
                 {{ loadLevelText(diagnosisResult.cognitiveLoad.overall).text }}
               </a-tag>
             </template>
@@ -990,7 +1084,9 @@ watch(pageMode, (mode) => {
             </div>
             <a-progress
               :percent="Math.round(diagnosisResult.cognitiveLoad.attentionLoad * 100)"
-              :stroke-color="diagnosisResult.cognitiveLoad.attentionLoad > 0.6 ? '#ff4d4f' : '#4A90D9'"
+              :stroke-color="
+                diagnosisResult.cognitiveLoad.attentionLoad > 0.6 ? '#ff4d4f' : '#4A90D9'
+              "
               :size="'small'"
             />
           </div>
@@ -1003,7 +1099,9 @@ watch(pageMode, (mode) => {
             </div>
             <a-progress
               :percent="Math.round(diagnosisResult.cognitiveLoad.processingLoad * 100)"
-              :stroke-color="diagnosisResult.cognitiveLoad.processingLoad > 0.6 ? '#ff4d4f' : '#4A90D9'"
+              :stroke-color="
+                diagnosisResult.cognitiveLoad.processingLoad > 0.6 ? '#ff4d4f' : '#4A90D9'
+              "
               :size="'small'"
             />
           </div>
@@ -1026,13 +1124,25 @@ watch(pageMode, (mode) => {
               >
                 <div class="mastery-item-header">
                   <span class="mastery-name">{{ item.knowledgePoint }}</span>
-                  <a-tag :color="item.level === 'excellent' ? 'green' : item.level === 'proficient' ? 'blue' : item.level === 'developing' ? 'orange' : 'red'">
+                  <a-tag
+                    :color="
+                      item.level === 'excellent'
+                        ? 'green'
+                        : item.level === 'proficient'
+                          ? 'blue'
+                          : item.level === 'developing'
+                            ? 'orange'
+                            : 'red'
+                    "
+                  >
                     {{ levelText(item.level) }}
                   </a-tag>
                 </div>
                 <a-progress
                   :percent="Math.round(item.mastery * 100)"
-                  :stroke-color="item.mastery >= 0.7 ? '#52c41a' : item.mastery >= 0.4 ? '#faad14' : '#ff4d4f'"
+                  :stroke-color="
+                    item.mastery >= 0.7 ? '#52c41a' : item.mastery >= 0.4 ? '#faad14' : '#ff4d4f'
+                  "
                   :size="'small'"
                 />
                 <div class="mastery-confidence">
@@ -1090,7 +1200,7 @@ watch(pageMode, (mode) => {
         </a-col>
       </a-row>
 
-      <!-- 📝 AI 诊断摘要 -->
+      <!-- AI 诊断摘要 -->
       <a-card class="summary-card" :bordered="false" title="AI 诊断摘要">
         <template #extra>
           <span class="learning-style-tag">{{ diagnosisResult.learningStyle }}</span>
@@ -1098,7 +1208,7 @@ watch(pageMode, (mode) => {
         <p class="summary-text">{{ diagnosisResult.summary }}</p>
       </a-card>
 
-      <!-- 🚀 操作按钮 -->
+      <!-- 操作按钮 -->
       <div class="report-actions">
         <a-button type="primary" size="large" class="generate-path-btn" @click="goToGeneratePath">
           <RocketOutlined />
@@ -1108,9 +1218,7 @@ watch(pageMode, (mode) => {
           <ReloadOutlined />
           重新诊断
         </a-button>
-        <a-button size="large" @click="router.push('/home')">
-          返回首页
-        </a-button>
+        <a-button size="large" @click="router.push('/home')"> 返回首页 </a-button>
       </div>
     </div>
   </div>
@@ -1179,25 +1287,25 @@ export default {
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #E8D5B7 0%, #f5e6cc 100%);
+  background: linear-gradient(135deg, #e8d5b7 0%, #f5e6cc 100%);
   margin-bottom: 16px;
 }
 
 .start-icon {
   font-size: 36px;
-  color: #4A6CF7;
+  color: #4a6cf7;
 }
 
 .start-title {
   font-size: 26px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   margin: 0 0 8px;
 }
 
 .start-subtitle {
   font-size: 15px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin: 0;
 }
 
@@ -1220,19 +1328,19 @@ export default {
 
 .info-icon {
   font-size: 24px;
-  color: #4A6CF7;
+  color: #4a6cf7;
   opacity: 0.8;
 }
 
 .info-label {
   font-size: 12px;
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .info-value {
   font-size: 14px;
   font-weight: 600;
-  color: #E2E8F0;
+  color: #e2e8f0;
 }
 
 .start-tips {
@@ -1244,7 +1352,7 @@ export default {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #D4A373;
+  color: #d4a373;
   background: rgba(212, 163, 115, 0.08);
   padding: 10px 16px;
   border-radius: 8px;
@@ -1264,9 +1372,9 @@ export default {
   font-size: 16px;
   font-weight: 600;
   border-radius: 10px;
-  background: linear-gradient(135deg, #D4A373 0%, #C08B5C 100%);
+  background: linear-gradient(135deg, #d4a373 0%, #c08b5c 100%);
   border: none;
-  color: #0A0D14;
+  color: #0a0d14;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1288,17 +1396,17 @@ export default {
 
 .progress-text {
   font-size: 14px;
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .progress-text strong {
-  color: #F8FAFC;
+  color: #f8fafc;
   font-size: 16px;
 }
 
 .answered-text {
   font-size: 13px;
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .quiz-progress-bar {
@@ -1340,7 +1448,7 @@ export default {
 .question-title {
   font-size: 18px;
   font-weight: 600;
-  color: #F8FAFC;
+  color: #f8fafc;
   line-height: 1.6;
   margin: 0;
 }
@@ -1367,24 +1475,24 @@ export default {
 }
 
 .option-item:hover:not(.option-correct):not(.option-wrong):not(.option-dimmed) {
-  border-color: rgba(74, 108, 247, 0.40);
+  border-color: rgba(74, 108, 247, 0.4);
   background: rgba(74, 108, 247, 0.08);
   transform: translateX(4px);
 }
 
 .option-selected {
-  border-color: #D4A373;
+  border-color: #d4a373;
   background: rgba(212, 163, 115, 0.12);
 }
 
 .option-correct {
-  border-color: #34D399;
+  border-color: #34d399;
   background: rgba(52, 211, 153, 0.08);
   cursor: default;
 }
 
 .option-wrong {
-  border-color: #F87171;
+  border-color: #f87171;
   background: rgba(248, 113, 113, 0.08);
   cursor: default;
 }
@@ -1404,46 +1512,70 @@ export default {
   background: rgba(255, 255, 255, 0.06);
   font-weight: 700;
   font-size: 14px;
-  color: #94A3B8;
+  color: #94a3b8;
   flex-shrink: 0;
   transition: all 0.25s;
 }
 
 .option-selected .option-label {
-  background: #D4A373;
-  color: #0A0D14;
+  background: #d4a373;
+  color: #0a0d14;
 }
 
 .option-correct .option-label {
-  background: #34D399;
-  color: #0A0D14;
+  background: #34d399;
+  color: #0a0d14;
 }
 
 .option-wrong .option-label {
-  background: #F87171;
+  background: #f87171;
   color: #fff;
 }
 
 .option-text {
   flex: 1;
   font-size: 15px;
-  color: #E2E8F0;
+  color: #e2e8f0;
   line-height: 1.5;
 }
 
 .option-icon-correct {
-  color: #34D399;
+  color: #34d399;
   font-size: 20px;
 }
 
 .option-icon-wrong {
-  color: #F87171;
+  color: #f87171;
   font-size: 20px;
 }
 
 /* 答题反馈 */
 .question-feedback {
   margin-top: 20px;
+}
+
+/* 答题反馈 Alert 深色主题覆盖 */
+.question-feedback :deep(.ant-alert) {
+  border-radius: 10px;
+  border: 1px solid;
+  font-weight: 500;
+  font-size: 15px;
+}
+.question-feedback :deep(.ant-alert-success) {
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.3);
+  color: #34d399;
+}
+.question-feedback :deep(.ant-alert-success .ant-alert-message) {
+  color: #34d399;
+}
+.question-feedback :deep(.ant-alert-error) {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #f87171;
+}
+.question-feedback :deep(.ant-alert-error .ant-alert-message) {
+  color: #f87171;
 }
 
 /* 底部操作栏 */
@@ -1480,7 +1612,7 @@ export default {
 
 .submitting-text {
   font-size: 15px;
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .dot-pulse {
@@ -1492,16 +1624,28 @@ export default {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #4A90D9;
+  background: #4a90d9;
   animation: dotPulse 1.4s infinite ease-in-out both;
 }
 
-.dot-pulse .dot:nth-child(1) { animation-delay: -0.32s; }
-.dot-pulse .dot:nth-child(2) { animation-delay: -0.16s; }
+.dot-pulse .dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.dot-pulse .dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
 
 @keyframes dotPulse {
-  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-  40% { transform: scale(1); opacity: 1; }
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -1525,7 +1669,7 @@ export default {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4A6CF7 0%, #1D4ED8 100%);
+  background: linear-gradient(135deg, #4a6cf7 0%, #1d4ed8 100%);
   color: #fff;
   font-size: 30px;
   margin-bottom: 12px;
@@ -1534,13 +1678,13 @@ export default {
 .report-title {
   font-size: 26px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   margin: 0 0 6px;
 }
 
 .report-meta {
   font-size: 13px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin: 0;
 }
 
@@ -1559,13 +1703,13 @@ export default {
 .score-number {
   font-size: 36px;
   font-weight: 800;
-  color: #D4A373;
+  color: #d4a373;
   line-height: 1;
 }
 
 .score-label {
   font-size: 12px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-top: 4px;
 }
 
@@ -1620,7 +1764,7 @@ export default {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-bottom: 10px;
 }
 
@@ -1658,19 +1802,19 @@ export default {
 .mastery-name {
   font-size: 14px;
   font-weight: 500;
-  color: #E2E8F0;
+  color: #e2e8f0;
 }
 
 .mastery-confidence {
   font-size: 11px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-top: 4px;
   text-align: right;
 }
 
 /* 薄弱点 */
 .weak-point-title {
-  color: #F8FAFC;
+  color: #f8fafc;
 }
 
 .weak-point-card {
@@ -1684,7 +1828,7 @@ export default {
 
 .no-weak-points p {
   font-size: 14px;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-top: 8px;
 }
 
@@ -1712,7 +1856,7 @@ export default {
 .wp-name {
   font-size: 14px;
   font-weight: 600;
-  color: #E2E8F0;
+  color: #e2e8f0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1726,7 +1870,7 @@ export default {
 
 .wp-reason {
   font-size: 13px;
-  color: #94A3B8;
+  color: #94a3b8;
   line-height: 1.5;
   padding-left: 22px;
   position: relative;
@@ -1734,7 +1878,7 @@ export default {
 
 .wp-reason-icon {
   font-size: 13px;
-  color: #4A90D9;
+  color: #4a90d9;
   position: absolute;
   left: 0;
   top: 2px;
@@ -1754,7 +1898,7 @@ export default {
 
 .wp-suggestion-icon {
   font-size: 13px;
-  color: #E8D5B7;
+  color: #e8d5b7;
   position: absolute;
   left: 12px;
   top: 10px;
@@ -1765,7 +1909,7 @@ export default {
   border-radius: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
   margin-bottom: 24px;
-  border-left: 4px solid #4A90D9;
+  border-left: 4px solid #4a90d9;
 }
 
 .summary-card :deep(.ant-card-head-title) {
@@ -1775,13 +1919,13 @@ export default {
 
 .learning-style-tag {
   font-size: 12px;
-  color: #4A90D9;
+  color: #4a90d9;
   font-weight: 500;
 }
 
 .summary-text {
   font-size: 14px;
-  color: #94A3B8;
+  color: #94a3b8;
   line-height: 1.8;
   margin: 0;
 }
@@ -1800,7 +1944,7 @@ export default {
   font-size: 15px;
   font-weight: 600;
   border-radius: 10px;
-  background: linear-gradient(135deg, #4A90D9 0%, #3a7bc8 100%);
+  background: linear-gradient(135deg, #4a90d9 0%, #3a7bc8 100%);
   border: none;
   display: flex;
   align-items: center;

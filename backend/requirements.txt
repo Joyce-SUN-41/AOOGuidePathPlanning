@@ -1,7 +1,7 @@
 # ============================================================
 #  AOO Backend — 核心依赖
-#  不含大型 AI 组件（chromadb、sentence-transformers、torch）
-#  如需 RAG 功能，额外安装: pip install -r requirements-ai.txt
+#  RAG 使用 NumPy 内存向量存储，零额外依赖
+#  如需本地嵌入模型 (sentence-transformers/torch)，额外安装: pip install -r requirements-ai.txt
 # ============================================================
 
 # Web framework
@@ -29,6 +29,13 @@ redis>=5.0.0,<6.0.0
 
 # HTTP client
 httpx>=0.27.0,<1.0.0
+# WebSocket client (讯飞星火助手 API)
+websockets>=13.0,<14.0
 
 # Numeric computation (AOO engine)
-numpy>=1.26.0,<2.0.0
+numpy>=1.26.0,<3.0.0
+
+# Async database driver support (required by SQLAlchemy async in Celery workers)
+greenlet>=3.0.0
+
+# RAG — NumPy 内存向量存储（智能问答必需，零额外依赖）

@@ -44,13 +44,12 @@
         </div>
 
         <!-- 引用来源 -->
-        <div v-if="message.sources && message.sources.length > 0 && !message.isStreaming" class="msg-sources">
+        <div
+          v-if="message.sources && message.sources.length > 0 && !message.isStreaming"
+          class="msg-sources"
+        >
           <div class="sources-title">参考来源 ({{ message.sources.length }})</div>
-          <SourceCard
-            v-for="s in message.sources"
-            :key="s.ref"
-            :source="s"
-          />
+          <SourceCard v-for="s in message.sources" :key="s.ref" :source="s" />
         </div>
 
         <!-- 复制按钮 -->
@@ -68,33 +67,87 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import {
   UserOutlined,
   RobotOutlined,
   CopyOutlined,
   CheckCircleOutlined,
-  ExclamationCircleOutlined,
+  ExclamationCircleOutlined
 } from '@ant-design/icons-vue'
 import { message as antMessage } from 'ant-design-vue'
 import SourceCard from './SourceCard.vue'
 import type { ChatMessage } from '@/types/rag'
 
-const props = withDefaults(defineProps<{
-  message: ChatMessage
-  userName?: string
-}>(), {
-  userName: '我',
-})
+const props = withDefaults(
+  defineProps<{
+    message: ChatMessage
+    userName?: string
+  }>(),
+  {
+    userName: '我'
+  }
+)
 
 marked.setOptions({
   breaks: true,
-  gfm: true,
+  gfm: true
 })
 
 const renderedContent = computed(() => {
   if (!props.message.content) return ''
   try {
-    return marked.parse(props.message.content) as string
+    const raw = marked.parse(props.message.content) as string
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: [
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'p',
+        'br',
+        'strong',
+        'em',
+        'b',
+        'i',
+        'u',
+        'a',
+        'ul',
+        'ol',
+        'li',
+        'code',
+        'pre',
+        'blockquote',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+        'hr',
+        'img',
+        'span',
+        'div',
+        'del',
+        'sup',
+        'sub'
+      ],
+      ALLOWED_ATTR: [
+        'href',
+        'target',
+        'rel',
+        'src',
+        'alt',
+        'class',
+        'id',
+        'style',
+        'colspan',
+        'rowspan'
+      ],
+      ALLOW_DATA_ATTR: false
+    })
   } catch {
     return escapeHtml(props.message.content)
   }
@@ -106,7 +159,7 @@ function escapeHtml(text: string): string {
     '<': '&lt;',
     '>': '&gt;',
     '"': '&quot;',
-    "'": '&#039;',
+    "'": '&#039;'
   }
   return text.replace(/[&<>"']/g, (ch) => map[ch] || ch)
 }
@@ -118,7 +171,9 @@ async function copyContent() {
     await navigator.clipboard.writeText(props.message.content)
     copied.value = true
     antMessage.success('已复制到剪贴板')
-    setTimeout(() => { copied.value = false }, 2000)
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
   } catch {
     antMessage.error('复制失败')
   }
@@ -178,7 +233,7 @@ function formatTime(ts: number): string {
 }
 
 .avatar-user {
-  background: linear-gradient(135deg, #D4A373, #B8860B);
+  background: linear-gradient(135deg, #d4a373, #b8860b);
 }
 
 .avatar-ai {
@@ -203,7 +258,7 @@ function formatTime(ts: number): string {
 .msg-role {
   font-size: 12px;
   font-weight: 600;
-  color: #94A3B8;
+  color: #94a3b8;
 }
 
 .msg-time {
@@ -217,8 +272,8 @@ function formatTime(ts: number): string {
 
   &.user-content {
     padding: 10px 18px;
-    background: linear-gradient(135deg, rgba(212, 163, 115, 0.30), rgba(184, 134, 11, 0.15));
-    color: #F8FAFC;
+    background: linear-gradient(135deg, rgba(212, 163, 115, 0.3), rgba(184, 134, 11, 0.15));
+    color: #f8fafc;
     font-size: 14px;
     border-bottom-right-radius: 4px;
     word-break: break-word;
@@ -229,7 +284,7 @@ function formatTime(ts: number): string {
   &.ai-content {
     padding: 6px 0;
     font-size: 14px;
-    color: #E2E8F0;
+    color: #e2e8f0;
     word-break: break-word;
   }
 }
@@ -240,15 +295,24 @@ function formatTime(ts: number): string {
     margin: 0.4em 0;
   }
 
-  :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
     margin: 1em 0 0.4em;
     font-weight: 600;
-    color: #F8FAFC;
+    color: #f8fafc;
   }
 
-  :deep(h1) { font-size: 1.4em; }
-  :deep(h2) { font-size: 1.2em; }
-  :deep(h3) { font-size: 1.05em; }
+  :deep(h1) {
+    font-size: 1.4em;
+  }
+  :deep(h2) {
+    font-size: 1.2em;
+  }
+  :deep(h3) {
+    font-size: 1.05em;
+  }
 
   :deep(code) {
     padding: 2px 6px;
@@ -256,21 +320,21 @@ function formatTime(ts: number): string {
     background: rgba(255, 255, 255, 0.08);
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 0.88em;
-    color: #FBBF24;
+    color: #fbbf24;
   }
 
   :deep(pre) {
     margin: 12px 0;
     padding: 16px 18px;
     border-radius: 10px;
-    background: rgba(0, 0, 0, 0.40);
+    background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.06);
     overflow-x: auto;
 
     code {
       padding: 0;
       background: none;
-      color: #E2E8F0;
+      color: #e2e8f0;
       font-size: 13px;
       line-height: 1.65;
     }
@@ -279,14 +343,15 @@ function formatTime(ts: number): string {
   :deep(blockquote) {
     margin: 8px 0;
     padding: 10px 16px;
-    border-left: 3px solid #D4A373;
+    border-left: 3px solid #d4a373;
     background: rgba(212, 163, 115, 0.06);
     border-radius: 0 8px 8px 0;
-    color: #94A3B8;
+    color: #94a3b8;
     font-style: italic;
   }
 
-  :deep(ul), :deep(ol) {
+  :deep(ul),
+  :deep(ol) {
     padding-left: 1.4em;
     margin: 0.4em 0;
   }
@@ -296,9 +361,12 @@ function formatTime(ts: number): string {
   }
 
   :deep(a) {
-    color: #4A6CF7;
+    color: #4a6cf7;
     text-decoration: none;
-    &:hover { text-decoration: underline; color: #00D4FF; }
+    &:hover {
+      text-decoration: underline;
+      color: #00d4ff;
+    }
   }
 
   :deep(table) {
@@ -307,7 +375,8 @@ function formatTime(ts: number): string {
     width: 100%;
     font-size: 13px;
 
-    th, td {
+    th,
+    td {
       padding: 8px 12px;
       border: 1px solid rgba(255, 255, 255, 0.08);
       text-align: left;
@@ -315,12 +384,12 @@ function formatTime(ts: number): string {
 
     th {
       background: rgba(255, 255, 255, 0.05);
-      color: #F8FAFC;
+      color: #f8fafc;
       font-weight: 600;
     }
 
     td {
-      color: #CBD5E1;
+      color: #cbd5e1;
     }
   }
 
@@ -340,13 +409,19 @@ function formatTime(ts: number): string {
 .streaming-cursor {
   display: inline;
   animation: blink 0.8s infinite;
-  color: #D4A373;
+  color: #d4a373;
   font-weight: 400;
 }
 
 @keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
 }
 
 /* ── 置信度 ── */
@@ -368,19 +443,19 @@ function formatTime(ts: number): string {
 
   &.confidence-high {
     background: rgba(52, 211, 153, 0.12);
-    color: #34D399;
+    color: #34d399;
     border: 1px solid rgba(52, 211, 153, 0.2);
   }
 
   &.confidence-medium {
     background: rgba(251, 191, 36, 0.12);
-    color: #FBBF24;
+    color: #fbbf24;
     border: 1px solid rgba(251, 191, 36, 0.2);
   }
 
   &.confidence-low {
     background: rgba(248, 113, 113, 0.12);
-    color: #F87171;
+    color: #f87171;
     border: 1px solid rgba(248, 113, 113, 0.2);
   }
 }
@@ -399,7 +474,7 @@ function formatTime(ts: number): string {
 .sources-title {
   font-size: 12px;
   font-weight: 600;
-  color: #64748B;
+  color: #64748b;
   margin-bottom: 8px;
 }
 
@@ -410,8 +485,10 @@ function formatTime(ts: number): string {
   transition: opacity 0.2s;
 
   :deep(.ant-btn-text) {
-    color: #64748B;
-    &:hover { color: #D4A373; }
+    color: #64748b;
+    &:hover {
+      color: #d4a373;
+    }
   }
 }
 </style>

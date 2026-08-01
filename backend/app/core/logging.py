@@ -34,12 +34,19 @@ def setup_logging() -> None:
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # ---- 文件输出 ----
-    log_path = Path(settings.LOG_FILE_PATH)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
+    # ---- 文件输出 (权限不足时降级为 console-only) ----
+    try:
+        log_path = Path(settings.LOG_FILE_PATH)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+    except (PermissionError, OSError) as e:
+        # Docker / 权限受限环境：降级为纯控制台日志
+        root_logger.warning(
+            "Cannot write log file %s (%s), falling back to console-only",
+            settings.LOG_FILE_PATH, e,
+        )
 
     # 降低第三方库日志噪点
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

@@ -5,7 +5,7 @@
  * 设计理念：让用户感觉在与智能生命体交流，而非填表格。
  * 视觉：动态粒子连线背景 + 噪点纹理 + 燕麦金/极光蓝 深色科技风。
  */
-import { ref, computed, nextTick, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { ragApi } from '@/api/modules/rag'
@@ -21,7 +21,6 @@ import {
   ClearOutlined,
   DownloadOutlined,
   DownOutlined,
-  SendOutlined,
 } from '@ant-design/icons-vue'
 
 // ── Store ──
@@ -101,7 +100,7 @@ function animate() {
 
   // 更新 & 绘制粒子
   for (let i = 0; i < particles.length; i++) {
-    const p = particles[i]
+    const p = particles[i]!
 
     // 移动
     p.x += p.vx
@@ -131,8 +130,8 @@ function animate() {
   // 连线
   for (let i = 0; i < particles.length; i++) {
     for (let j = i + 1; j < particles.length; j++) {
-      const a = particles[i]
-      const b = particles[j]
+      const a = particles[i]!
+      const b = particles[j]!
       const dx = a.x - b.x
       const dy = a.y - b.y
       const dist = Math.sqrt(dx * dx + dy * dy)
@@ -240,6 +239,8 @@ async function handleSend() {
       top_k: 5,
       subject: chatStore.currentSubject,
       student_id: userStore.userInfo?.id ? String(userStore.userInfo.id) : undefined,
+      // 直接调用大模型回答，不检索知识库
+      skip_retrieval: true,
     })
 
     stopThinkingAnimation()
@@ -250,15 +251,17 @@ async function handleSend() {
     }
 
     if (!response.answer) {
-      chatStore.finishAssistant({})
+      // addErrorMessage 会正确处理并移除 placeholder 消息
       chatStore.addErrorMessage('模型未返回有效回答')
       return
     }
 
     startTypewriter(response.answer, () => {
+      // 直连大模型回答时不展示"置信度 0%"，仅在有检索来源时回传置信度
+      const hasRetrieval = Array.isArray(response.sources) && response.sources.length > 0
       chatStore.finishAssistant({
         sources: response.sources,
-        confidence: response.confidence,
+        confidence: hasRetrieval ? response.confidence : undefined,
         tokenUsage: response.token_usage,
         queryId: response.query_id,
       })

@@ -36,24 +36,39 @@ from app.schemas.diagnosis import (
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_uuid(value: Any) -> Optional[uuid.UUID]:
+    """尝试将任意值转为 UUID，失败返回 None。
+    用于兼容 mock 数据中的字符串 kp_id（如 "kp_001"）与数据库 UUID 列。
+    """
+    if isinstance(value, uuid.UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return uuid.UUID(value)
+        except (ValueError, AttributeError):
+            return None
+    return None
+
+
 # ── 默认知识点信息 (当数据库无记录时使用) ─────────────
 
 _DEFAULT_KP_MAP: Dict[str, dict] = {
-    "kp_001": {"name": "一元二次方程", "difficulty": 3},
-    "kp_002": {"name": "函数图像与性质", "difficulty": 4},
-    "kp_003": {"name": "三角恒等变换", "difficulty": 4},
-    "kp_004": {"name": "数列与递推", "difficulty": 3},
-    "kp_005": {"name": "概率与统计", "difficulty": 2},
+    "kp_001": {"name": "人工智能基础概念", "difficulty": 1},
+    "kp_002": {"name": "机器学习基础", "difficulty": 2},
+    "kp_003": {"name": "深度学习与神经网络", "difficulty": 3},
+    "kp_004": {"name": "自然语言处理与大模型", "difficulty": 3},
+    "kp_005": {"name": "AI伦理与前沿应用", "difficulty": 2},
 }
 
-# ── 题目答案映射 (Mock 题库正确选项) ───────────────────
+# ── 题目答案映射 (Mock 题库正确选项 - AI 通识课) ───────
 
 _CORRECT_ANSWER_MAP: Dict[str, str] = {
-    "q001": "B", "q002": "C", "q003": "A",
-    "q004": "D", "q005": "A", "q006": "C",
-    "q007": "B", "q008": "A", "q009": "D",
-    "q010": "C", "q011": "B", "q012": "A",
-    "q013": "D", "q014": "C", "q015": "A",
+    "q001": "A", "q002": "B", "q003": "A",
+    "q004": "C", "q005": "A", "q006": "B",
+    "q007": "A", "q008": "A", "q009": "B",
+    "q010": "A", "q011": "A", "q012": "A",
+    "q013": "A", "q014": "A", "q015": "A",
 }
 
 # 题目 → 知识点 → 预期时间 映射
@@ -61,7 +76,7 @@ _QUESTION_META: Dict[str, dict] = {
     f"q{i:03d}": {
         "kp_id": list(_DEFAULT_KP_MAP.keys())[(i - 1) // 3],
         "expected_time": 15.0 + ((i - 1) % 3) * 5.0,
-        "difficulty": list(range(1, 6))[(i - 1) // 3],
+        "difficulty": ((i - 1) % 3) + 1,
     }
     for i in range(1, 16)
 }
@@ -170,33 +185,277 @@ def estimate_mastery_irt(analyses: List[AnswerAnalysis]) -> float:
     return 1.0 / (1.0 + math.exp(-theta))
 
 
-# ── DINA 模型辅助 ──────────────────────────────────────
+# ── DINA 模型 (Deterministic Input, Noisy "And" gate) ──
+
+@dataclass
+class DINAParams:
+    """DINA 模型参数估计结果"""
+    slip: float       # 粗心参数: P(答错 | 掌握了所有属性)
+    guess: float      # 猜测参数: P(答对 | 未掌握所有属性)
+    slips_per_kp: Dict[str, float] = field(default_factory=dict)
+    guesses_per_kp: Dict[str, float] = field(default_factory=dict)
+    converged: bool = False
+    iterations: int = 0
+
 
 def compute_slip_and_guess(kp_analyses: Dict[str, KpAnalysis]) -> Tuple[float, float]:
-    """估计 DINA 模型的 slip (粗心) 和 guess (猜测) 参数.
+    """估计 DINA 模型的 slip (粗心) 和 guess (猜测) 参数 (全局均值).
 
     slip = P(答错 | 掌握了所有属性)
     guess = P(答对 | 未掌握所有属性)
-
-    简化: 使用全局均值估计
     """
-    # 假设: 高掌握度 (>0.7) 时答错是 slip; 低掌握度 (<0.3) 时答对是 guess
-    slip_count = 0
-    slip_total = 0
-    guess_count = 0
-    guess_total = 0
+    return compute_slip_and_guess_detailed(kp_analyses)
 
+
+def compute_slip_and_guess_detailed(kp_analyses: Dict[str, KpAnalysis]) -> Tuple[float, float]:
+    """详细版 slip/guess 估计 — 按知识点分别估计，再取加权平均"""
+    kp_slips: Dict[str, float] = {}
+    kp_guesses: Dict[str, float] = {}
+
+    # 按知识点分别估计
     for kp_id, kpa in kp_analyses.items():
-        if kpa.accuracy > 0.7 and kpa.total >= 2:
-            slip_count += kpa.total - kpa.correct
-            slip_total += kpa.total
-        elif kpa.accuracy < 0.3 and kpa.total >= 2:
-            guess_count += kpa.correct
-            guess_total += kpa.total
+        if kpa.total < 2:
+            continue
 
-    s = slip_count / slip_total if slip_total > 0 else 0.1
-    g = guess_count / guess_total if guess_total > 0 else 0.25
-    return min(max(s, 0.0), 0.5), min(max(g, 0.0), 0.5)
+        s_count = 0
+        s_total = 0
+        g_count = 0
+        g_total = 0
+
+        for a in kpa.questions:
+            if a.is_correct and a.difficulty >= 3:
+                # 答对难题 → 可能是掌握了 → 如果其他简单题答错说明有 slip
+                pass
+            elif not a.is_correct and a.difficulty <= 2:
+                # 简单题答错 → 更可能是 slip（粗心）
+                s_count += 1
+                s_total += 1
+            elif a.is_correct and a.difficulty <= 2:
+                # 简单题答对 → 如果不掌握也可能猜对
+                g_total += 1
+            else:
+                # 难题答错 → 更可能是没掌握
+                s_total += 1
+
+        # 基于答题模式的 slip/guess 估计
+        if s_total > 0:
+            kp_slips[kp_id] = min(0.5, max(0.0, s_count / s_total))
+        else:
+            kp_slips[kp_id] = 0.1
+
+        if g_total > 0:
+            kp_guesses[kp_id] = min(0.5, max(0.0, g_count / g_total))
+        else:
+            kp_guesses[kp_id] = 0.25
+
+    # 加权平均（按答题数加权）
+    total_q = sum(kpa.total for kpa in kp_analyses.values())
+    if total_q == 0:
+        return 0.1, 0.25
+
+    slip = sum(
+        kp_slips.get(kp_id, 0.1) * kpa.total
+        for kp_id, kpa in kp_analyses.items()
+    ) / total_q
+
+    guess = sum(
+        kp_guesses.get(kp_id, 0.25) * kpa.total
+        for kp_id, kpa in kp_analyses.items()
+    ) / total_q
+
+    return round(min(max(slip, 0.0), 0.5), 3), round(min(max(guess, 0.0), 0.5), 3)
+
+
+def dina_probability(
+    alpha: List[float],  # 属性掌握向量 [0/1, ...]
+    q_matrix: List[int],  # Q矩阵行（题目需要哪些属性）[0/1, ...]
+    slip: float,
+    guess: float,
+) -> float:
+    """DINA 模型: 给定属性掌握向量 α 和 Q矩阵, 计算答对概率.
+
+    η = ∏ α_k^{q_k}  (And gate: 必须掌握所有所需属性)
+    P(Y=1 | α) = guess^(1-η) * (1-slip)^η
+
+    Args:
+        alpha: 属性掌握向量 [α₁, α₂, ...], α_k ∈ {0, 1}
+        q_matrix: Q矩阵行 [q₁, q₂, ...], q_k ∈ {0, 1}
+        slip: 粗心参数
+        guess: 猜测参数
+
+    Returns:
+        答对概率 P ∈ [0, 1]
+    """
+    # η ∈ {0, 1}: 是否掌握了题目需要的所有属性
+    eta = 1.0
+    for a, q in zip(alpha, q_matrix):
+        if q == 1 and a < 0.5:
+            eta = 0.0
+            break
+
+    # P = (1-slip)^η * guess^(1-η)
+    if eta > 0.5:
+        return 1.0 - slip
+    else:
+        return guess
+
+
+def estimate_mastery_dina(
+    analyses: List[AnswerAnalysis],
+    slip: float = 0.1,
+    guess: float = 0.25,
+    n_attributes: int = 1,
+) -> Tuple[List[float], float]:
+    """使用 DINA 模型估计属性掌握度.
+
+    当 n_attributes == 1 时退化为单维掌握度估计。
+    使用极大似然估计 (MLE) 搜索最佳属性掌握向量。
+
+    Args:
+        analyses: 答题分析列表
+        slip: 全局 slip 参数
+        guess: 全局 guess 参数
+        n_attributes: 属性维度
+
+    Returns:
+        (alpha_vector, log_likelihood)
+    """
+    if not analyses:
+        return ([0.0] * max(n_attributes, 1)), 0.0
+
+    if n_attributes == 1:
+        # 单维: 直接扫 α ∈ {0, 1}
+        alpha0 = [0.0]
+        alpha1 = [1.0]
+
+        ll0 = 0.0
+        ll1 = 0.0
+
+        for a in analyses:
+            q_row = [1]  # 单维：题目总是考察这个属性
+            p0 = dina_probability(alpha0, q_row, slip, guess)
+            p1 = dina_probability(alpha1, q_row, slip, guess)
+
+            r = 1.0 if a.is_correct else 0.0
+            ll0 += r * math.log(max(p0, 1e-10)) + (1 - r) * math.log(max(1 - p0, 1e-10))
+            ll1 += r * math.log(max(p1, 1e-10)) + (1 - r) * math.log(max(1 - p1, 1e-10))
+
+        if ll1 >= ll0:
+            return alpha1, ll1
+        else:
+            return alpha0, ll0
+
+    # 多维: 穷举搜索（属性数 ≤ 5 时可行）
+    best_alpha = [0.0] * n_attributes
+    best_ll = float('-inf')
+
+    for mask in range(1 << n_attributes):
+        alpha = [1.0 if (mask >> i) & 1 else 0.0 for i in range(n_attributes)]
+        ll = 0.0
+
+        for a in analyses:
+            # 简化: 每个题目考察所有属性 (全 1 Q矩阵)
+            q_row = [1] * n_attributes
+            p = dina_probability(alpha, q_row, slip, guess)
+            r = 1.0 if a.is_correct else 0.0
+            ll += r * math.log(max(p, 1e-10)) + (1 - r) * math.log(max(1 - p, 1e-10))
+
+        if ll > best_ll:
+            best_ll = ll
+            best_alpha = alpha
+
+    return best_alpha, best_ll
+
+
+def estimate_dina_params_em(
+    kp_analyses: Dict[str, KpAnalysis],
+    n_iterations: int = 20,
+    tol: float = 1e-4,
+) -> DINAParams:
+    """使用 EM 算法估计 DINA 模型的 slip/guess 参数。
+
+    这是一个简化版 EM：
+    - E-step: 在给定当前参数下，估计每个知识点的属性掌握概率
+    - M-step: 在给定属性掌握概率下，更新 slip/guess
+
+    Args:
+        kp_analyses: 知识点答题分析汇总
+        n_iterations: 最大迭代次数
+        tol: 收敛阈值
+
+    Returns:
+        DINAParams 估计结果
+    """
+    if not kp_analyses:
+        return DINAParams(slip=0.1, guess=0.25)
+
+    # 初始化参数
+    slip = 0.1
+    guess = 0.25
+    prev_slip = 0.0
+    prev_guess = 0.0
+
+    # 收集所有题目分析
+    all_analyses: List[AnswerAnalysis] = []
+    for kpa in kp_analyses.values():
+        all_analyses.extend(kpa.questions)
+
+    n = len(all_analyses)
+    if n == 0:
+        return DINAParams(slip=0.1, guess=0.25)
+
+    # EM 迭代
+    for it in range(n_iterations):
+        # E-step: 估计每个知识点的 P(α=1)
+        kp_alpha_prob: Dict[str, float] = {}
+        for kp_id, kpa in kp_analyses.items():
+            alpha1, ll1 = estimate_mastery_dina(kpa.questions, slip, guess, n_attributes=1)
+            kp_alpha_prob[kp_id] = alpha1[0]  # P(α=1)
+
+        # M-step: 更新 slip, guess
+        # slip = E[# 答错且 α=1] / E[# α=1]
+        # guess = E[# 答对且 α=0] / E[# α=0]
+        slip_num = 0.0
+        slip_den = 0.0
+        guess_num = 0.0
+        guess_den = 0.0
+
+        for a in all_analyses:
+            alpha = kp_alpha_prob.get(a.kp_id, 0.5)
+            r = 1.0 if a.is_correct else 0.0
+
+            # 软计数
+            slip_num += (1 - r) * alpha        # 答错 × P(掌握)
+            slip_den += alpha                   # P(掌握)
+            guess_num += r * (1 - alpha)        # 答对 × P(未掌握)
+            guess_den += (1 - alpha)            # P(未掌握)
+
+        new_slip = slip_num / max(slip_den, 1e-6)
+        new_guess = guess_num / max(guess_den, 1e-6)
+
+        new_slip = min(max(new_slip, 0.0), 0.5)
+        new_guess = min(max(new_guess, 0.0), 0.5)
+
+        # 检查收敛
+        if abs(new_slip - slip) < tol and abs(new_guess - guess) < tol:
+            slip = new_slip
+            guess = new_guess
+            return DINAParams(
+                slip=round(slip, 3),
+                guess=round(guess, 3),
+                converged=True,
+                iterations=it + 1,
+            )
+
+        slip = new_slip
+        guess = new_guess
+
+    return DINAParams(
+        slip=round(slip, 3),
+        guess=round(guess, 3),
+        converged=False,
+        iterations=n_iterations,
+    )
 
 
 # ── 认知负荷计算 ──────────────────────────────────────
@@ -870,11 +1129,20 @@ class DiagnosisService:
         # ── 更新 StudentKnowledge ──
         now = datetime.utcnow()
         for kp_id, value in mastery_levels.items():
+            # 尝试将 kp_id 转为 UUID；mock 数据使用字符串格式 (如 "kp_001")，
+            # 此时仅写入 DiagnosisRecord，不更新 StudentKnowledge 表
+            kp_uuid = _coerce_uuid(kp_id)
+            if kp_uuid is None:
+                logger.debug(
+                    "Skipping StudentKnowledge update for non-UUID kp_id=%s", kp_id
+                )
+                continue
+
             # Try update existing
             result = await db.execute(
                 select(StudentKnowledge).where(
                     StudentKnowledge.student_id == student_id,
-                    StudentKnowledge.kp_id == kp_id,
+                    StudentKnowledge.kp_id == kp_uuid,
                 )
             )
             sk = result.scalar_one_or_none()
@@ -888,7 +1156,7 @@ class DiagnosisService:
                 # Insert new
                 sk = StudentKnowledge(
                     student_id=student_id,
-                    kp_id=kp_id,
+                    kp_id=kp_uuid,
                     mastery_level=value,
                     last_assessed_at=now,
                 )
@@ -941,7 +1209,7 @@ class DiagnosisService:
 
         return DiagnosisResultResponse(
             id=str(record.id),
-            user_id=record.student_id,
+            user_id=str(record.student_id),
             created_at=record.created_at.replace(tzinfo=None),
             subject=record.subject,
             grade=record.grade,

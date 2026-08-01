@@ -55,29 +55,29 @@ const emit = defineEmits<{
 
 // ═══════════ 颜色常量（对齐品牌色板） ═══════════
 const COLORS = {
-  elite: '#FF4D4F',        // 红色 — 精英个体
-  normal: '#4F7CFF',       // 蓝色 — 普通个体
-  exploring: '#52C41A',    // 绿色 — 探索中
-  bestLine: '#FF4D4F',     // 最优适应度曲线
-  avgLine: '#4F7CFF',      // 平均适应度曲线
-  medianLine: '#B8A99A',   // 中位数适应度曲线
+  elite: '#FF4D4F', // 红色 — 精英个体
+  normal: '#4F7CFF', // 蓝色 — 普通个体
+  exploring: '#52C41A', // 绿色 — 探索中
+  bestLine: '#FF4D4F', // 最优适应度曲线
+  avgLine: '#4F7CFF', // 平均适应度曲线
+  medianLine: '#B8A99A', // 中位数适应度曲线
   diversityLine: '#FA8C16', // 多样性曲线
   historyPoint: 'rgba(180, 180, 180, 0.35)', // 历史种群点
-  progressTrack: '#E8E0D8',
+  progressTrack: '#E8E0D8'
 }
 
 /** 角色 → 颜色映射 */
 const ROLE_COLOR_MAP: Record<string, string> = {
   elite: COLORS.elite,
   normal: COLORS.normal,
-  exploring: COLORS.exploring,
+  exploring: COLORS.exploring
 }
 
 // ═══════════ 速度档位 ═══════════
 const SPEED_OPTIONS = [
   { label: '1x', value: 1, interval: 600 },
   { label: '2x', value: 2, interval: 300 },
-  { label: '5x', value: 5, interval: 120 },
+  { label: '5x', value: 5, interval: 120 }
 ] as const
 
 // ═══════════ 响应式状态 ═══════════
@@ -120,8 +120,6 @@ const currentDiversity = computed(
   () => props.convergenceData.diversity[currentFrameIndex.value] ?? 0
 )
 
-
-
 /** 播放进度 (0-100) */
 const progress = computed(() => {
   if (totalFrames.value <= 1) return 0
@@ -135,9 +133,7 @@ const frameInterval = computed(() => {
 })
 
 /** 总迭代数 */
-const totalIterations = computed(
-  () => props.convergenceData.iterations[totalFrames.value - 1] ?? 0
-)
+const totalIterations = computed(() => props.convergenceData.iterations[totalFrames.value - 1] ?? 0)
 
 /** 元信息 */
 const metadata = computed(() => props.convergenceData.metadata)
@@ -155,7 +151,7 @@ function initChart(): void {
   }
 
   chartInstance = echarts.init(chartContainer.value, undefined, {
-    devicePixelRatio: window.devicePixelRatio || 1,
+    devicePixelRatio: window.devicePixelRatio || 1
   })
 
   // 响应式缩放
@@ -191,7 +187,7 @@ function buildChartOption(): EChartsOption {
       for (let j = 0; j < snap.fitnessValues.length; j++) {
         historyData.push({
           value: [iter, snap.fitnessValues[j]],
-          symbolSize: 4,
+          symbolSize: 4
         })
       }
     }
@@ -211,8 +207,8 @@ function buildChartOption(): EChartsOption {
             borderColor: isBest ? '#fff' : 'transparent',
             borderWidth: isBest ? 2 : 0,
             shadowBlur: isBest ? 8 : 0,
-            shadowColor: isBest ? ROLE_COLOR_MAP[role] : 'transparent',
-          },
+            shadowColor: isBest ? ROLE_COLOR_MAP[role] : 'transparent'
+          }
         })
       }
     }
@@ -239,7 +235,7 @@ function buildChartOption(): EChartsOption {
     markLineData.push({
       xAxis: currentIter,
       label: { show: true, formatter: `第 ${currentIter} 代`, fontSize: 11 },
-      lineStyle: { color: '#9B8A7A', type: 'dashed', width: 1.5, opacity: 0.7 },
+      lineStyle: { color: '#9B8A7A', type: 'dashed', width: 1.5, opacity: 0.7 }
     })
   }
 
@@ -264,7 +260,7 @@ function buildChartOption(): EChartsOption {
           return `迭代: ${iter}<br/>多样性: ${(fitness * 100).toFixed(1)}%`
         }
         return `迭代: ${iter}<br/>适应度: ${fitness.toFixed(4)}`
-      },
+      }
     } as any,
 
     legend: {
@@ -276,8 +272,8 @@ function buildChartOption(): EChartsOption {
       itemGap: 20,
       selected: {
         历史种群: !!(snapshots && snapshots.length > 0),
-        中位数适应度: false, // 默认隐藏减少视觉噪音
-      },
+        中位数适应度: false // 默认隐藏减少视觉噪音
+      }
     },
 
     grid: {
@@ -285,7 +281,7 @@ function buildChartOption(): EChartsOption {
       right: 72,
       bottom: 48,
       left: 64,
-      containLabel: false,
+      containLabel: false
     },
 
     xAxis: {
@@ -299,7 +295,7 @@ function buildChartOption(): EChartsOption {
       axisLine: { lineStyle: { color: '#D6D4D0' } },
       axisTick: { show: false },
       axisLabel: { color: '#A8A6A2', fontSize: 11 },
-      splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } },
+      splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } }
     },
 
     yAxis: [
@@ -316,9 +312,9 @@ function buildChartOption(): EChartsOption {
         axisLabel: {
           color: '#A8A6A2',
           fontSize: 11,
-          formatter: (val: number) => val.toFixed(2),
+          formatter: (val: number) => val.toFixed(2)
         },
-        splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } },
+        splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } }
       },
       {
         type: 'value' as const,
@@ -333,10 +329,10 @@ function buildChartOption(): EChartsOption {
         axisLabel: {
           color: '#A8A6A2',
           fontSize: 11,
-          formatter: (val: number) => `${(val * 100).toFixed(0)}%`,
+          formatter: (val: number) => `${(val * 100).toFixed(0)}%`
         },
-        splitLine: { show: false },
-      },
+        splitLine: { show: false }
+      }
     ],
 
     series: [
@@ -350,7 +346,7 @@ function buildChartOption(): EChartsOption {
         itemStyle: { color: COLORS.historyPoint },
         emphasis: { scale: 1.2 },
         zlevel: 0,
-        animation: false, // 历史点不需要入场动画
+        animation: false // 历史点不需要入场动画
       },
 
       // ② 当前帧种群散点（彩色 — 精英红 / 普通蓝 / 探索绿）
@@ -365,8 +361,8 @@ function buildChartOption(): EChartsOption {
           silent: true,
           symbol: 'none',
           data: markLineData,
-          zlevel: 1,
-        },
+          zlevel: 1
+        }
       },
 
       // ③ 最优适应度收敛曲线
@@ -381,10 +377,10 @@ function buildChartOption(): EChartsOption {
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(255, 77, 79, 0.12)' },
-            { offset: 1, color: 'rgba(255, 77, 79, 0.01)' },
-          ]),
+            { offset: 1, color: 'rgba(255, 77, 79, 0.01)' }
+          ])
         },
-        zlevel: 1,
+        zlevel: 1
       },
 
       // ④ 平均适应度曲线
@@ -396,7 +392,7 @@ function buildChartOption(): EChartsOption {
         smooth: true,
         symbol: 'none',
         lineStyle: { color: COLORS.avgLine, width: 2, type: 'dashed' },
-        zlevel: 1,
+        zlevel: 1
       },
 
       // ⑤ 中位数适应度曲线（轻量辅助线）
@@ -408,7 +404,7 @@ function buildChartOption(): EChartsOption {
         smooth: true,
         symbol: 'none',
         lineStyle: { color: COLORS.medianLine, width: 1.2, type: 'dotted' },
-        zlevel: 0,
+        zlevel: 0
       },
 
       // ⑥ 种群多样性曲线（右 Y 轴）
@@ -423,12 +419,12 @@ function buildChartOption(): EChartsOption {
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(250, 140, 22, 0.15)' },
-            { offset: 1, color: 'rgba(250, 140, 22, 0.02)' },
-          ]),
+            { offset: 1, color: 'rgba(250, 140, 22, 0.02)' }
+          ])
         },
-        zlevel: 1,
-      },
-    ],
+        zlevel: 1
+      }
+    ]
   }
 }
 
@@ -633,7 +629,7 @@ defineExpose({
   },
   currentFrameIndex,
   isPlaying,
-  currentSpeed,
+  currentSpeed
 })
 </script>
 
@@ -674,10 +670,7 @@ defineExpose({
             {{ (currentDiversity * 100).toFixed(1) }}%
           </span>
           <div class="diversity-bar">
-            <div
-              class="diversity-bar__fill"
-              :style="{ width: `${currentDiversity * 100}%` }"
-            />
+            <div class="diversity-bar__fill" :style="{ width: `${currentDiversity * 100}%` }" />
           </div>
         </div>
 
@@ -690,22 +683,13 @@ defineExpose({
     </div>
 
     <!-- ── 图表主体 ── -->
-    <div
-      ref="chartContainer"
-      class="aoo-animation__chart"
-      :style="{ height: `${height}px` }"
-    />
+    <div ref="chartContainer" class="aoo-animation__chart" :style="{ height: `${height}px` }" />
 
     <!-- ── 播放控制栏 ── -->
     <div v-if="showControls" class="aoo-animation__controls">
       <div class="controls-left">
         <!-- 重播 -->
-        <button
-          class="control-btn"
-          title="从头播放"
-          :disabled="totalFrames <= 1"
-          @click="replay"
-        >
+        <button class="control-btn" title="从头播放" :disabled="totalFrames <= 1" @click="replay">
           <ReloadOutlined />
         </button>
 
@@ -754,10 +738,7 @@ defineExpose({
             :disabled="totalFrames <= 1"
             @input="seekTo(Number(($event.target as HTMLInputElement).value))"
           />
-          <div
-            class="progress-fill"
-            :style="{ width: `${progress}%` }"
-          />
+          <div class="progress-fill" :style="{ width: `${progress}%` }" />
         </div>
         <span class="progress-label">{{ totalIterations }}</span>
       </div>
@@ -833,7 +814,7 @@ defineExpose({
 
 .stat-label {
   font-size: 11px;
-  color: #A8A6A2;
+  color: #a8a6a2;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
@@ -842,7 +823,7 @@ defineExpose({
 .stat-value {
   font-size: 14px;
   font-weight: 600;
-  color: #3D3B39;
+  color: #3d3b39;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 
@@ -854,26 +835,26 @@ defineExpose({
 .stat-suffix {
   font-size: 13px;
   font-weight: 400;
-  color: #A8A6A2;
+  color: #a8a6a2;
 }
 
 .stat-value--best {
-  color: #FF4D4F;
+  color: #ff4d4f;
 }
 
 .stat-value--avg {
-  color: #4F7CFF;
+  color: #4f7cff;
 }
 
 .stat-value--diversity {
-  color: #FA8C16;
+  color: #fa8c16;
 }
 
 /* 多样性迷你进度条 */
 .diversity-bar {
   width: 60px;
   height: 3px;
-  background: #F5F4F2;
+  background: #f5f4f2;
   border-radius: 2px;
   margin-top: 4px;
   overflow: hidden;
@@ -881,7 +862,7 @@ defineExpose({
 
 .diversity-bar__fill {
   height: 100%;
-  background: linear-gradient(90deg, #FA8C16, #FFB84D);
+  background: linear-gradient(90deg, #fa8c16, #ffb84d);
   border-radius: 2px;
   transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -917,10 +898,10 @@ defineExpose({
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid #E8E0D8;
+  border: 1px solid #e8e0d8;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.6);
-  color: #5C5A57;
+  color: #5c5a57;
   cursor: pointer;
   font-size: 14px;
   transition:
@@ -932,8 +913,8 @@ defineExpose({
 
 .control-btn:hover:not(:disabled) {
   background: rgba(79, 124, 255, 0.08);
-  border-color: #B8CBFF;
-  color: #4F7CFF;
+  border-color: #b8cbff;
+  color: #4f7cff;
 }
 
 .control-btn:active:not(:disabled) {
@@ -949,8 +930,8 @@ defineExpose({
   width: 38px;
   height: 38px;
   font-size: 18px;
-  border-color: #4F7CFF;
-  color: #4F7CFF;
+  border-color: #4f7cff;
+  color: #4f7cff;
   background: rgba(79, 124, 255, 0.06);
 }
 
@@ -969,7 +950,7 @@ defineExpose({
 
 .progress-label {
   font-size: 11px;
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   min-width: 28px;
   text-align: center;
@@ -1002,7 +983,7 @@ defineExpose({
   top: 0;
   left: 0;
   height: 100%;
-  background: linear-gradient(90deg, #4F7CFF, #8FAEFF);
+  background: linear-gradient(90deg, #4f7cff, #8faeff);
   border-radius: 2px;
   pointer-events: none;
   z-index: 1;
@@ -1013,13 +994,13 @@ defineExpose({
   content: '';
   position: absolute;
   inset: 0;
-  background: #E8E0D8;
+  background: #e8e0d8;
   border-radius: 2px;
 }
 
 /* 速度选择 */
 .speed-label {
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -1028,7 +1009,7 @@ defineExpose({
 .speed-group {
   display: flex;
   gap: 2px;
-  background: #F5F4F2;
+  background: #f5f4f2;
   border-radius: 8px;
   padding: 2px;
 }
@@ -1038,7 +1019,7 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807C;
+  color: #82807c;
   font-size: 12px;
   font-weight: 500;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
@@ -1049,13 +1030,13 @@ defineExpose({
 }
 
 .speed-btn:hover {
-  color: #3D3B39;
+  color: #3d3b39;
   background: rgba(255, 255, 255, 0.5);
 }
 
 .speed-btn--active {
   background: #fff;
-  color: #4F7CFF;
+  color: #4f7cff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
@@ -1077,20 +1058,20 @@ defineExpose({
 }
 
 .legend-dot--elite {
-  background: #FF4D4F;
+  background: #ff4d4f;
 }
 
 .legend-dot--normal {
-  background: #4F7CFF;
+  background: #4f7cff;
 }
 
 .legend-dot--exploring {
-  background: #52C41A;
+  background: #52c41a;
 }
 
 .legend-text {
   font-size: 11px;
-  color: #A8A6A2;
+  color: #a8a6a2;
 }
 
 /* ═══════════ 空状态 ═══════════ */
@@ -1099,7 +1080,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   min-height: 200px;
-  color: #A8A6A2;
+  color: #a8a6a2;
   font-size: 14px;
 }
 

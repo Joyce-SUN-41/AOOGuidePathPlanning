@@ -51,15 +51,30 @@ class AOOOptimizeConfig(CamelModel):
 
 
 class AOOOptimizeRequest(CamelModel):
-    """POST /api/v1/aoo/optimize — 触发 AOO 路径优化"""
+    """POST /api/v1/aoo/optimize — 触发 AOO 路径优化
 
-    student_id: str = Field(..., description="学生用户 ID (UUID)")
-    diagnosis_id: str = Field(..., description="诊断结果 ID")
-    mastery_levels: Dict[str, float] = Field(
-        ..., description="知识点掌握度映射 {kp_id: value ∈ [0,1]}"
+    前端只需传入 diagnosis_id，其余字段由后端从诊断数据库自动补全。
+    若显式传入，则优先使用传入值。
+    """
+
+    diagnosis_id: str = Field(
+        ...,
+        min_length=1,
+        description="诊断结果 ID (必填)，后端可据此自动补全 student_id/mastery_levels/cognitive_load",
     )
-    cognitive_load: float = Field(
-        ..., ge=0.0, le=1.0, description="综合认知负荷指数"
+    student_id: Optional[str] = Field(
+        default=None,
+        description="学生用户 ID (UUID)，省略时从诊断记录自动补全",
+    )
+    mastery_levels: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="知识点掌握度映射 {kp_id: value ∈ [0,1]}，省略时从诊断记录提取",
+    )
+    cognitive_load: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="综合认知负荷指数，省略时从诊断记录提取",
     )
     config: Optional[AOOOptimizeConfig] = Field(
         default=None, description="可选的 AOO 超参数覆盖"
@@ -67,8 +82,10 @@ class AOOOptimizeRequest(CamelModel):
 
     @field_validator("mastery_levels")
     @classmethod
-    def mastery_values_in_range(cls, v: Dict[str, float]) -> Dict[str, float]:
+    def mastery_values_in_range(cls, v: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
         """确保所有掌握度值在 [0, 1] 范围内"""
+        if v is None:
+            return v
         for kp_id, value in v.items():
             if not (0.0 <= value <= 1.0):
                 raise ValueError(
@@ -121,7 +138,7 @@ class AlternativePath(CamelModel):
     total_days: int = Field(..., ge=0)
     total_tasks: int = Field(..., ge=0)
     total_estimated_hours: float = Field(..., ge=0)
-    fitness: float = Field(..., ge=0, le=1, description="适应度得分")
+    fitness: float = Field(..., description="适应度得分 (含惩罚项, 可能为负)")
 
 
 class PathFitnessDetail(CamelModel):

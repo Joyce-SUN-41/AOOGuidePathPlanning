@@ -65,8 +65,8 @@ const themeConfig = {
     // 动画
     motionDurationSlow: '0.3s',
     motionDurationMid: '0.2s',
-    motionDurationFast: '0.1s',
-  },
+    motionDurationFast: '0.1s'
+  }
 }
 </script>
 
@@ -87,8 +87,8 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 export default {
   data() {
     return {
-      zhCN,
+      zhCN
     }
-  },
+  }
 }
 </script>

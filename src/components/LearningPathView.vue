@@ -9,7 +9,7 @@
  * 支持三条差异化路径切换（效率型 / 均衡型 / 稳健型），联动更新
  * 统计数据面板：总天数、总时长、覆盖知识点、日均时长、认知负荷指数
  */
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, type Component } from 'vue'
 import * as echarts from 'echarts'
 import { usePathStore } from '@/stores/path'
 import type { AlternativePath, DailyTaskView, LearningTask } from '@/types'
@@ -20,7 +20,16 @@ import {
   BookOutlined,
   BulbOutlined,
   ThunderboltOutlined,
-  DashboardOutlined
+  DashboardOutlined,
+  VideoCameraOutlined,
+  CheckCircleOutlined,
+  ReadOutlined,
+  FileTextOutlined,
+  ProjectOutlined,
+  EditOutlined,
+  RocketOutlined,
+  SlidersOutlined,
+  SafetyOutlined
 } from '@ant-design/icons-vue'
 
 // ============ Props ============
@@ -64,48 +73,69 @@ let resizeObserver: ResizeObserver | null = null
 
 /** 悬停中的任务（Timeline Tooltip） */
 const hoveredTask = ref<LearningTask | null>(null)
-function showTaskTooltip(task: LearningTask) { hoveredTask.value = task }
-function hideTaskTooltip() { hoveredTask.value = null }
+function showTaskTooltip(task: LearningTask) {
+  hoveredTask.value = task
+}
+function hideTaskTooltip() {
+  hoveredTask.value = null
+}
 
 // ============ 任务类型配色 ============
-const TASK_TYPE_CONFIG: Record<string, { color: string; bg: string; label: string; icon: string }> = {
-  video:    { color: '#1890FF', bg: 'rgba(24,144,255,0.12)',  label: '视频', icon: '▶' },
-  quiz:     { color: '#FA8C16', bg: 'rgba(250,140,22,0.12)',  label: '测验', icon: '✓' },
-  reading:  { color: '#52C41A', bg: 'rgba(82,196,26,0.12)',   label: '阅读', icon: '📖' },
-  article:  { color: '#52C41A', bg: 'rgba(82,196,26,0.12)',   label: '阅读', icon: '📖' },
-  project:  { color: '#722ED1', bg: 'rgba(114,46,209,0.12)',  label: '项目', icon: '⚙' },
-  exercise: { color: '#13C2C2', bg: 'rgba(19,194,194,0.12)',  label: '练习', icon: '✎' },
+interface TaskTypeStyle {
+  color: string
+  bg: string
+  label: string
+  icon: Component
+}
+const TASK_TYPE_CONFIG: {
+  [K in 'video' | 'quiz' | 'reading' | 'article' | 'project' | 'exercise']: TaskTypeStyle
+} = {
+  video: { color: '#1890FF', bg: 'rgba(24,144,255,0.12)', label: '视频', icon: VideoCameraOutlined },
+  quiz: { color: '#FA8C16', bg: 'rgba(250,140,22,0.12)', label: '测验', icon: CheckCircleOutlined },
+  reading: { color: '#52C41A', bg: 'rgba(82,196,26,0.12)', label: '阅读', icon: ReadOutlined },
+  article: { color: '#52C41A', bg: 'rgba(82,196,26,0.12)', label: '阅读', icon: FileTextOutlined },
+  project: { color: '#722ED1', bg: 'rgba(114,46,209,0.12)', label: '项目', icon: ProjectOutlined },
+  exercise: { color: '#13C2C2', bg: 'rgba(19,194,194,0.12)', label: '练习', icon: EditOutlined }
 }
 
 /** 任务类型图例列表 */
 const taskTypeLegends = [
-  { key: 'video',    ...TASK_TYPE_CONFIG.video },
-  { key: 'quiz',     ...TASK_TYPE_CONFIG.quiz },
-  { key: 'reading',  ...TASK_TYPE_CONFIG.reading },
-  { key: 'project',  ...TASK_TYPE_CONFIG.project },
-  { key: 'exercise', ...TASK_TYPE_CONFIG.exercise },
+  { key: 'video', ...TASK_TYPE_CONFIG.video },
+  { key: 'quiz', ...TASK_TYPE_CONFIG.quiz },
+  { key: 'reading', ...TASK_TYPE_CONFIG.reading },
+  { key: 'project', ...TASK_TYPE_CONFIG.project },
+  { key: 'exercise', ...TASK_TYPE_CONFIG.exercise }
 ]
 
 // ============ 路径变体配色 ============
 const VARIANT_THEMES = [
   {
-    icon: '🚀', label: '速成冲刺型',
+    icon: RocketOutlined,
+    label: '速成冲刺型',
     description: '高学习效果，高负荷推进，适合有基础的学习者',
-    color: '#FF6B35', bg: 'rgba(255,107,53,0.08)', border: 'rgba(255,107,53,0.3)',
+    color: '#FF6B35',
+    bg: 'rgba(255,107,53,0.08)',
+    border: 'rgba(255,107,53,0.3)',
     intensityLabel: '高强度'
   },
   {
-    icon: '⚖️', label: '稳扎稳打型',
+    icon: SlidersOutlined,
+    label: '稳扎稳打型',
     description: '平衡学习效果与认知负荷，循序渐进',
-    color: '#4F7CFF', bg: 'rgba(79,124,255,0.08)', border: 'rgba(79,124,255,0.3)',
+    color: '#4F7CFF',
+    bg: 'rgba(79,124,255,0.08)',
+    border: 'rgba(79,124,255,0.3)',
     intensityLabel: '适中'
   },
   {
-    icon: '🛡️', label: '查漏补缺型',
+    icon: SafetyOutlined,
+    label: '查漏补缺型',
     description: '低负荷，重点攻克薄弱知识点',
-    color: '#52C41A', bg: 'rgba(82,196,26,0.08)', border: 'rgba(82,196,26,0.3)',
+    color: '#52C41A',
+    bg: 'rgba(82,196,26,0.08)',
+    border: 'rgba(82,196,26,0.3)',
     intensityLabel: '低强度'
-  },
+  }
 ]
 
 // ============ 数据源 ============
@@ -157,13 +187,13 @@ const variants = computed(() => {
     {
       id: pathStore.pathId || 'current',
       index: 0,
-      label: VARIANT_THEMES[1].label, // 默认当前是均衡型
-      icon: VARIANT_THEMES[1].icon,
-      description: VARIANT_THEMES[1].description,
-      color: VARIANT_THEMES[1].color,
-      bg: VARIANT_THEMES[1].bg,
-      border: VARIANT_THEMES[1].border,
-      intensityLabel: VARIANT_THEMES[1].intensityLabel,
+      label: VARIANT_THEMES[1]!.label, // 默认当前是均衡型
+      icon: VARIANT_THEMES[1]!.icon,
+      description: VARIANT_THEMES[1]!.description,
+      color: VARIANT_THEMES[1]!.color,
+      bg: VARIANT_THEMES[1]!.bg,
+      border: VARIANT_THEMES[1]!.border,
+      intensityLabel: VARIANT_THEMES[1]!.intensityLabel,
       totalDays: totalDays.value,
       totalTasks: totalTasks.value,
       totalEstimatedHours: totalEstimatedHours.value,
@@ -173,7 +203,7 @@ const variants = computed(() => {
   ]
 
   alternativePaths.value.forEach((alt, i) => {
-    const theme = i === 0 ? VARIANT_THEMES[0] : VARIANT_THEMES[2]
+    const theme = (i === 0 ? VARIANT_THEMES[0] : VARIANT_THEMES[2])!
     list.push({
       id: alt.id,
       index: i + 1,
@@ -226,36 +256,60 @@ interface StatItem {
   label: string
   value: string | number
   unit?: string
-  icon: ReturnType<typeof defineComponent> | string
+  icon: Component | string
   color: string
 }
 
 const stats = computed<StatItem[]>(() => [
   {
-    key: 'days', label: '总学习天数', value: totalDays.value, unit: '天',
-    icon: ClockCircleOutlined, color: '#4F7CFF'
+    key: 'days',
+    label: '总学习天数',
+    value: totalDays.value,
+    unit: '天',
+    icon: ClockCircleOutlined,
+    color: '#4F7CFF'
   },
   {
-    key: 'hours', label: '总学习时长', value: totalEstimatedHours.value.toFixed(1), unit: '小时',
-    icon: ThunderboltOutlined, color: '#FA8C16'
+    key: 'hours',
+    label: '总学习时长',
+    value: totalEstimatedHours.value.toFixed(1),
+    unit: '小时',
+    icon: ThunderboltOutlined,
+    color: '#FA8C16'
   },
   {
-    key: 'kps', label: '覆盖知识点', value: uniqueKnowledgePoints.value, unit: '个',
-    icon: BulbOutlined, color: '#52C41A'
+    key: 'kps',
+    label: '覆盖知识点',
+    value: uniqueKnowledgePoints.value,
+    unit: '个',
+    icon: BulbOutlined,
+    color: '#52C41A'
   },
   {
-    key: 'avg-daily', label: '日均学习', value: `${Math.floor(avgDailyMinutes.value / 60)}h${avgDailyMinutes.value % 60}m`,
-    icon: FieldTimeOutlined, color: '#13C2C2'
+    key: 'avg-daily',
+    label: '日均学习',
+    value: `${Math.floor(avgDailyMinutes.value / 60)}h${avgDailyMinutes.value % 60}m`,
+    icon: FieldTimeOutlined,
+    color: '#13C2C2'
   },
   {
-    key: 'load', label: '认知负荷指数', value: cognitiveLoadIndex.value, unit: '/100',
-    icon: DashboardOutlined, color: cognitiveLoadIndex.value > 70 ? '#FF4D4F' : cognitiveLoadIndex.value > 40 ? '#FA8C16' : '#52C41A'
-  },
+    key: 'load',
+    label: '认知负荷指数',
+    value: cognitiveLoadIndex.value,
+    unit: '/100',
+    icon: DashboardOutlined,
+    color:
+      cognitiveLoadIndex.value > 70
+        ? '#FF4D4F'
+        : cognitiveLoadIndex.value > 40
+          ? '#FA8C16'
+          : '#52C41A'
+  }
 ])
 
 // ============ 辅助函数 ============
-function getTaskConfig(taskType: string) {
-  return TASK_TYPE_CONFIG[taskType] || TASK_TYPE_CONFIG.reading
+function getTaskConfig(taskType: string): TaskTypeStyle {
+  return TASK_TYPE_CONFIG[taskType as keyof typeof TASK_TYPE_CONFIG] || TASK_TYPE_CONFIG.reading
 }
 
 function getDifficultyStars(difficulty: number): string {
@@ -264,7 +318,23 @@ function getDifficultyStars(difficulty: number): string {
 
 function getDifficultyColor(difficulty: number): string {
   const colors = ['#52C41A', '#73D13D', '#FA8C16', '#FF7A45', '#FF4D4F']
-  return colors[difficulty - 1] || colors[2]
+  return colors[difficulty - 1] ?? colors[2] ?? '#52C41A'
+}
+
+/** 按可用像素宽度截断文字（中文约 11px/字，西文约 6px/字），超出加省略号 */
+function fitText(name: string, maxPx: number): string {
+  if (maxPx <= 0) return ''
+  let used = 0
+  let result = ''
+  for (const ch of name) {
+    const w = /[一-龥]/.test(ch) ? 11 : 6
+    if (used + w > maxPx) {
+      return result + '…'
+    }
+    used += w
+    result += ch
+  }
+  return result
 }
 
 // ============ 甘特图渲染 ============
@@ -287,12 +357,13 @@ function renderGanttChart(): void {
 
   const maxDay = tasks.length > 0 ? Math.max(...tasks.map((t) => t.day)) : 1
   const taskNames = tasks.map((t) => `第${t.day}天 · ${t.name}`)
-  const rowHeight = 36
-  const chartHeight = Math.max(300, Math.min(tasks.length * rowHeight + 60, 700))
+  const rowHeight = 40
+  const chartHeight = Math.max(300, Math.min(tasks.length * rowHeight + 80, 760))
 
   // 动态调整容器高度
   if (ganttRef.value) {
     ganttRef.value.style.height = `${chartHeight}px`
+    chartInstance.resize()
   }
 
   const option: echarts.EChartsOption = {
@@ -303,20 +374,21 @@ function renderGanttChart(): void {
       borderRadius: 8,
       padding: [12, 16],
       textStyle: { color: '#F8FAFC', fontSize: 13 },
-      formatter: (params: { dataIndex?: number }) => {
+      formatter: (params: any) => {
         if (params.dataIndex == null) return ''
         const t = tasks[params.dataIndex]
+        if (!t) return ''
         const config = getTaskConfig(t.taskType)
         return `
           <div style="font-weight:600;font-size:14px;margin-bottom:8px;">
             ${t.name}
           </div>
-          <div style="display:flex;flex-direction:column;gap:4px;color:#5C5A57;">
-            <span>📌 知识点：${t.knowledgePoint || '—'}</span>
-            <span>${config.icon}  类型：${config.label}</span>
-            <span>⏱  时长：${t.estimatedMinutes} 分钟</span>
-            <span>📊 难度：${getDifficultyStars(t.difficulty)}</span>
-            <span>📅 第 ${t.day} 天 · 第 ${t.orderIndex} 个任务</span>
+          <div style="display:flex;flex-direction:column;gap:4px;color:#94A3B8;">
+            <span>知识点：${t.knowledgePoint || '—'}</span>
+            <span>类型：${config.label}</span>
+            <span>时长：${t.estimatedMinutes} 分钟</span>
+            <span>难度：${getDifficultyStars(t.difficulty)}</span>
+            <span>第 ${t.day} 天 · 第 ${t.orderIndex} 个任务</span>
           </div>
         `
       }
@@ -325,15 +397,15 @@ function renderGanttChart(): void {
       left: 24,
       right: 48,
       top: 16,
-      bottom: 24,
+      bottom: 48,
       containLabel: true
     },
     xAxis: {
       type: 'value' as const,
       name: '学习天数',
       nameLocation: 'middle' as const,
-      nameGap: 30,
-      nameTextStyle: { color: '#475569', fontSize: 12 },
+      nameGap: 32,
+      nameTextStyle: { color: '#CBD5E1', fontSize: 12, fontWeight: 500 },
       min: 0.5,
       max: maxDay + 0.5,
       interval: 1,
@@ -342,7 +414,7 @@ function renderGanttChart(): void {
           if (v === Math.round(v)) return `第${v}天`
           return ''
         },
-        color: '#475569',
+        color: '#94A3B8',
         fontSize: 12
       },
       axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
@@ -359,49 +431,54 @@ function renderGanttChart(): void {
       axisLabel: {
         width: 180,
         overflow: 'truncate' as const,
-        ellipsis: '...',
         fontSize: 12,
         color: '#94A3B8'
       },
       axisLine: { show: false },
       axisTick: { show: false },
-      splitLine: { show: false },
+      splitLine: { show: false }
     },
-    dataZoom: tasks.length > 12 ? [
-      {
-        type: 'slider' as const,
-        yAxisIndex: 0,
-        start: 0,
-        end: Math.min(100, Math.round(12 * 100 / tasks.length)),
-        width: 18,
-        handleSize: 0,
-        backgroundColor: 'transparent',
-        borderColor: 'transparent',
-        fillerColor: 'rgba(79,124,255,0.15)',
-        left: 0
-      }
-    ] : [],
+    dataZoom:
+      tasks.length > 12
+        ? [
+            {
+              type: 'slider' as const,
+              yAxisIndex: 0,
+              start: 0,
+              end: Math.min(100, Math.round((12 * 100) / tasks.length)),
+              width: 18,
+              handleSize: 0,
+              backgroundColor: 'transparent',
+              borderColor: 'transparent',
+              fillerColor: 'rgba(79,124,255,0.15)',
+              left: 0
+            }
+          ]
+        : [],
     series: [
       {
         type: 'custom',
-        renderItem: (_params, api) => {
+        renderItem: (_params: any, api: any) => {
           const dataIndex = (_params as { dataIndex: number }).dataIndex
           if (dataIndex == null) return null
           const task = tasks[dataIndex]
+          if (!task) return null
           const day = task.day
           const rowIdx = dataIndex
           const config = getTaskConfig(task.taskType)
 
-          const [xStart, y] = api.coord([day - 0.48, rowIdx])
-          const [xEnd] = api.coord([day + 0.48, rowIdx])
+          const [xStart, y] = api.coord([day - 0.46, rowIdx])
+          const [xEnd] = api.coord([day + 0.46, rowIdx])
 
-          const rectWidth = Math.max(xEnd - xStart - 10, 12)
-          const rectHeight = 28
-          const rectX = xStart + 5
+          const rectWidth = Math.max(xEnd - xStart - 4, 14)
+          const rectHeight = 32
+          const rectX = xStart + 2
           const rectY = y - rectHeight / 2
+          const innerPad = 10
 
-          const text = task.name.length > 18 ? task.name.slice(0, 16) + '...' : task.name
-          const showText = rectWidth > 60
+          // 按像素宽度截断文字，避免超出绿色框
+          const avail = rectWidth - innerPad - 6
+          const text = fitText(task.name, avail)
 
           const children: any[] = [
             // 主矩形 — 极轻底色块
@@ -412,12 +489,12 @@ function renderGanttChart(): void {
                 y: rectY,
                 width: rectWidth,
                 height: rectHeight,
-                r: [4, 4, 4, 4]
+                r: [5, 5, 5, 5]
               },
               style: {
                 fill: config.color + '22',
                 stroke: config.color + '55',
-                lineWidth: 1,
+                lineWidth: 1
               },
               z2: 2
             },
@@ -426,9 +503,9 @@ function renderGanttChart(): void {
               type: 'rect',
               shape: {
                 x: rectX,
-                y: rectY + 5,
-                width: 2,
-                height: rectHeight - 10,
+                y: rectY + 6,
+                width: 3,
+                height: rectHeight - 12,
                 r: [2, 0, 0, 2]
               },
               style: {
@@ -438,17 +515,24 @@ function renderGanttChart(): void {
             }
           ]
 
-          // 文字标签 — 任务类型色
-          if (showText) {
+          // 文字标签 — 仅在框内放得下时显示，并用 clip 裁剪兜底
+          if (text && avail > 12) {
             children.push({
               type: 'text',
               style: {
                 text,
-                x: rectX + 10,
+                x: rectX + innerPad,
                 y,
                 fill: '#94A3B8',
                 font: '500 11px Inter, PingFang SC, sans-serif',
-                textVerticalAlign: 'middle' as const
+                textVerticalAlign: 'middle' as const,
+                textAlign: 'left' as const
+              },
+              clipRect: {
+                x: rectX + innerPad - 1,
+                y: rectY,
+                width: Math.max(rectWidth - innerPad - 4, 0),
+                height: rectHeight
               },
               z2: 4
             })
@@ -525,16 +609,19 @@ function handleResize() {
 }
 
 // ============ Watchers ============
-watch(() => flatTasks.value.length, async () => {
-  await nextTick()
-  if (viewMode.value === 'gantt') {
-    if (!chartInstance && ganttRef.value) {
-      initChart()
-    } else {
-      renderGanttChart()
+watch(
+  () => flatTasks.value.length,
+  async () => {
+    await nextTick()
+    if (viewMode.value === 'gantt') {
+      if (!chartInstance && ganttRef.value) {
+        initChart()
+      } else {
+        renderGanttChart()
+      }
     }
   }
-})
+)
 
 watch(viewMode, async (mode) => {
   if (mode === 'gantt') {
@@ -544,15 +631,21 @@ watch(viewMode, async (mode) => {
 })
 
 // 监听备选路径更新，重置选中索引
-watch(() => alternativePaths.value.length, (newLen) => {
-  if (newLen === 0) {
-    selectedVariantIndex.value = 0
+watch(
+  () => alternativePaths.value.length,
+  (newLen) => {
+    if (newLen === 0) {
+      selectedVariantIndex.value = 0
+    }
   }
-})
+)
 </script>
 
 <template>
-  <div class="learning-path-view" :style="{ height: typeof height === 'number' ? height + 'px' : height }">
+  <div
+    class="learning-path-view"
+    :style="{ height: typeof height === 'number' ? height + 'px' : height }"
+  >
     <!-- ═══ 统计面板 ═══ -->
     <div v-if="showStats && stats.length > 0" class="stats-row">
       <div v-for="stat in stats" :key="stat.key" class="stat-card">
@@ -560,7 +653,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
           <component :is="stat.icon" />
         </div>
         <div class="stat-content">
-          <span class="stat-value">{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></span>
+          <span class="stat-value"
+            >{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></span
+          >
           <span class="stat-label">{{ stat.label }}</span>
         </div>
       </div>
@@ -588,7 +683,7 @@ watch(() => alternativePaths.value.length, (newLen) => {
             @click="switchVariant(vi)"
           >
             <div class="variant-top">
-              <span class="variant-icon">{{ variant.icon }}</span>
+              <component :is="variant.icon" class="variant-icon" />
               <span class="variant-name">{{ variant.label }}</span>
               <a-tag :color="variant.color" size="small" class="variant-intensity">
                 {{ variant.intensityLabel }}
@@ -687,11 +782,7 @@ watch(() => alternativePaths.value.length, (newLen) => {
         <!-- 时间轴 -->
         <div v-else class="timeline-list">
           <div class="timeline-line-track" />
-          <div
-            v-for="dayView in dailyTaskViews"
-            :key="dayView.dayIndex"
-            class="timeline-day-group"
-          >
+          <div v-for="dayView in dailyTaskViews" :key="dayView.dayIndex" class="timeline-day-group">
             <!-- 天数标记 -->
             <div class="timeline-marker">
               <div
@@ -703,7 +794,13 @@ watch(() => alternativePaths.value.length, (newLen) => {
                   <span class="day-number">{{ dayView.dayLabel }}</span>
                   <span class="day-date">{{ dayView.date }}</span>
                   <a-tag
-                    :color="dayView.difficulty > 3.5 ? 'red' : dayView.difficulty > 2.5 ? 'orange' : 'green'"
+                    :color="
+                      dayView.difficulty > 3.5
+                        ? 'red'
+                        : dayView.difficulty > 2.5
+                          ? 'orange'
+                          : 'green'
+                    "
                     size="small"
                   >
                     难度 {{ dayView.difficulty }}/5
@@ -725,7 +822,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
               >
                 <div
                   class="task-type-strip"
-                  :style="{ background: getTaskConfig(task.resources?.[0]?.type || 'reading').color + '99' }"
+                  :style="{
+                    background: getTaskConfig(task.resources?.[0]?.type || 'reading').color + '99'
+                  }"
                 />
                 <div class="task-body">
                   <div class="task-header-row">
@@ -733,7 +832,7 @@ watch(() => alternativePaths.value.length, (newLen) => {
                       :color="getTaskConfig(task.resources?.[0]?.type || 'reading').color"
                       size="small"
                     >
-                      {{ getTaskConfig(task.resources?.[0]?.type || 'reading').icon }}
+                      <component :is="getTaskConfig(task.resources?.[0]?.type || 'reading').icon" />
                       {{ getTaskConfig(task.resources?.[0]?.type || 'reading').label }}
                     </a-tag>
                     <span class="task-duration">{{ task.estimatedMinutes }}分钟</span>
@@ -750,7 +849,10 @@ watch(() => alternativePaths.value.length, (newLen) => {
                     </div>
                     <div class="tt-row">
                       <span class="tt-label">难度</span>
-                      <span class="tt-value" :style="{ color: getDifficultyColor(task.difficulty) }">
+                      <span
+                        class="tt-value"
+                        :style="{ color: getDifficultyColor(task.difficulty) }"
+                      >
                         {{ getDifficultyStars(task.difficulty) }}
                       </span>
                     </div>
@@ -785,15 +887,20 @@ watch(() => alternativePaths.value.length, (newLen) => {
         </div>
         <div class="summary-item">
           <span class="summary-label">日均学习时长</span>
-          <span class="summary-value">{{ Math.floor(avgDailyMinutes / 60) }}h{{ avgDailyMinutes % 60 }}m</span>
+          <span class="summary-value"
+            >{{ Math.floor(avgDailyMinutes / 60) }}h{{ avgDailyMinutes % 60 }}m</span
+          >
         </div>
         <div class="summary-item">
           <span class="summary-label">认知负荷评估</span>
-          <span class="summary-value load-value" :class="{
-            'load-low': cognitiveLoadIndex < 35,
-            'load-mid': cognitiveLoadIndex >= 35 && cognitiveLoadIndex < 70,
-            'load-high': cognitiveLoadIndex >= 70
-          }">
+          <span
+            class="summary-value load-value"
+            :class="{
+              'load-low': cognitiveLoadIndex < 35,
+              'load-mid': cognitiveLoadIndex >= 35 && cognitiveLoadIndex < 70,
+              'load-high': cognitiveLoadIndex >= 70
+            }"
+          >
             {{ cognitiveLoadIndex < 35 ? '轻松' : cognitiveLoadIndex < 70 ? '适中' : '较高' }}
           </span>
         </div>
@@ -822,8 +929,12 @@ watch(() => alternativePaths.value.length, (newLen) => {
   grid-template-columns: repeat(5, 1fr);
   gap: @spacing-md;
 
-  @media (max-width: 1024px) { grid-template-columns: repeat(3, 1fr); }
-  @media (max-width: 640px)  { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 1024px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  @media (max-width: 640px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .stat-card {
@@ -933,13 +1044,13 @@ watch(() => alternativePaths.value.length, (newLen) => {
     transform: translateY(-1px);
 
     &::after {
-      content: '✓ 当前方案';
+      content: '当前方案';
       position: absolute;
       top: @spacing-xs;
       right: @spacing-sm;
       font-size: @font-size-xs;
       font-weight: @font-weight-bold;
-      color: @gray-900;
+      color: #fff;
       background: var(--variant-color);
       padding: 1px 6px;
       border-radius: @radius-tag;
@@ -956,6 +1067,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
 
 .variant-icon {
   font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .variant-name {
@@ -1066,7 +1180,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
   cursor: help;
   transition: transform @transition-fast;
 
-  &:hover { transform: scale(1.5); }
+  &:hover {
+    transform: scale(1.5);
+  }
 }
 
 .legend-divider {
@@ -1153,7 +1269,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
   position: relative;
   margin-bottom: @spacing-xl;
 
-  &:last-child { margin-bottom: 0; }
+  &:last-child {
+    margin-bottom: 0;
+  }
 }
 
 // 天数标记
@@ -1171,7 +1289,7 @@ watch(() => alternativePaths.value.length, (newLen) => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 2px solid #0A0D14;
+  border: 2px solid #0a0d14;
   box-shadow: @shadow-elevation-1;
   z-index: 1;
 }
@@ -1224,7 +1342,7 @@ watch(() => alternativePaths.value.length, (newLen) => {
   }
 
   &.is-tooltip-open {
-    border-color: rgba(212, 163, 115, 0.30);
+    border-color: rgba(212, 163, 115, 0.3);
     z-index: 5;
   }
 }
@@ -1237,10 +1355,12 @@ watch(() => alternativePaths.value.length, (newLen) => {
   transform: translateY(-50%);
   width: 280px;
   background: rgba(10, 13, 20, 0.95);
-  border: 1px solid rgba(212, 163, 115, 0.20);
+  border: 1px solid rgba(212, 163, 115, 0.2);
   border-radius: 6px;
   padding: 14px 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.60), 0 0 0 1px rgba(0, 0, 0, 0.30);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.3);
   z-index: @z-tooltip;
   pointer-events: none;
 }
@@ -1310,7 +1430,9 @@ watch(() => alternativePaths.value.length, (newLen) => {
 // Tooltip 出入动画
 .tooltip-fade-enter-active,
 .tooltip-fade-leave-active {
-  transition: opacity 150ms ease, transform 150ms ease;
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
 }
 
 .tooltip-fade-enter-from,
@@ -1414,9 +1536,15 @@ watch(() => alternativePaths.value.length, (newLen) => {
 }
 
 .load-value {
-  &.load-low  { color: @color-success; }
-  &.load-mid  { color: @color-warning; }
-  &.load-high { color: @color-error; }
+  &.load-low {
+    color: @color-success;
+  }
+  &.load-mid {
+    color: @color-warning;
+  }
+  &.load-high {
+    color: @color-error;
+  }
 }
 
 // ============================================================

@@ -44,7 +44,7 @@ async function handleLogin() {
     const success = await userStore.login(formState)
     if (success) {
       // 登录成功 → 跳转到 redirect 页面或首页
-      const redirect = (route.query.redirect as string) || '/home'
+      const redirect = (route.query['redirect'] as string) || '/home'
       router.push(redirect)
     }
   } finally {
@@ -139,13 +139,7 @@ function demoLogin(role: 'student' | 'teacher') {
           </div>
 
           <a-form-item>
-            <a-button
-              type="primary"
-              html-type="submit"
-              :loading="loading"
-              block
-              class="login-btn"
-            >
+            <a-button type="primary" html-type="submit" :loading="loading" block class="login-btn">
               登 录
             </a-button>
           </a-form-item>
@@ -170,9 +164,7 @@ function demoLogin(role: 'student' | 'teacher') {
 
         <div class="form-footer">
           还没有账号？
-          <a-button type="link" size="small" @click="router.push('/register')">
-            立即注册
-          </a-button>
+          <a-button type="link" size="small" @click="router.push('/register')"> 立即注册 </a-button>
         </div>
       </div>
     </div>
@@ -215,7 +207,7 @@ export default {
 .login-banner {
   flex: 1;
   position: relative;
-  background: linear-gradient(135deg, #141B2B 0%, #0F1623 50%, #0A0D14 100%);
+  background: linear-gradient(135deg, #141b2b 0%, #0f1623 50%, #0a0d14 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +228,7 @@ export default {
   z-index: 1;
   max-width: 420px;
   padding: 60px 40px;
-  color: #F8FAFC;
+  color: #f8fafc;
 }
 
 .banner-logo {
@@ -253,10 +245,10 @@ export default {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, rgba(212, 163, 115, 0.25), rgba(212, 163, 115, 0.08));
-  border: 1px solid rgba(212, 163, 115, 0.20);
+  border: 1px solid rgba(212, 163, 115, 0.2);
   border-radius: 16px;
   font-size: 28px;
-  color: #D4A373;
+  color: #d4a373;
 }
 
 .banner-title {
@@ -270,7 +262,7 @@ export default {
   font-size: 15px;
   line-height: 1.7;
   opacity: 0.75;
-  color: #94A3B8;
+  color: #94a3b8;
   margin-bottom: 36px;
 }
 
@@ -285,13 +277,13 @@ export default {
   align-items: center;
   gap: 10px;
   font-size: 14px;
-  color: #94A3B8;
+  color: #94a3b8;
   opacity: 0.85;
 }
 
 .feature-icon {
   font-size: 16px;
-  color: #D4A373;
+  color: #d4a373;
 }
 
 /* ============================================================
@@ -318,18 +310,18 @@ export default {
 .form-title {
   font-size: 26px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: #f8fafc;
   margin: 0 0 8px 0;
 }
 
 .form-subtitle {
-  color: #94A3B8;
+  color: #94a3b8;
   font-size: 14px;
   margin: 0;
 }
 
 .input-icon {
-  color: #64748B;
+  color: #64748b;
 }
 
 .form-extra {
@@ -356,7 +348,7 @@ export default {
 .demo-divider {
   display: flex;
   align-items: center;
-  color: #64748B;
+  color: #64748b;
   font-size: 12px;
   margin-bottom: 16px;
 }
@@ -388,25 +380,25 @@ export default {
 
 .demo-btn.student {
   border-color: rgba(52, 211, 153, 0.35);
-  color: #34D399;
+  color: #34d399;
   background: rgba(255, 255, 255, 0.03);
 }
 
 .demo-btn.student:hover {
-  border-color: #34D399;
-  color: #34D399;
+  border-color: #34d399;
+  color: #34d399;
   background: rgba(52, 211, 153, 0.08);
 }
 
 .demo-btn.teacher {
   border-color: rgba(251, 191, 36, 0.35);
-  color: #FBBF24;
+  color: #fbbf24;
   background: rgba(255, 255, 255, 0.03);
 }
 
 .demo-btn.teacher:hover {
-  border-color: #D4A373;
-  color: #D4A373;
+  border-color: #d4a373;
+  color: #d4a373;
   background: rgba(212, 163, 115, 0.08);
 }
 
@@ -414,7 +406,7 @@ export default {
   margin-top: 24px;
   text-align: center;
   font-size: 13px;
-  color: #64748B;
+  color: #64748b;
 }
 
 /* ============================================================

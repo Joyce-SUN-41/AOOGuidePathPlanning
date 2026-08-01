@@ -412,6 +412,19 @@ class AOOService:
         # 评估最佳路径的详细得分
         best_fr = fitness_calc.evaluate_strict(result.best_position)
 
+        # 序列化种群快照 (用于前端粒子轨迹动画)
+        population_snapshots = [
+            {
+                "iteration": snap.iteration,
+                "fitnessValues": snap.fitness_values,
+                "positionsX": snap.positions_x,
+                "positionsY": snap.positions_y,
+                "colors": snap.colors,
+                "bestIndex": snap.best_index,
+            }
+            for snap in conv.snapshots
+        ]
+
         return {
             "best_path": best_path,
             "best_path_fitness": self._fitness_result_to_dict(best_fr),
@@ -424,7 +437,7 @@ class AOOService:
                 "median_fitness": conv.median_fitness,
                 "q1_fitness": conv.q1_fitness,
                 "q3_fitness": conv.q3_fitness,
-                "population_snapshots": None,
+                "population_snapshots": population_snapshots,
                 "metadata": {
                     "algorithm": "AOO",
                     "population_size": config.population_size,

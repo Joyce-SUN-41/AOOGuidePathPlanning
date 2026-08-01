@@ -36,12 +36,12 @@ import {
   RiseOutlined,
   ReloadOutlined,
   CalendarOutlined,
-  ExperimentOutlined,
   FireOutlined,
-  RightOutlined,
   AimOutlined,
+  DashboardOutlined,
+  CaretLeftOutlined,
+  CaretRightOutlined
 } from '@ant-design/icons-vue'
-import { message } from 'ant-design-vue'
 
 // ============================================================
 //   Store
@@ -57,12 +57,16 @@ const loading = ref(true)
 const chartRefs = {
   radar: ref<HTMLDivElement | null>(null),
   trend: ref<HTMLDivElement | null>(null),
-  calendar: ref<HTMLDivElement | null>(null),
+  calendar: ref<HTMLDivElement | null>(null)
 }
-const chartInstances: Record<string, echarts.ECharts | null> = {
+const chartInstances: {
+  radar: echarts.ECharts | null
+  trend: echarts.ECharts | null
+  calendar: echarts.ECharts | null
+} = {
   radar: null,
   trend: null,
-  calendar: null,
+  calendar: null
 }
 const resizeObservers: ResizeObserver[] = []
 
@@ -99,10 +103,8 @@ const weakPoints = computed(() => diagnosisStore.sortedWeakPoints)
 const masteryStats = computed(() => diagnosisStore.masteryStats)
 const masteryRadarData = computed(() => diagnosisStore.masteryRadarData)
 
-const hasPath = computed(() => pathStore.hasPath)
 const totalTasks = computed(() => pathStore.taskCount)
 const estimatedHours = computed(() => pathStore.estimatedHours)
-const totalDays = computed(() => pathStore.totalDays)
 
 const completedTaskCount = computed(() => completedTaskIds.value.size)
 const masteredKPCount = computed(() => masteryStats.value.excellent + masteryStats.value.proficient)
@@ -110,7 +112,7 @@ const totalKPCount = computed(() => masteryLevels.value.length)
 
 // 薄弱点（掌握度 < 0.6 的知识点）
 const lowMasteryKPs = computed<MasteryItem[]>(() =>
-  masteryLevels.value.filter(kp => kp.mastery < 0.6)
+  masteryLevels.value.filter((kp) => kp.mastery < 0.6)
 )
 
 // ============================================================
@@ -121,12 +123,10 @@ function loadCompletedTasks(): Set<string> {
   try {
     const raw = localStorage.getItem('oat_completed_tasks')
     if (raw) return new Set(JSON.parse(raw))
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return new Set()
-}
-
-function saveCompletedTasks(): void {
-  localStorage.setItem('oat_completed_tasks', JSON.stringify([...completedTaskIds.value]))
 }
 
 /** 初始化雷达图 */
@@ -138,32 +138,32 @@ function initRadarChart(): void {
   const chart = echarts.init(container)
   chartInstances.radar = chart
 
-  const indicators = masteryRadarData.value.map(item => ({
+  const indicators = masteryRadarData.value.map((item) => ({
     name: item.name,
     max: 100
   }))
 
   // 当前掌握度
-  const currentValues = masteryRadarData.value.map(item => item.value)
+  const currentValues = masteryRadarData.value.map((item) => item.value)
 
   // 模拟初始掌握度（首次诊断或对比上次诊断）
   // 优先从历史诊断获取，若没有则使用当前值做基线偏移
   const initialMultiplier = 0.55 + Math.random() * 0.15
-  const initialValues = masteryRadarData.value.map(item =>
+  const initialValues = masteryRadarData.value.map((item) =>
     Math.max(5, Math.round(item.value * initialMultiplier))
   )
 
   // 提升幅度
-  const improvements = currentValues.map((v, i) => v - initialValues[i])
+  const improvements = currentValues.map((v, i) => v - (initialValues[i] ?? 0))
 
   chart.setOption({
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e8e0d8',
-      textStyle: { color: '#3d3b39' },
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.14)',
+      textStyle: { color: '#E2E8F0' },
       formatter: (params: { name: string; value: number; seriesName: string; color: string }) => {
-        const idx = indicators.findIndex(ind => ind.name === params.name)
+        const idx = indicators.findIndex((ind) => ind.name === params.name)
         const imp = idx >= 0 ? improvements[idx] : 0
         return `<b>${params.name}</b><br/>
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${params.color};margin-right:6px;"></span>
@@ -174,21 +174,27 @@ function initRadarChart(): void {
     legend: {
       bottom: 0,
       data: ['当前掌握度', '初始水平'],
-      textStyle: { color: '#5c5a57', fontSize: 12 }
+      textStyle: { color: '#CBD5E1', fontSize: 12 }
     },
     radar: {
       center: ['50%', '52%'],
       radius: '62%',
       indicator: indicators,
       axisName: {
-        color: '#5c5a57',
+        color: '#CBD5E1',
         fontSize: 11,
         borderRadius: 3,
         padding: [3, 5]
       },
       splitArea: {
         areaStyle: {
-          color: ['rgba(79,124,255,0.02)', 'rgba(79,124,255,0.04)', 'rgba(79,124,255,0.02)', 'rgba(79,124,255,0.04)', 'rgba(79,124,255,0.02)']
+          color: [
+            'rgba(79,124,255,0.02)',
+            'rgba(79,124,255,0.04)',
+            'rgba(79,124,255,0.02)',
+            'rgba(79,124,255,0.04)',
+            'rgba(79,124,255,0.02)'
+          ]
         }
       },
       splitLine: { lineStyle: { color: 'rgba(79,124,255,0.15)' } },
@@ -201,9 +207,14 @@ function initRadarChart(): void {
         data: [{ value: currentValues, name: '当前掌握度' }],
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { color: '#4F7CFF', width: 2, shadowBlur: 6, shadowColor: 'rgba(79,124,255,0.3)' },
+        lineStyle: {
+          color: '#4F7CFF',
+          width: 2,
+          shadowBlur: 6,
+          shadowColor: 'rgba(79,124,255,0.3)'
+        },
         areaStyle: { color: 'rgba(79,124,255,0.15)' },
-        itemStyle: { color: '#4F7CFF', borderColor: '#fff', borderWidth: 2 }
+        itemStyle: { color: '#4F7CFF', borderColor: '#141B2B', borderWidth: 2 }
       },
       {
         type: 'radar',
@@ -230,25 +241,26 @@ function initTrendChart(): void {
   const chart = echarts.init(container)
   chartInstances.trend = chart
 
-  const trendData = cognitiveTrend.value.length > 0
-    ? cognitiveTrend.value
-    : buildFallbackTrendData()
+  const trendData =
+    cognitiveTrend.value.length > 0 ? cognitiveTrend.value : buildFallbackTrendData()
 
-  const dates = trendData.map(d => d.date)
-  const overall = trendData.map(d => Math.round(d.overall * 100))
-  const memory = trendData.map(d => Math.round(d.memoryLoad * 100))
-  const attention = trendData.map(d => Math.round(d.attentionLoad * 100))
-  const processing = trendData.map(d => Math.round(d.processingLoad * 100))
+  const dates = trendData.map((d) => d.date)
+  const overall = trendData.map((d) => Math.round(d.overall * 100))
+  const memory = trendData.map((d) => Math.round(d.memoryLoad * 100))
+  const attention = trendData.map((d) => Math.round(d.attentionLoad * 100))
+  const processing = trendData.map((d) => Math.round(d.processingLoad * 100))
 
   chart.setOption({
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e8e0d8',
-      textStyle: { color: '#3d3b39', fontSize: 13 },
-      formatter: (params: Array<{ seriesName: string; value: number; color: string; axisValue: string }>) => {
-        let html = `<b>${params[0].axisValue}</b><br/>`
-        params.forEach(p => {
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.14)',
+      textStyle: { color: '#E2E8F0', fontSize: 13 },
+      formatter: (
+        params: Array<{ seriesName: string; value: number; color: string; axisValue: string }>
+      ) => {
+        let html = `<b>${params[0]?.axisValue}</b><br/>`
+        params.forEach((p) => {
           html += `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>
             ${p.seriesName}: <b>${p.value}%</b><br/>`
         })
@@ -256,25 +268,28 @@ function initTrendChart(): void {
       }
     },
     legend: {
-      bottom: 0,
+      top: 0,
+      left: 'center',
       data: ['综合负荷', '记忆负荷', '注意力负荷', '加工负荷'],
-      textStyle: { color: '#5c5a57', fontSize: 11 }
+      textStyle: { color: '#CBD5E1', fontSize: 11 },
+      itemWidth: 14,
+      itemHeight: 8
     },
-    grid: { left: 40, right: 20, top: 40, bottom: 50 },
+    grid: { left: 40, right: 20, top: 56, bottom: 28 },
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { color: '#82807c', fontSize: 11, rotate: dates.length > 8 ? 30 : 0 },
+      axisLabel: { color: '#94A3B8', fontSize: 11, rotate: dates.length > 8 ? 30 : 0 },
       axisTick: { show: false },
-      axisLine: { lineStyle: { color: '#e8e0d8' } }
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.12)' } }
     },
     yAxis: {
       type: 'value',
       name: '负荷 (%)',
       min: 0,
       max: 100,
-      axisLabel: { color: '#82807c', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#f0ede8', type: 'dashed' } },
+      axisLabel: { color: '#94A3B8', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' } },
       axisLine: { show: false }
     },
     series: [
@@ -286,7 +301,7 @@ function initTrendChart(): void {
         symbol: 'circle',
         symbolSize: 8,
         lineStyle: { width: 3, color: '#FF4D4F' },
-        itemStyle: { color: '#FF4D4F', borderColor: '#fff', borderWidth: 2 },
+        itemStyle: { color: '#FF4D4F', borderColor: '#141B2B', borderWidth: 2 },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(255,77,79,0.15)' },
@@ -356,9 +371,7 @@ function initCalendarChart(): void {
   const chart = echarts.init(container)
   chartInstances.calendar = chart
 
-  const calData = calendarData.value.length > 0
-    ? calendarData.value
-    : buildFallbackCalendarData()
+  const calData = calendarData.value.length > 0 ? calendarData.value : buildFallbackCalendarData()
 
   const year = calendarYear.value
   const month = calendarMonth.value
@@ -369,20 +382,17 @@ function initCalendarChart(): void {
   const rangeStart = formatDateStr(firstDay)
   const rangeEnd = formatDateStr(lastDay)
 
-  const heatData: [string, number][] = calData.map(item => [
-    item.date,
-    item.studyMinutes
-  ])
+  const heatData: [string, number][] = calData.map((item) => [item.date, item.studyMinutes])
 
   chart.setOption({
     tooltip: {
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e8e0d8',
-      textStyle: { color: '#3d3b39', fontSize: 13 },
+      backgroundColor: 'rgba(20,27,43,0.95)',
+      borderColor: 'rgba(255,255,255,0.14)',
+      textStyle: { color: '#E2E8F0', fontSize: 13 },
       formatter: (params: { value: [string, number] }) => {
         if (!params.value) return ''
         const [date, minutes] = params.value
-        const item = calData.find(d => d.date === date)
+        const item = calData.find((d) => d.date === date)
         const hours = Math.floor(minutes / 60)
         const mins = minutes % 60
         return `<b>${date}</b><br/>
@@ -393,44 +403,53 @@ function initCalendarChart(): void {
     },
     visualMap: {
       min: 0,
-      max: Math.max(...heatData.map(d => d[1]), 60),
+      max: Math.max(...heatData.map((d) => d[1]), 60),
       type: 'piecewise',
       orient: 'horizontal',
       left: 'center',
-      bottom: 0,
-      inRange: { color: ['#f5f0eb', '#dbe4ff', '#8FAEFF', '#4F7CFF', '#2A46B3'] },
+      top: 2,
+      itemWidth: 12,
+      itemHeight: 12,
+      inRange: { color: ['#1E293B', '#2A46B3', '#4F7CFF', '#8FAEFF', '#C5D4FF'] },
       text: ['多', '少'],
-      textStyle: { color: '#5c5a57', fontSize: 11 }
+      textStyle: { color: '#CBD5E1', fontSize: 11 },
+      itemGap: 6
     },
     calendar: {
+      top: 36,
       range: [rangeStart, rangeEnd],
-      cellSize: ['auto', 32],
+      cellSize: ['auto', 34],
       yearLabel: { show: false },
       dayLabel: {
         firstDay: 1,
         nameMap: 'ZH',
-        color: '#82807c',
-        fontSize: 11
+        color: '#94A3B8',
+        fontSize: 11,
+        margin: 8
       },
       monthLabel: {
         nameMap: 'ZH',
-        color: '#3d3b39',
+        color: '#E2E8F0',
         fontSize: 13,
-        fontWeight: 'bold'
+        fontWeight: 'bold',
+        align: 'left'
       },
       itemStyle: {
-        borderColor: '#fff',
-        borderWidth: 3,
-        borderRadius: 4,
-        color: '#f5f0eb'
+        borderColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderRadius: 8,
+        color: 'rgba(255,255,255,0.04)',
+        gapWidth: 3
       },
-      splitLine: { show: true, lineStyle: { color: '#f0ede8', width: 1 } }
+      splitLine: { show: false }
     },
-    series: [{
-      type: 'heatmap',
-      coordinateSystem: 'calendar',
-      data: heatData
-    }]
+    series: [
+      {
+        type: 'heatmap',
+        coordinateSystem: 'calendar',
+        data: heatData
+      }
+    ]
   })
 
   observeResize(container, chart)
@@ -445,8 +464,8 @@ function observeResize(el: HTMLDivElement, chart: echarts.ECharts): void {
 
 /** 销毁所有图表 */
 function disposeAllCharts(): void {
-  Object.values(chartInstances).forEach(c => c?.dispose())
-  resizeObservers.forEach(ro => ro.disconnect())
+  Object.values(chartInstances).forEach((c) => c?.dispose())
+  resizeObservers.forEach((ro) => ro.disconnect())
   resizeObservers.length = 0
 }
 
@@ -519,7 +538,7 @@ function buildFallbackCalendarData(): DailyActivityItem[] {
         date: formatDateStr(date),
         studyMinutes: minutes,
         taskCount: Math.round(Math.random() * 4 + 1),
-        knowledgePoints: masteryLevels.value.slice(0, 2).map(m => m.knowledgePoint)
+        knowledgePoints: masteryLevels.value.slice(0, 2).map((m) => m.knowledgePoint)
       })
     }
   }
@@ -534,9 +553,9 @@ function buildFallbackSuggestions(): LearningSuggestion[] {
     tips.push({
       category: 'weakness',
       title: '重点关注薄弱环节',
-      content: `检测到 ${weakPoints.value.length} 个薄弱知识点。建议优先从掌握度最低的 "${weakPoints.value[0].knowledgePoint}" 入手，每天安排 30 分钟专项练习。`,
+      content: `检测到 ${weakPoints.value.length} 个薄弱知识点。建议优先从掌握度最低的 "${weakPoints.value[0]?.knowledgePoint ?? ''}" 入手，每天安排 30 分钟专项练习。`,
       priority: 1,
-      relatedKPs: weakPoints.value.slice(0, 3).map(w => w.knowledgePoint)
+      relatedKPs: weakPoints.value.slice(0, 3).map((w) => w.knowledgePoint)
     })
   }
 
@@ -544,7 +563,8 @@ function buildFallbackSuggestions(): LearningSuggestion[] {
     tips.push({
       category: 'warning',
       title: '认知负荷偏高',
-      content: '当前认知负荷指数处于较高水平，建议增加复习间隔，避免连续学习高难度内容。可尝试番茄工作法（25分钟学习 + 5分钟休息）。',
+      content:
+        '当前认知负荷指数处于较高水平，建议增加复习间隔，避免连续学习高难度内容。可尝试番茄工作法（25分钟学习 + 5分钟休息）。',
       priority: 2
     })
   }
@@ -552,23 +572,26 @@ function buildFallbackSuggestions(): LearningSuggestion[] {
   tips.push({
     category: 'tip',
     title: '交替学习法',
-    content: '研究表明交替学习不同知识点的效果优于集中学习单一内容。建议每天安排 2-3 个不同知识点的任务轮流进行。',
+    content:
+      '研究表明交替学习不同知识点的效果优于集中学习单一内容。建议每天安排 2-3 个不同知识点的任务轮流进行。',
     priority: 3
   })
 
   tips.push({
     category: 'strength',
     title: '保持优势领域',
-    content: masteryStats.value.excellent > 0
-      ? `在 "${masteryLevels.value.find(m => m.level === 'excellent')?.knowledgePoint ?? ''}" 方面表现优秀，可以尝试相关进阶内容，进一步拓展知识边界。`
-      : '当前没有特别突出的优势领域，继续按照学习路径稳步推进即可。',
+    content:
+      masteryStats.value.excellent > 0
+        ? `在 "${masteryLevels.value.find((m) => m.level === 'excellent')?.knowledgePoint ?? ''}" 方面表现优秀，可以尝试相关进阶内容，进一步拓展知识边界。`
+        : '当前没有特别突出的优势领域，继续按照学习路径稳步推进即可。',
     priority: 4
   })
 
   tips.push({
     category: 'tip',
     title: '定期复习策略',
-    content: '遵循艾宾浩斯遗忘曲线，学习后 1 天、2 天、4 天、7 天、15 天进行间隔复习，可显著提升长期记忆效果。',
+    content:
+      '遵循艾宾浩斯遗忘曲线，学习后 1 天、2 天、4 天、7 天、15 天进行间隔复习，可显著提升长期记忆效果。',
     priority: 5
   })
 
@@ -583,6 +606,8 @@ function buildFallbackOverview(): DashboardOverview {
     masteredKPs: masteredKPCount.value,
     totalKPs: totalKPCount.value,
     streakDays: Math.min(7, Math.round(Math.random() * 5 + 3)),
+    totalDiagnoses: 0,
+    totalPaths: 0,
     lastStudyDate: formatDateStr(new Date())
   }
 }
@@ -615,49 +640,72 @@ function getScoreLevel(score: number): { label: string; color: string } {
 
 function getSeverityColor(severity: WeakPoint['severity']): string {
   switch (severity) {
-    case 'severe': return '#FF4D4F'
-    case 'moderate': return '#FA8C16'
-    case 'mild': return '#4F7CFF'
-    default: return '#82807c'
+    case 'severe':
+      return '#FF4D4F'
+    case 'moderate':
+      return '#FA8C16'
+    case 'mild':
+      return '#4F7CFF'
+    default:
+      return '#94A3B8'
   }
 }
 
 function getSeverityLabel(severity: WeakPoint['severity']): string {
   switch (severity) {
-    case 'severe': return '严重'
-    case 'moderate': return '中等'
-    case 'mild': return '轻度'
-    default: return '未知'
+    case 'severe':
+      return '严重'
+    case 'moderate':
+      return '中等'
+    case 'mild':
+      return '轻度'
+    default:
+      return '未知'
   }
 }
 
-function getSuggestionIcon(category: LearningSuggestion['category']): string {
+function getSuggestionIcon(category: LearningSuggestion['category']): any {
   switch (category) {
-    case 'strength': return '🌟'
-    case 'weakness': return '🎯'
-    case 'tip': return '💡'
-    case 'warning': return '⚠️'
-    default: return '📌'
+    case 'strength':
+      return TrophyOutlined
+    case 'weakness':
+      return AimOutlined
+    case 'tip':
+      return BulbOutlined
+    case 'warning':
+      return WarningOutlined
+    default:
+      return BulbOutlined
   }
 }
 
 function getSuggestionBgColor(category: LearningSuggestion['category']): string {
   switch (category) {
-    case 'strength': return '#f6ffed'
-    case 'weakness': return '#fff7e6'
-    case 'tip': return '#f0f5ff'
-    case 'warning': return '#fff2f0'
-    default: return '#fafaf9'
+    case 'strength':
+      return 'rgba(82,196,26,0.10)'
+    case 'weakness':
+      return 'rgba(250,140,22,0.10)'
+    case 'tip':
+      return 'rgba(79,124,255,0.10)'
+    case 'warning':
+      return 'rgba(255,77,79,0.10)'
+    default:
+      return 'rgba(255,255,255,0.04)'
   }
 }
 
 function getSuggestionBorderColor(category: LearningSuggestion['category']): string {
   switch (category) {
-    case 'strength': return '#b7eb8f'
-    case 'weakness': return '#ffd591'
-    case 'tip': return '#adc6ff'
-    case 'warning': return '#ffccc7'
-    default: return '#e8e0d8'
+    case 'strength':
+      return 'rgba(82,196,26,0.45)'
+    case 'weakness':
+      return 'rgba(250,140,22,0.45)'
+    case 'tip':
+      return 'rgba(79,124,255,0.45)'
+    case 'warning':
+      return 'rgba(255,77,79,0.45)'
+    default:
+      return 'rgba(255,255,255,0.14)'
   }
 }
 
@@ -669,17 +717,10 @@ function handleGoDiagnose(): void {
   router.push('/diagnose')
 }
 
-function handleGoPath(): void {
-  router.push('/path')
-}
-
 async function handleRefresh(): Promise<void> {
   loading.value = true
   try {
-    await Promise.all([
-      diagnosisStore.fetchLatestDiagnosis(),
-      pathStore.fetchCurrentPath()
-    ])
+    await Promise.all([diagnosisStore.fetchLatestDiagnosis(), pathStore.fetchCurrentPath()])
     await fetchDashboardExtras()
   } finally {
     loading.value = false
@@ -732,19 +773,45 @@ const sectionRefs = {
   radarKp: ref<HTMLElement | null>(null),
   trend: ref<HTMLElement | null>(null),
   weakpointSuggestion: ref<HTMLElement | null>(null),
-  calendar: ref<HTMLElement | null>(null),
+  calendar: ref<HTMLElement | null>(null)
 }
 
-const sectionVisible = ref<Record<string, boolean>>({})
+const sectionVisible = ref<{
+  progress: boolean
+  radarKp: boolean
+  trend: boolean
+  weakpointSuggestion: boolean
+  calendar: boolean
+}>({
+  progress: false,
+  radarKp: false,
+  trend: false,
+  weakpointSuggestion: false,
+  calendar: false
+})
 let sectionObserver: IntersectionObserver | null = null
 
+/** 立即显示全部区块（降级方案 / 观察器不可用时） */
+function revealAllSections(): void {
+  const v = sectionVisible.value as Record<string, boolean>
+  Object.keys(v).forEach((k) => {
+    v[k] = true
+  })
+}
+
 function setupScrollAnimation(): void {
+  // 浏览器不支持 IntersectionObserver 时直接全部显示，避免整页空白
+  if (typeof IntersectionObserver === 'undefined') {
+    revealAllSections()
+    return
+  }
+
   sectionObserver = new IntersectionObserver(
     (entries) => {
-      entries.forEach(entry => {
+      entries.forEach((entry) => {
         if (entry.isIntersecting) {
           const key = entry.target.getAttribute('data-section')
-          if (key) sectionVisible.value[key] = true
+          if (key) (sectionVisible.value as Record<string, boolean>)[key] = true
           sectionObserver?.unobserve(entry.target)
         }
       })
@@ -753,13 +820,56 @@ function setupScrollAnimation(): void {
   )
 
   nextTick(() => {
-    Object.entries(sectionRefs).forEach(([key, ref]) => {
-      if (ref.value) {
-        ref.value.setAttribute('data-section', key)
-        sectionObserver?.observe(ref.value)
+    let observed = 0
+    Object.entries(sectionRefs).forEach(([key, elRef]) => {
+      const el = elRef.value
+      if (el) {
+        // data-section 必须在 observe 之前设置，
+        // 否则首帧回调里 getAttribute 取不到 key，区块将永远停留在 opacity:0
+        el.setAttribute('data-section', key)
+        sectionObserver?.observe(el)
+        observed += 1
+      } else {
+        // 该区块被 v-if 隐藏（如尚无诊断数据）或 ref 未绑定成功，
+        // 直接标记为可见，避免它之后出现时仍是透明状态
+        ;(sectionVisible.value as Record<string, boolean>)[key] = true
       }
     })
+
+    // 兜底：若一个区块都没能观察到（ref 绑定失败等），
+    // 说明动画机制失效，此时必须全部显示，否则整页看起来是空的
+    if (observed === 0) {
+      revealAllSections()
+    }
   })
+
+  // 二次兜底：1.2s 后仍有区块不可见（例如始终未进入视口 / 观察器未回调），
+  // 强制显示，保证内容一定能被看到
+  window.setTimeout(revealAllSections, 1200)
+}
+
+/** 日历月份切换（模板中不能写 if 语句，抽成方法） */
+async function shiftCalendarMonth(delta: number): Promise<void> {
+  let m = calendarMonth.value + delta
+  let y = calendarYear.value
+  if (m < 1) {
+    m = 12
+    y -= 1
+  } else if (m > 12) {
+    m = 1
+    y += 1
+  }
+  calendarMonth.value = m
+  calendarYear.value = y
+
+  try {
+    const data = await dashboardApi.getCalendarActivity(y, m)
+    calendarData.value = data?.length ? data : buildFallbackCalendarData()
+  } catch {
+    calendarData.value = buildFallbackCalendarData()
+  }
+  await nextTick()
+  initCalendarChart()
 }
 
 /** 计算当前 vs 初始的模拟平均提升 */
@@ -776,13 +886,49 @@ function calculateAvgImprovement(): number {
 // ============================================================
 //   生命周期
 // ============================================================
+// 统一初始化所有图表。必须在区块已可见、ref 已赋值、数据已就绪后调用，
+// 否则图表会在零尺寸/隐藏状态下 init，导致「看板空白」。
+function initAllCharts(): void {
+  initRadarChart()
+  initTrendChart()
+  initCalendarChart()
+}
+
+// 安全初始化：先 reveal 区块（响应式更新需等下一帧 flush），再等浏览器布局完成
+// （requestAnimationFrame）后 init + resize，彻底避免 ECharts 在 0 尺寸下初始化导致空白。
+// 若布局尚未完成导致容器尺寸为 0，则轮询重试，直到具备有效尺寸或超时兜底。
+function safeInitCharts(): void {
+  revealAllSections()
+  let tries = 0
+  const MAX_TRIES = 40 // 约 2s
+  const tick = () => {
+    if (canInitAllCharts()) {
+      initAllCharts()
+      resizeAllCharts()
+      return
+    }
+    tries += 1
+    if (tries >= MAX_TRIES) {
+      // 兜底：即便尺寸可能仍为 0，也尝试初始化一次，避免图表永远不渲染
+      initAllCharts()
+      resizeAllCharts()
+      return
+    }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+// 所有图表容器是否都具备有效尺寸
+function canInitAllCharts(): boolean {
+  const els = [chartRefs.radar.value, chartRefs.trend.value, chartRefs.calendar.value]
+  return els.every((el) => !!el && el.clientWidth > 0 && el.clientHeight > 0)
+}
+
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([
-      diagnosisStore.fetchLatestDiagnosis(),
-      pathStore.fetchCurrentPath()
-    ])
+    await Promise.all([diagnosisStore.fetchLatestDiagnosis(), pathStore.fetchCurrentPath()])
     await fetchDashboardExtras()
   } catch {
     // 仍然可以使用已有 store 数据
@@ -791,16 +937,59 @@ onMounted(async () => {
   }
 
   await nextTick()
-  initRadarChart()
-  initTrendChart()
-  initCalendarChart()
+  // 先让区块可见（revealAllSections 改的是响应式值，class 应用到下一帧才生效），
+  // 故用 requestAnimationFrame 确保布局完成后再 init，避免 0 尺寸。
+  safeInitCharts()
   setupScrollAnimation()
+
+  // 兜底：覆盖 HMR 热替换 / ref 晚绑定 / 数据晚到达导致的图表未渲染
+  window.setTimeout(() => {
+    safeInitCharts()
+  }, 1500)
 })
 
 onUnmounted(() => {
   disposeAllCharts()
   sectionObserver?.disconnect()
+  window.removeEventListener('resize', handleWindowResize)
 })
+
+// 区块由 opacity:0 变为可见后，ECharts 实例是在「零尺寸/隐藏」状态下初始化的，
+// 必须重新 resize，否则图表区域会是一片空白。
+watch(
+  () => ({ ...sectionVisible.value }),
+  () => {
+    nextTick(() => {
+      resizeAllCharts()
+    })
+  },
+  { deep: true },
+)
+
+// 数据就绪后（诊断/路径/趋势加载完成，且 loading 已结束）重新初始化图表，
+// 防止 onMounted 时数据尚未到达导致图表 init 为空。
+watch(
+  [hasDiagnosis, () => !!pathStore.currentPath, () => cognitiveTrend.value.length, () => calendarData.value.length, loading],
+  () => {
+    if (loading.value) return
+    safeInitCharts()
+  },
+)
+
+function resizeAllCharts(): void {
+  Object.values(chartInstances).forEach((c) => {
+    try {
+      c?.resize()
+    } catch {
+      /* ignore */
+    }
+  })
+}
+
+function handleWindowResize(): void {
+  resizeAllCharts()
+}
+window.addEventListener('resize', handleWindowResize)
 
 // 路径数据变化时更新热力图 & 概览
 watch(
@@ -856,36 +1045,41 @@ watch(
       </div>
 
       <!-- ======================================== -->
-      <!--  空状态：无诊断                           -->
+      <!--  看板主体（概览统计始终显示，诊断专属图表按需） -->
       <!-- ======================================== -->
-      <div v-if="!hasDiagnosis" class="empty-state">
-        <div class="empty-card">
-          <ExperimentOutlined class="empty-icon" />
-          <h2>尚未完成认知诊断</h2>
-          <p>完成诊断后，学情看板将为你展示全面的学习画像</p>
-          <a-button type="primary" size="large" @click="handleGoDiagnose">
-            开始诊断
-            <template #icon><RightOutlined /></template>
-          </a-button>
-        </div>
-      </div>
-
       <!-- ======================================== -->
-      <!--  有诊断数据时展示完整看板                  -->
-      <!-- ======================================== -->
-      <template v-if="hasDiagnosis">
-        <!-- ======================================== -->
         <!--  Section 1: 进度概览卡片                  -->
         <!-- ======================================== -->
-        <div ref="sectionRefs.progress" class="dashboard-section" :class="{ visible: sectionVisible.progress }">
+        <div
+          :ref="(el) => (sectionRefs.progress.value = el as HTMLElement | null)"
+          class="dashboard-section"
+          :class="{ visible: sectionVisible.progress }"
+        >
+          <a-alert
+            v-if="!hasDiagnosis"
+            type="info"
+            show-icon
+            class="diagnosis-tip"
+            message="尚未完成认知诊断"
+            description="完成诊断后，下方将为你展示知识雷达、薄弱点与 AI 学习建议。当前展示基础学习概览。"
+          >
+            <template #action>
+              <a-button type="primary" size="small" @click="handleGoDiagnose">
+                开始诊断
+              </a-button>
+            </template>
+          </a-alert>
           <div class="progress-cards">
             <!-- 综合评分仪表盘 -->
             <div class="stat-card score-card">
               <div class="score-gauge">
                 <svg viewBox="0 0 120 120" class="gauge-svg">
-                  <circle cx="60" cy="60" r="50" fill="none" stroke="#f0ede8" stroke-width="8" />
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="8" />
                   <circle
-                    cx="60" cy="60" r="50" fill="none"
+                    cx="60"
+                    cy="60"
+                    r="50"
+                    fill="none"
                     :stroke="getScoreLevel(overallScore).color"
                     stroke-width="8"
                     stroke-linecap="round"
@@ -893,7 +1087,9 @@ watch(
                     transform="rotate(-90 60 60)"
                     class="gauge-arc"
                   />
-                  <text x="60" y="56" text-anchor="middle" class="gauge-value">{{ overallScore }}</text>
+                  <text x="60" y="56" text-anchor="middle" class="gauge-value">
+                    {{ overallScore }}
+                  </text>
                   <text x="60" y="76" text-anchor="middle" class="gauge-unit">/ 100</text>
                 </svg>
               </div>
@@ -907,8 +1103,8 @@ watch(
 
             <!-- 已完成任务 -->
             <div class="stat-card">
-              <div class="stat-icon-wrapper" style="background: rgba(82,196,26,0.1);">
-                <CheckSquareOutlined class="stat-icon" style="color: #52C41A;" />
+              <div class="stat-icon-wrapper" style="background: rgba(82, 196, 26, 0.1)">
+                <CheckSquareOutlined class="stat-icon" style="color: #52c41a" />
               </div>
               <div class="stat-body">
                 <div class="stat-value">
@@ -925,8 +1121,8 @@ watch(
 
             <!-- 已掌握知识点 -->
             <div class="stat-card">
-              <div class="stat-icon-wrapper" style="background: rgba(79,124,255,0.1);">
-                <BookOutlined class="stat-icon" style="color: #4F7CFF;" />
+              <div class="stat-icon-wrapper" style="background: rgba(79, 124, 255, 0.1)">
+                <BookOutlined class="stat-icon" style="color: #4f7cff" />
               </div>
               <div class="stat-body">
                 <div class="stat-value">
@@ -936,9 +1132,15 @@ watch(
                 </div>
                 <div class="stat-label">已掌握知识点</div>
                 <div class="stat-kp-tags" v-if="masteryStats">
-                  <a-tag color="success" v-if="masteryStats.excellent">优 {{ masteryStats.excellent }}</a-tag>
-                  <a-tag color="processing" v-if="masteryStats.proficient">良 {{ masteryStats.proficient }}</a-tag>
-                  <a-tag color="warning" v-if="masteryStats.developing">中 {{ masteryStats.developing }}</a-tag>
+                  <a-tag color="success" v-if="masteryStats.excellent"
+                    >优 {{ masteryStats.excellent }}</a-tag
+                  >
+                  <a-tag color="processing" v-if="masteryStats.proficient"
+                    >良 {{ masteryStats.proficient }}</a-tag
+                  >
+                  <a-tag color="warning" v-if="masteryStats.developing"
+                    >中 {{ masteryStats.developing }}</a-tag
+                  >
                   <a-tag color="error" v-if="masteryStats.weak">弱 {{ masteryStats.weak }}</a-tag>
                 </div>
               </div>
@@ -946,16 +1148,18 @@ watch(
 
             <!-- 学习总时长 + 连续天数 -->
             <div class="stat-card">
-              <div class="stat-icon-wrapper" style="background: rgba(114,46,209,0.1);">
-                <ClockCircleOutlined class="stat-icon" style="color: #722ED1;" />
+              <div class="stat-icon-wrapper" style="background: rgba(114, 46, 209, 0.1)">
+                <ClockCircleOutlined class="stat-icon" style="color: #722ed1" />
               </div>
               <div class="stat-body">
                 <div class="stat-value">
-                  <span class="count-up">{{ overview?.totalStudyMinutes ? formatMinutes(overview.totalStudyMinutes) : '—' }}</span>
+                  <span class="count-up">{{
+                    overview?.totalStudyMinutes ? formatMinutes(overview.totalStudyMinutes) : '—'
+                  }}</span>
                 </div>
                 <div class="stat-label">学习总时长</div>
                 <div class="stat-sub" v-if="overview?.streakDays">
-                  <FireOutlined style="color: #FA8C16; font-size: 12px;" />
+                  <FireOutlined style="color: #fa8c16; font-size: 12px" />
                   {{ overview.streakDays }} 天连续学习
                 </div>
               </div>
@@ -966,7 +1170,12 @@ watch(
         <!-- ======================================== -->
         <!--  Section 2: 知识雷达图 + 薄弱知识点       -->
         <!-- ======================================== -->
-        <div ref="sectionRefs.radarKp" class="dashboard-section" :class="{ visible: sectionVisible.radarKp }">
+        <div
+          v-if="hasDiagnosis"
+          :ref="(el) => (sectionRefs.radarKp.value = el as HTMLElement | null)"
+          class="dashboard-section"
+          :class="{ visible: sectionVisible.radarKp }"
+        >
           <div class="section-row-2col">
             <!-- 雷达图 -->
             <div class="section-card chart-card">
@@ -978,10 +1187,10 @@ watch(
                 </span>
               </div>
               <div class="chart-body">
-                <div ref="chartRefs.radar" class="echarts-container"></div>
+                <div :ref="(el) => (chartRefs.radar.value = el as HTMLDivElement | null)" class="echarts-container"></div>
                 <!-- 提升幅度 -->
                 <div class="improvement-bar" v-if="masteryLevels.length">
-                  <RiseOutlined style="color: #52C41A;" />
+                  <RiseOutlined style="color: #52c41a" />
                   <span>
                     平均提升 <b>{{ calculateAvgImprovement() }}%</b>
                   </span>
@@ -993,7 +1202,9 @@ watch(
             <div class="section-card weak-points-card">
               <div class="card-header">
                 <h3><WarningOutlined /> 薄弱知识点</h3>
-                <a-tag color="error" v-if="lowMasteryKPs.length">{{ lowMasteryKPs.length }} 个待提升</a-tag>
+                <a-tag color="error" v-if="lowMasteryKPs.length"
+                  >{{ lowMasteryKPs.length }} 个待提升</a-tag
+                >
                 <a-tag color="success" v-else>全部达标</a-tag>
               </div>
               <div class="weak-points-list">
@@ -1005,10 +1216,7 @@ watch(
                   >
                     <div class="wp-header">
                       <span class="wp-name">{{ kp.knowledgePoint }}</span>
-                      <a-tag
-                        :color="kp.level === 'weak' ? 'error' : 'warning'"
-                        size="small"
-                      >
+                      <a-tag :color="kp.level === 'weak' ? 'error' : 'warning'" size="small">
                         {{ Math.round(kp.mastery * 100) }}%
                       </a-tag>
                     </div>
@@ -1025,7 +1233,7 @@ watch(
                   </div>
                 </template>
                 <div v-else class="weak-empty">
-                  <TrophyOutlined style="font-size: 36px; color: #52C41A;" />
+                  <TrophyOutlined style="font-size: 36px; color: #52c41a" />
                   <p>所有知识点掌握度达标！继续保持</p>
                 </div>
               </div>
@@ -1036,14 +1244,19 @@ watch(
         <!-- ======================================== -->
         <!--  Section 3: 认知负荷趋势                  -->
         <!-- ======================================== -->
-        <div ref="sectionRefs.trend" class="dashboard-section" :class="{ visible: sectionVisible.trend }">
+        <div
+          v-if="hasDiagnosis"
+          :ref="(el) => (sectionRefs.trend.value = el as HTMLElement | null)"
+          class="dashboard-section"
+          :class="{ visible: sectionVisible.trend }"
+        >
           <div class="section-card">
             <div class="card-header">
               <h3><LineChartOutlined /> 认知负荷趋势</h3>
               <span class="card-hint">越低越好 · 虚线为负荷警戒线</span>
             </div>
             <div class="chart-body">
-              <div ref="chartRefs.trend" class="echarts-container" style="height: 340px;"></div>
+              <div :ref="(el) => (chartRefs.trend.value = el as HTMLDivElement | null)" class="echarts-container" style="height: 340px"></div>
             </div>
             <!-- 当前认知负荷三维度 -->
             <div class="cl-dimensions">
@@ -1078,13 +1291,20 @@ watch(
         <!-- ======================================== -->
         <!--  Section 4: 薄弱点详情 + AI 学习建议      -->
         <!-- ======================================== -->
-        <div ref="sectionRefs.weakpointSuggestion" class="dashboard-section" :class="{ visible: sectionVisible.weakpointSuggestion }">
+        <div
+          v-if="hasDiagnosis"
+          :ref="(el) => (sectionRefs.weakpointSuggestion.value = el as HTMLElement | null)"
+          class="dashboard-section"
+          :class="{ visible: sectionVisible.weakpointSuggestion }"
+        >
           <div class="section-row-2col">
             <!-- 薄弱点详细列表 -->
             <div class="section-card">
               <div class="card-header">
                 <h3><AimOutlined /> 薄弱点详情</h3>
-                <span class="card-hint" v-if="weakPoints.length">{{ weakPoints.length }} 个诊断薄弱点</span>
+                <span class="card-hint" v-if="weakPoints.length"
+                  >{{ weakPoints.length }} 个诊断薄弱点</span
+                >
               </div>
               <div class="weak-points-detailed">
                 <template v-if="weakPoints.length > 0">
@@ -1107,7 +1327,7 @@ watch(
                   </div>
                 </template>
                 <div v-else class="weak-empty">
-                  <TrophyOutlined style="font-size: 36px; color: #52C41A;" />
+                  <TrophyOutlined style="font-size: 36px; color: #52c41a" />
                   <p>未检测到薄弱点，学习状态良好！</p>
                 </div>
               </div>
@@ -1130,7 +1350,7 @@ watch(
                   }"
                 >
                   <div class="sg-header">
-                    <span class="sg-icon">{{ getSuggestionIcon(sg.category) }}</span>
+                    <component :is="getSuggestionIcon(sg.category)" class="sg-icon" />
                     <span class="sg-title">{{ sg.title }}</span>
                     <a-tag
                       v-if="sg.priority <= 2"
@@ -1146,7 +1366,7 @@ watch(
                       v-for="kp in sg.relatedKPs"
                       :key="kp"
                       size="small"
-                      style="margin-right: 4px;"
+                      style="margin-right: 4px"
                     >
                       {{ kp }}
                     </a-tag>
@@ -1160,34 +1380,28 @@ watch(
         <!-- ======================================== -->
         <!--  Section 5: 学习日历热力图                -->
         <!-- ======================================== -->
-        <div ref="sectionRefs.calendar" class="dashboard-section" :class="{ visible: sectionVisible.calendar }">
+        <div
+          :ref="(el) => (sectionRefs.calendar.value = el as HTMLElement | null)"
+          class="dashboard-section"
+          :class="{ visible: sectionVisible.calendar }"
+        >
           <div class="section-card">
             <div class="card-header">
               <h3><CalendarOutlined /> 学习日历</h3>
               <div class="calendar-nav">
-                <a-button size="small" type="text" @click="calendarMonth--; if(calendarMonth<1){calendarMonth=12;calendarYear--}; nextTick(() => initCalendarChart())">
-                  ◀
-                </a-button>
+                <a-button size="small" type="text" @click="shiftCalendarMonth(-1)"><CaretLeftOutlined /></a-button>
                 <span class="calendar-label">{{ calendarYear }} 年 {{ calendarMonth }} 月</span>
-                <a-button size="small" type="text" @click="calendarMonth++; if(calendarMonth>12){calendarMonth=1;calendarYear++}; nextTick(() => initCalendarChart())">
-                  ▶
-                </a-button>
+                <a-button size="small" type="text" @click="shiftCalendarMonth(1)"><CaretRightOutlined /></a-button>
               </div>
             </div>
             <div class="chart-body">
-              <div ref="chartRefs.calendar" class="echarts-container" style="height: 220px;"></div>
+              <div :ref="(el) => (chartRefs.calendar.value = el as HTMLDivElement | null)" class="echarts-container" style="height: 220px"></div>
             </div>
           </div>
         </div>
-      </template>
     </template>
   </div>
 </template>
-
-<script lang="ts">
-import { DashboardOutlined } from '@ant-design/icons-vue'
-export default { components: { DashboardOutlined } }
-</script>
 
 <style scoped lang="less">
 @import '@/assets/styles/variables.less';
@@ -1248,7 +1462,7 @@ export default { components: { DashboardOutlined } }
 
   .header-meta {
     font-size: @font-size-sm;
-    color: @gray-500;
+    color: @gray-300;
   }
 
   .header-right {
@@ -1283,7 +1497,7 @@ export default { components: { DashboardOutlined } }
   }
 
   p {
-    color: rgba(212, 163, 115, 0.60);
+    color: rgba(212, 163, 115, 0.6);
     margin: 0 0 24px;
     font-size: @font-size-base;
   }
@@ -1295,7 +1509,9 @@ export default { components: { DashboardOutlined } }
 .dashboard-section {
   opacity: 0;
   transform: translateY(30px);
-  transition: opacity 0.6s ease, transform 0.6s ease;
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
   margin-bottom: @section-gap;
 
   &.visible {
@@ -1350,7 +1566,7 @@ export default { components: { DashboardOutlined } }
 .stat-value {
   font-size: @font-size-xl;
   font-weight: @font-weight-bold;
-  color: @gray-900;
+  color: @gray-50;
   line-height: 1.2;
 
   .count-up {
@@ -1358,26 +1574,26 @@ export default { components: { DashboardOutlined } }
   }
 
   .stat-separator {
-    color: @gray-400;
+    color: @gray-300;
     font-weight: @font-weight-normal;
     margin: 0 2px;
   }
 
   .stat-total {
-    color: @gray-500;
+    color: @gray-300;
     font-weight: @font-weight-medium;
   }
 }
 
 .stat-label {
   font-size: @font-size-sm;
-  color: @gray-500;
+  color: @gray-300;
   margin-top: 2px;
 }
 
 .stat-sub {
   font-size: @font-size-xs;
-  color: @gray-400;
+  color: @gray-300;
   margin-top: 4px;
 }
 
@@ -1404,13 +1620,13 @@ export default { components: { DashboardOutlined } }
   .gauge-value {
     font-size: 24px;
     font-weight: @font-weight-bold;
-    fill: @gray-900;
+    fill: @gray-50;
     dominant-baseline: middle;
   }
 
   .gauge-unit {
     font-size: 12px;
-    fill: @gray-500;
+    fill: @gray-300;
     dominant-baseline: middle;
   }
 }
@@ -1434,13 +1650,13 @@ export default { components: { DashboardOutlined } }
     justify-content: space-between;
     align-items: center;
     padding: 16px @card-padding;
-    border-bottom: 1px solid @gray-200;
+    border-bottom: 1px solid @glass-border;
 
     h3 {
       margin: 0;
       font-size: @font-size-md;
       font-weight: @font-weight-semibold;
-      color: @gray-800;
+      color: @gray-50;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1448,7 +1664,7 @@ export default { components: { DashboardOutlined } }
 
     .card-hint {
       font-size: @font-size-xs;
-      color: @gray-400;
+      color: @gray-300;
     }
   }
 
@@ -1488,10 +1704,10 @@ export default { components: { DashboardOutlined } }
   margin-top: 8px;
   padding: 8px 0;
   font-size: @font-size-sm;
-  color: @gray-600;
+  color: @gray-200;
 
   b {
-    color: #52C41A;
+    color: @color-success;
     font-size: @font-size-md;
   }
 }
@@ -1505,7 +1721,7 @@ export default { components: { DashboardOutlined } }
 
   &.current {
     background: @brand-blue-500;
-    box-shadow: 0 0 4px rgba(79,124,255,0.4);
+    box-shadow: 0 0 4px rgba(79, 124, 255, 0.4);
   }
   &.initial {
     background: @brand-oat-400;
@@ -1527,7 +1743,7 @@ export default { components: { DashboardOutlined } }
 
 .weak-point-item {
   padding: 10px 0;
-  border-bottom: 1px solid @gray-100;
+  border-bottom: 1px solid @glass-border;
 
   &:last-child {
     border-bottom: none;
@@ -1543,12 +1759,12 @@ export default { components: { DashboardOutlined } }
   .wp-name {
     font-size: @font-size-sm;
     font-weight: @font-weight-medium;
-    color: @gray-800;
+    color: @gray-100;
   }
 
   .wp-bar-bg {
     height: 6px;
-    background: @gray-100;
+    background: rgba(255, 255, 255, 0.08);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -1560,16 +1776,16 @@ export default { components: { DashboardOutlined } }
     background: @brand-blue-500;
 
     &.weak {
-      background: linear-gradient(90deg, #FF4D4F, #FA8C16);
+      background: linear-gradient(90deg, #ff4d4f, #fa8c16);
     }
     &.developing {
-      background: linear-gradient(90deg, #FA8C16, @brand-blue-500);
+      background: linear-gradient(90deg, #fa8c16, @brand-blue-500);
     }
   }
 
   .wp-meta {
     font-size: @font-size-xs;
-    color: @gray-400;
+    color: @gray-300;
     margin-top: 4px;
   }
 }
@@ -1577,7 +1793,7 @@ export default { components: { DashboardOutlined } }
 .weak-empty {
   text-align: center;
   padding: 40px 0;
-  color: @gray-400;
+  color: @gray-300;
   font-size: @font-size-sm;
 }
 
@@ -1589,13 +1805,13 @@ export default { components: { DashboardOutlined } }
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   padding: 12px @card-padding @card-padding;
-  border-top: 1px solid @gray-100;
+  border-top: 1px solid @glass-border;
 }
 
 .cl-dim-item {
   .cl-dim-label {
     font-size: @font-size-xs;
-    color: @gray-500;
+    color: @gray-300;
     margin-bottom: 4px;
   }
 }
@@ -1613,7 +1829,7 @@ export default { components: { DashboardOutlined } }
   padding: 12px 14px;
   margin-bottom: 10px;
   border-left: 3px solid;
-  background: @gray-50;
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 0 @radius-sm @radius-sm 0;
 
   &:last-child {
@@ -1628,20 +1844,20 @@ export default { components: { DashboardOutlined } }
 
     strong {
       font-size: @font-size-sm;
-      color: @gray-800;
+      color: @gray-50;
     }
   }
 
   .wp-detail-reason {
     font-size: @font-size-sm;
-    color: @gray-600;
+    color: @gray-200;
     margin: 0 0 4px;
     line-height: 1.5;
   }
 
   .wp-detail-remediation {
     font-size: @font-size-xs;
-    color: @brand-blue-600;
+    color: @brand-cyan-400;
     margin: 0;
     display: flex;
     align-items: center;
@@ -1680,18 +1896,21 @@ export default { components: { DashboardOutlined } }
 
   .sg-icon {
     font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
+    color: @brand-cyan-400;
   }
 
   .sg-title {
     font-size: @font-size-sm;
     font-weight: @font-weight-semibold;
-    color: @gray-800;
+    color: @gray-50;
     flex: 1;
   }
 
   .sg-content {
     font-size: @font-size-sm;
-    color: @gray-600;
+    color: @gray-200;
     margin: 0;
     line-height: 1.6;
   }
@@ -1711,7 +1930,7 @@ export default { components: { DashboardOutlined } }
 
   .calendar-label {
     font-size: @font-size-sm;
-    color: @gray-600;
+    color: @gray-200;
     font-weight: @font-weight-medium;
     min-width: 80px;
     text-align: center;

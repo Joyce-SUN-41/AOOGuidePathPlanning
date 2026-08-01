@@ -10,6 +10,12 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+# 跨域回退头 — 当 CORSMiddleware 对错误响应未添加头时兜底
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Credentials": "true",
+}
+
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
@@ -23,6 +29,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "message": "请求参数校验失败",
                 "data": {"errors": exc.errors()},
             },
+            headers=_CORS_HEADERS,
         )
 
     @app.exception_handler(HTTPException)
@@ -32,6 +39,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"code": exc.status_code, "message": exc.detail, "data": None},
+            headers=_CORS_HEADERS,
         )
 
     @app.exception_handler(Exception)
@@ -42,4 +50,5 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=500,
             content={"code": 500, "message": "内部服务异常", "data": None},
+            headers=_CORS_HEADERS,
         )

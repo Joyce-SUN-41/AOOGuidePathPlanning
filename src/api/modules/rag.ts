@@ -1,4 +1,4 @@
-import { request } from '@/api'
+import { request, getToken } from '@/api'
 import type {
   RAGQueryRequest,
   RAGQueryResponse,
@@ -10,11 +10,17 @@ import type {
 const BASE = '/rag'
 
 export const ragApi = {
-  /** RAG 问答 */
+  /** RAG 问答
+   *
+   * 后端对单次 LLM 调用设了 90s 上限（LLM_CALL_TIMEOUT），
+   * 前端超时必须留出余量（检索 + 序列化 + 网络），
+   * 否则会在后端返回可读错误之前先抛出 "timeout of xxx ms exceeded"。
+   */
   query(data: RAGQueryRequest): Promise<RAGQueryResponse> {
     return request.post<RAGQueryResponse>(
       `${BASE}/query`,
-      data as unknown as Record<string, unknown>
+      { ...data, skip_retrieval: data.skip_retrieval ?? false } as unknown as Record<string, unknown>,
+      { timeout: 150000 }
     )
   },
 
@@ -48,15 +54,11 @@ export function ragQueryStream(
   onError: (err: Error) => void,
   signal?: AbortSignal
 ): void {
-  const token = (() => {
-    try {
-      const raw = localStorage.getItem('oat_user_store')
-      if (raw) return JSON.parse(raw)?.token || ''
-    } catch { /* ignore */ }
-    return ''
-  })()
+  // 复用统一的 token 读取逻辑，避免与 axios 拦截器实现漂移
+  const token = getToken() || ''
 
-  const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+  // 与 request.download / tryRefreshToken 保持一致的 baseURL 兜底
+  const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
   fetch(`${baseURL}${BASE}/query`, {
     method: 'POST',

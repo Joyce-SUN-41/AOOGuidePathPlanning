@@ -1,24 +1,52 @@
-FROM python:3.11-slim
+# ============================================================
+#  AOO Backend — 多阶段 Docker 构建
+# ============================================================
+
+# ---- Stage 1: 依赖安装 ----
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# 先复制依赖文件 (利用 Docker 缓存层)
-COPY requirements.txt .
+# 安装构建依赖（核心 + AI 扩展，包含 chromadb）
+COPY requirements.txt requirements-ai.txt* ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    -i https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com
+RUN if [ -f requirements-ai.txt ]; then \
+        pip install --no-cache-dir -r requirements-ai.txt \
+        -i https://mirrors.aliyun.com/pypi/simple/ \
+        --trusted-host mirrors.aliyun.com; \
+    fi
 
-# 安装 Python 依赖（pip 国内镜像加速）
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+# ---- Stage 2: 生产运行 ----
+FROM python:3.11-slim
+
+# 创建非 root 用户
+RUN groupadd -r aoo && useradd -r -g aoo -d /app -s /sbin/nologin aoo
+
+WORKDIR /app
+
+# 从 builder 阶段复制已安装的包
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制项目代码
 COPY . .
 
-# 创建数据和日志目录
-RUN mkdir -p /app/data /app/logs
+# 创建数据和日志目录，设置权限
+RUN mkdir -p /app/data /app/logs && \
+    chown -R aoo:aoo /app && \
+    chmod +x /app/entrypoint.sh
 
-# 设置启动脚本权限
-RUN chmod +x /app/entrypoint.sh
+# 切换到非 root 用户
+USER aoo
 
 # 暴露端口
 EXPOSE 8000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')" || exit 1
 
 # 使用 entrypoint 脚本启动（自动运行数据库迁移）
 ENTRYPOINT ["/app/entrypoint.sh"]
