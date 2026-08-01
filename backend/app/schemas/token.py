@@ -42,4 +42,5 @@ class UserInfoResponse(BaseModel):
 class AuthResponse(BaseModel):
     """认证成功响应（登录/注册），前端期望 {token, userInfo} 格式"""
     token: str
+    refreshToken: Optional[str] = None
     userInfo: UserInfoResponse

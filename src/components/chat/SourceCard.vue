@@ -38,9 +38,9 @@ function toggle() {
 <style scoped lang="less">
 .source-card {
   margin-top: 6px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  background: #fafbfc;
+  background: rgba(255, 255, 255, 0.04);
   overflow: hidden;
   transition:
     border-color 0.2s,
@@ -48,13 +48,13 @@ function toggle() {
   cursor: pointer;
 
   &:hover {
-    border-color: #d0d5ff;
-    box-shadow: 0 1px 4px rgba(79, 124, 255, 0.08);
+    border-color: rgba(212, 163, 115, 0.3);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
   }
 
   &.expanded {
-    border-color: #b8cbff;
-    background: #f5f7ff;
+    border-color: rgba(74, 108, 247, 0.3);
+    background: rgba(74, 108, 247, 0.06);
   }
 }
 
@@ -64,7 +64,7 @@ function toggle() {
   gap: 8px;
   padding: 8px 12px;
   font-size: 12px;
-  color: #5c5a57;
+  color: #CBD5E1;
   user-select: none;
 }
 
@@ -74,8 +74,8 @@ function toggle() {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 12px;
-  background: rgba(79, 124, 255, 0.1);
-  color: #4f7cff;
+  background: rgba(74, 108, 247, 0.15);
+  color: #6B8AFF;
   font-size: 11px;
   font-weight: 600;
 }
@@ -97,15 +97,15 @@ function toggle() {
 .source-score {
   padding: 1px 6px;
   border-radius: 4px;
-  background: #eff3ff;
-  color: #3b5fd9;
+  background: rgba(74, 108, 247, 0.15);
+  color: #6B8AFF;
   font-size: 11px;
   font-weight: 600;
 }
 
 .source-arrow {
   font-size: 10px;
-  color: #a8a6a2;
+  color: #64748B;
   transition: transform 0.2s;
 
   .expanded & {
@@ -115,21 +115,21 @@ function toggle() {
 
 .source-body {
   padding: 0 12px 10px;
-  border-top: 1px solid #e8e8e8;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 8px;
 }
 
 .source-section {
   font-size: 12px;
   font-weight: 600;
-  color: #3d3b39;
+  color: #CBD5E1;
   margin-bottom: 6px;
 }
 
 .source-text {
   font-size: 12px;
   line-height: 1.6;
-  color: #5c5a57;
+  color: #94A3B8;
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;

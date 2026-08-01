@@ -67,6 +67,7 @@ async def login(
         message="登录成功",
         data=AuthResponse(
             token=token,
+            refreshToken=refresh,
             userInfo=_build_user_info(user),
         ),
     )
@@ -120,6 +121,7 @@ async def register(
         message="注册成功",
         data=AuthResponse(
             token=token,
+            refreshToken=refresh,
             userInfo=_build_user_info(user),
         ),
     )
