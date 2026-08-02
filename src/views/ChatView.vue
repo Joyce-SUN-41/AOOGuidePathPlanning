@@ -8,7 +8,8 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
-import { ragApi } from '@/api/modules/rag'
+import { ragApi, ragQueryStream, autoOptimize } from '@/api/modules/rag'
+import type { ChatProfileData } from '@/api/modules/rag'
 import { trackEvent } from '@/utils/tracking'
 import type { QuickQuestion, RAGQueryResponse } from '@/types/rag'
 
@@ -20,8 +21,10 @@ import QuickQuestions from '@/components/chat/QuickQuestions.vue'
 import {
   RobotOutlined,
   ClearOutlined,
+  SwapOutlined,
   DownloadOutlined,
   DownOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons-vue'
 
 // ── Store ──
@@ -30,6 +33,7 @@ const userStore = useUserStore()
 
 // ── 本地状态 ──
 const inputText = ref('')
+const firstChunkReceived = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const scrollBtnVisible = ref(false)
 const thinkingDots = ref('')
@@ -169,29 +173,8 @@ function resizeCanvas() {
   if (ctx) ctx.scale(dpr, dpr)
 }
 
-// ── 打字机效果 ──
+// ── 打字机效果 (保留 stopTypewriter 以清理潜在定时器) ──
 let typewriterTimer: number | null = null
-
-function startTypewriter(fullText: string, onDone: () => void) {
-  stopTypewriter()
-  const CHARS_PER_FRAME = 3
-  const FRAME_INTERVAL = 18
-  let index = 0
-
-  function tick() {
-    if (index >= fullText.length) {
-      stopTypewriter()
-      onDone()
-      return
-    }
-    const chunk = fullText.slice(index, index + CHARS_PER_FRAME)
-    index += CHARS_PER_FRAME
-    chatStore.appendToAssistant(chunk)
-    scrollToBottom()
-    typewriterTimer = window.setTimeout(tick, FRAME_INTERVAL)
-  }
-  tick()
-}
 
 function stopTypewriter() {
   if (typewriterTimer !== null) {
@@ -220,12 +203,68 @@ function stopThinkingAnimation() {
   thinkingDots.value = ''
 }
 
+// ── 重规划自动采纳开关（默认关，符合 P2 决策：默认生成待采纳版本供用户一键采纳）──
+const autoAdoptEnabled = ref(false)
+
+// ── 对话诊断 → AOO 自动优化触发 ──
+// autoAdopt: 是否自动采纳重规划版本（默认 false，仅生成待采纳版本供用户一键采纳）
+async function triggerAutoOptimize(
+  diagnosis: NonNullable<RAGQueryResponse['diagnosis']>,
+  autoAdopt = false
+) {
+  if (!diagnosis || !diagnosis.needs_optimization) return
+
+  const masteryEstimates = diagnosis.mastery_estimates ?? []
+  chatStore.addSystemMessage(
+    `检测到 ${masteryEstimates.length > 0 ? masteryEstimates.filter(e => (e.level ?? 1) < 0.5).length : 0} ` +
+    '个薄弱知识点，正在生成最优学习路径...'
+  )
+
+  try {
+    const result = await autoOptimize({
+      mastery_estimates: masteryEstimates.map((e: any) => ({
+        kp_name: String(e.kp_name ?? ''),
+        level: Number(e.level ?? 0.5),
+      })),
+      cognitive_load: diagnosis.cognitive_load ?? 0.5,
+      learning_intent: String(diagnosis.learning_intent ?? 'quick_fix'),
+      needs_optimization: true,
+      auto_adopt: autoAdopt,
+    })
+
+    if (result.aoo_task_id) {
+      if (autoAdopt) {
+        chatStore.addSystemMessage(
+          '已根据你的对话自动优化并采纳新的学习路径，可在路径看板查看。'
+        )
+      } else {
+        chatStore.addSystemMessage(
+          '已生成新版本学习路径（待采纳）。前往「我的路径」可查看变更详情并一键采纳。'
+        )
+      }
+    } else {
+      chatStore.addSystemMessage(result.message || '学习路径优化启动失败，请稍后重试。')
+    }
+
+    trackEvent('chat_aoo_auto_optimize', {
+      triggered: result.triggered,
+      task_id: result.aoo_task_id,
+      auto_adopt: autoAdopt,
+    })
+  } catch (err: unknown) {
+    chatStore.addSystemMessage(
+      '路径优化服务暂时不可用，稍后可在诊断页面手动触发。'
+    )
+  }
+}
+
 // ── 发送消息 ──
 async function handleSend() {
   const question = inputText.value.trim()
   if (!question || isStreaming.value) return
 
   inputText.value = ''
+  firstChunkReceived.value = false
 
   chatStore.addUserMessage(question)
   chatStore.addAssistantPlaceholder()
@@ -241,47 +280,77 @@ async function handleSend() {
     questionLength: question.length
   })
 
+  // 累积完整回答用于 token 统计
+  let fullAnswer = ''
+  let _sources: RAGQueryResponse['sources'] = []
+  let _queryId = ''
+
   try {
-    const response: RAGQueryResponse = await ragApi.query({
-      question,
-      top_k: 5,
-      subject: chatStore.currentSubject,
-      student_id: userStore.userInfo?.id ? String(userStore.userInfo.id) : undefined,
-      // 直接调用大模型回答，不检索知识库
-      skip_retrieval: true,
-    })
+    await ragQueryStream(
+      {
+        question,
+        top_k: 5,
+        subject: chatStore.currentSubject,
+        student_id: userStore.userInfo?.id ? String(userStore.userInfo.id) : undefined,
+        skip_retrieval: true,
+        fast_mode: true,
+        diagnose_mode: true,
+        stream: true,
+      },
+      // onChunk - 实时流式追加文本
+      (chunk: string) => {
+        if (!firstChunkReceived.value) {
+          firstChunkReceived.value = true
+          stopThinkingAnimation()
+        }
+        fullAnswer += chunk
+        chatStore.appendToAssistant(chunk)
+        scrollToBottom()
+      },
+      // onDone - 流式完成
+      (full: RAGQueryResponse) => {
+        _sources = full.sources ?? []
+        _queryId = full.query_id
 
-    stopThinkingAnimation()
+        stopThinkingAnimation()
 
-    const lastMsg = messages.value[messages.value.length - 1]
-    if (lastMsg && lastMsg.role === 'assistant') {
-      lastMsg.content = ''
-    }
+        if (!fullAnswer && !full.answer) {
+          chatStore.addErrorMessage('模型未返回有效回答')
+          return
+        }
 
-    if (!response.answer) {
-      // addErrorMessage 会正确处理并移除 placeholder 消息
-      chatStore.addErrorMessage('模型未返回有效回答')
-      return
-    }
+        trackEvent('chat_response', {
+          success: true,
+          durationMs: Date.now() - _queryStartedAt,
+          sourceCount: _sources.length,
+          streaming: true,
+        })
 
-    trackEvent('chat_response', {
-      success: true,
-      durationMs: Date.now() - _queryStartedAt,
-      sourceCount: response.sources?.length ?? 0,
-      tokens: response.token_usage?.total_tokens ?? 0
-    })
+        const hasRetrieval = _sources.length > 0
+        chatStore.finishAssistant({
+          sources: _sources,
+          confidence: hasRetrieval ? full.confidence : undefined,
+          queryId: _queryId,
+        })
 
-    startTypewriter(response.answer, () => {
-      // 直连大模型回答时不展示"置信度 0%"，仅在有检索来源时回传置信度
-      const hasRetrieval = Array.isArray(response.sources) && response.sources.length > 0
-      chatStore.finishAssistant({
-        sources: response.sources,
-        confidence: hasRetrieval ? response.confidence : undefined,
-        tokenUsage: response.token_usage,
-        queryId: response.query_id,
-      })
-      chatStore.stopLoading()
-    })
+        // 诊断模式：检测到薄弱知识点 → 自动触发 AOO 路径优化
+        if (full.diagnosis?.needs_optimization) {
+          triggerAutoOptimize(full.diagnosis, autoAdoptEnabled.value)
+        }
+
+        chatStore.stopLoading()
+      },
+      // onError
+      (err: Error) => {
+        stopThinkingAnimation()
+        trackEvent('chat_response', {
+          success: false,
+          durationMs: Date.now() - _queryStartedAt
+        })
+        chatStore.addErrorMessage(err.message || '网络异常，请稍后重试')
+        chatStore.stopLoading()
+      },
+    )
   } catch (err: unknown) {
     stopThinkingAnimation()
     const msg = err instanceof Error ? err.message : '网络异常，请稍后重试'
@@ -296,6 +365,54 @@ async function handleSend() {
 
 function quickFill(text: string) {
   inputText.value = text
+}
+
+// ── 对话画像抽屉 ──
+// 仅展示「智能问答」通过对话梳理出的该生知识点掌握特点（与学习诊断严格分离）
+const chatProfileVisible = ref(false)
+const chatProfileLoading = ref(false)
+const chatProfile = ref<ChatProfileData | null>(null)
+
+async function openChatProfile() {
+  chatProfileVisible.value = true
+  chatProfileLoading.value = true
+  try {
+    const resp = await ragApi.getChatProfile()
+    chatProfile.value = (resp as any)?.data ?? resp
+  } catch (e) {
+    console.error('[ChatView] 读取对话画像失败:', e)
+    chatProfile.value = {
+      exists: false,
+      chat_signal_count: 0,
+      last_chat_at: null,
+      updated_at: null,
+      items: [],
+    }
+  } finally {
+    chatProfileLoading.value = false
+  }
+}
+
+/** 掌握度 → 颜色（与诊断雷达图一致的燕麦金/极光蓝语义） */
+function profileLevelColor(level: number): string {
+  if (level >= 0.75) return '#52c41a' // 掌握良好
+  if (level >= 0.5) return '#4A6CF7' // 一般
+  if (level >= 0.3) return '#D4A373' // 薄弱
+  return '#ff4d4f' // 严重不足
+}
+function profileLevelText(level: number): string {
+  if (level >= 0.75) return '良好'
+  if (level >= 0.5) return '一般'
+  if (level >= 0.3) return '薄弱'
+  return '严重不足'
+}
+function formatProfileTime(iso?: string | null): string {
+  if (!iso) return '-'
+  try {
+    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return iso
+  }
 }
 
 // ── 自动滚动 ──
@@ -472,6 +589,10 @@ onBeforeUnmount(() => {
           </a-select>
         </div>
         <div class="toolbar-right">
+          <a-button type="text" size="small" @click="openChatProfile()" title="查看由对话梳理出的掌握特点">
+            <template #icon><ProfileOutlined /></template>
+            对话画像
+          </a-button>
           <a-button type="text" size="small" :disabled="!hasMessages" @click="chatStore.clearChat()" title="清空对话">
             <template #icon><ClearOutlined /></template>
             清空
@@ -482,6 +603,65 @@ onBeforeUnmount(() => {
           </a-button>
         </div>
       </div>
+
+      <!-- 对话画像抽屉 -->
+      <a-drawer
+        v-model:open="chatProfileVisible"
+        title="对话画像 · 智能问答梳理的掌握特点"
+        placement="right"
+        :width="420"
+        :mask-closable="true"
+      >
+        <template #extra>
+          <a-button size="small" :loading="chatProfileLoading" @click="openChatProfile()">刷新</a-button>
+        </template>
+
+        <a-spin :spinning="chatProfileLoading">
+          <a-alert
+            v-if="!chatProfile || !chatProfile.exists"
+            class="chat-profile-empty"
+            type="info"
+            show-icon
+            message="暂无对话画像"
+            description="在对话中谈论具体知识点的掌握情况后，系统会自动梳理出你的掌握特点并在此展示。"
+          />
+          <template v-else>
+            <div class="profile-meta">
+              <span>基于 <b>{{ chatProfile.chat_signal_count }}</b> 次对话信号梳理</span>
+              <span>最近更新：{{ formatProfileTime(chatProfile.last_chat_at) }}</span>
+            </div>
+            <a-divider style="margin: 12px 0" />
+            <p class="profile-hint">
+              以下内容<strong>仅来自智能问答对话</strong>，与「学习诊断」的客观答题结果相互独立，可用于「诊断 + 对话」重规划。
+            </p>
+            <a-list :data-source="chatProfile.items" size="small" :split="true">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <div class="profile-item">
+                    <div class="pi-head">
+                      <span class="pi-name">{{ item.kp_name }}</span>
+                      <a-tag :color="profileLevelColor(item.level)">
+                        {{ profileLevelText(item.level) }} · {{ Math.round(item.level * 100) }}%
+                      </a-tag>
+                    </div>
+                    <a-progress
+                      :percent="Math.round(item.level * 100)"
+                      :stroke-color="profileLevelColor(item.level)"
+                      :show-info="false"
+                      size="small"
+                    />
+                    <div class="pi-foot">
+                      <span>置信度 {{ Math.round(item.confidence * 100) }}%</span>
+                      <span>对话修正 {{ item.n }} 次</span>
+                      <span>{{ formatProfileTime(item.last_at) }}</span>
+                    </div>
+                  </div>
+                </a-list-item>
+              </template>
+            </a-list>
+          </template>
+        </a-spin>
+      </a-drawer>
 
       <!-- 消息区域 -->
       <div ref="messagesContainer" class="messages-container" @scroll="handleScroll">
@@ -548,6 +728,19 @@ onBeforeUnmount(() => {
           :questions="currentQuickQuestions"
           @select="quickFill"
         />
+        <div class="chat-footer-options">
+          <a-tooltip title="开启后，对话触发的路径优化将自动采纳新版本；默认关闭，仅生成待采纳版本供你一键确认">
+            <span class="adopt-switch">
+              <SwapOutlined />
+              <span class="adopt-label">自动采纳新路径</span>
+              <a-switch
+                v-model:checked="autoAdoptEnabled"
+                size="small"
+                :disabled="!hasMessages"
+              />
+            </span>
+          </a-tooltip>
+        </div>
         <ChatInput
           v-model="inputText"
           :sending="isLoading"
@@ -1011,5 +1204,98 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   background: rgba(10, 13, 20, 0.80);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-footer-options {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 20px 0;
+
+  .adopt-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: default;
+
+    .adopt-label {
+      user-select: none;
+    }
+  }
+}
+
+/* ============================================================
+   对话画像抽屉
+   ============================================================ */
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94A3B8;
+  margin-bottom: 4px;
+
+  b {
+    color: #D4A373;
+  }
+}
+.profile-hint {
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.6;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: rgba(74, 108, 247, 0.08);
+  border-left: 2px solid #4A6CF7;
+  border-radius: 4px;
+
+  strong {
+    color: #4A6CF7;
+  }
+}
+/* 对话画像空态提示：深色主题适配，避免默认浅蓝底与边框糊在一起 */
+.chat-profile-empty.ant-alert {
+  background: rgba(74, 108, 247, 0.10);
+  border: 1px solid rgba(74, 108, 247, 0.45);
+  border-radius: 8px;
+  padding: 12px 14px;
+
+  .ant-alert-icon {
+    color: #4A6CF7;
+  }
+  .ant-alert-message {
+    color: #E2E8F0;
+    font-weight: 600;
+  }
+  .ant-alert-description {
+    color: #94A3B8;
+    line-height: 1.6;
+  }
+}
+.profile-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pi-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #F8FAFC;
+}
+.pi-foot {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #64748B;
+  flex-wrap: wrap;
 }
 </style>

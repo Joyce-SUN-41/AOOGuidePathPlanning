@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +42,23 @@ class LearningPath(Base):
     )
     fitness_score: Mapped[Optional[float]] = mapped_column(
         Float, index=True, comment="AOO 适应度得分"
+    )
+    # ---- P2 重规划版本管理 ----
+    # parent_path_id: 本次重规划基于的旧路径（新版本指向旧版本，形成链路）
+    # version: 同一学生的路径版本号，从 1 递增
+    # is_active: 当前是否生效（待采纳的新版本为 False，采纳后置 True，旧版本置 False）
+    parent_path_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_paths.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="父路径ID（重规划来源版本）",
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, comment="路径版本号"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, index=True, comment="是否为当前生效路径"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

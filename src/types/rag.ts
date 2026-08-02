@@ -27,6 +27,10 @@ export interface RAGQueryRequest {
   subject?: string
   /** true = 跳过知识库检索直连大模型；默认 false（走 RAG 检索增强） */
   skip_retrieval?: boolean
+  /** true = 快速模式（低温度、短回复、短超时） */
+  fast_mode?: boolean
+  /** true = 诊断模式（附加学习状态评估 JSON） */
+  diagnose_mode?: boolean
   /** true = 走 SSE 流式返回（仅 ragQueryStream 使用） */
   stream?: boolean
 }
@@ -40,6 +44,13 @@ export interface RAGQueryResponse {
   model: string
   token_usage?: RAGTokenUsage
   query_id: string
+  /** 诊断模式下的学习评估数据 */
+  diagnosis?: {
+    mastery_estimates?: Array<{ kp_name: string; level: number }>
+    cognitive_load?: number
+    learning_intent?: string
+    needs_optimization?: boolean
+  }
 }
 
 /** RAG 知识库统计 */

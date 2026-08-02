@@ -7,7 +7,7 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# 安装构建依赖（核心 + AI 扩展，包含 chromadb）
+# 安装构建依赖（核心 + 可选 AI 扩展）
 COPY requirements.txt requirements-ai.txt* ./
 RUN pip install --no-cache-dir -r requirements.txt \
     -i https://mirrors.aliyun.com/pypi/simple/ \
@@ -46,8 +46,9 @@ EXPOSE 8000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')" || exit 1
+    CMD python -c "import urllib.request,os; port=os.environ.get('APP_PORT','8000'); urllib.request.urlopen('http://localhost:'+port+'/api/v1/health/live')" || exit 1
 
 # 使用 entrypoint 脚本启动（自动运行数据库迁移）
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 端口从 APP_PORT 环境变量读取（默认 8000），与配置保持一致、可被覆盖
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000}"]

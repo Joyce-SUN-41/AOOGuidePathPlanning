@@ -23,6 +23,10 @@ from app.models.chat_history import ChatHistory  # noqa: F401
 from app.models.aoo_optimization_log import AOOOptimizationLog  # noqa: F401
 from app.models.diagnosis import DiagnosisRecord  # noqa: F401
 from app.models.question import Question  # noqa: F401
+from app.models.cognitive_profile import (  # noqa: F401
+    StudentCognitiveProfile,
+    CognitiveProfileEvent,
+)
 
 # Alembic Config 对象
 config = context.config

@@ -455,33 +455,104 @@ class KnowledgeBase:
 
     # ---- 直连 LLM（跳过知识库检索） ----
 
+    # 快速模式系统提示词（精简短小，尽量一次返回）
+    DIRECT_CHAT_FAST_PROMPT: str = (
+        "你是「燕麦智导」的智能学习助手。请简洁直接地回答用户问题，"
+        "控制在 200 字以内，不需要铺垫。专注学习路径规划、知识薄弱点分析、"
+        "学习策略推荐。若问题超出范围，直接说明无法回答。"
+    )
+
+    # 诊断模式系统提示词（快速回答 + 隐式评估 + JSON 输出）
+    DIRECT_CHAT_DIAGNOSE_PROMPT: str = (
+        "你是「燕麦智导」的智能诊断助手。请用简洁中文回答用户问题（200 字内），"
+        "同时在回答末尾附加一份学习诊断 JSON。\n\n"
+        "诊断 JSON 必须用 [*DIAG_START*] 和 [*DIAG_END*] 包裹：\n"
+        "[*DIAG_START*]\n"
+        '{"mastery_estimates":[{"kp_name":"知识点名","level":0.0-1.0}],'
+        '"cognitive_load":0.0-1.0,'
+        '"learning_intent":"skill_improve|basic_review|deep_dive|quick_fix",'
+        '"needs_optimization":true|false}\n'
+        "[*DIAG_END*]\n\n"
+        "评估规则：\n"
+        "- mastery_estimates: 仅评估对话中明确涉及的知识点掌握度（0=完全不会，1=精通），勿编造\n"
+        "- cognitive_load: 用户表现出的认知负荷（越高=越吃力/困惑）\n"
+        "- learning_intent: skill_improve(技能提升)/basic_review(基础回顾)/deep_dive(深入钻研)/quick_fix(快速答疑)\n"
+        "- needs_optimization: 当检测到 2+ 薄弱知识点或用户明确要求优化路径时设为 true\n\n"
+        "重要：用户不应看到诊断 JSON，它仅供后端解析使用。"
+    )
+
+    @staticmethod
+    def _extract_diagnosis_json(content: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """从 LLM 回复中提取诊断 JSON 块，返回 (干净回答, 诊断数据或 None)"""
+        import re
+
+        diag_match = re.search(
+            r"\[\*DIAG_START\*\](.*?)\[\*DIAG_END\*\]",
+            content,
+            re.DOTALL,
+        )
+        if not diag_match:
+            return content, None
+
+        # 移除诊断块，仅保留干净回答
+        clean_answer = content[: diag_match.start()].strip() + content[diag_match.end() :].strip()
+        clean_answer = clean_answer.strip()
+
+        try:
+            diag_data = json.loads(diag_match.group(1).strip())
+        except json.JSONDecodeError:
+            logger.warning("[direct_chat] 诊断 JSON 解析失败，丢弃")
+            return clean_answer, None
+
+        return clean_answer, diag_data
+
     async def direct_chat(
         self,
         question: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        fast: bool = False,
+        diagnose: bool = False,
     ) -> RAGQueryResult:
         """直接调用大模型回答，不经过检索增强"""
         if not self._llm_client:
             raise RuntimeError("LLM 客户端未初始化，无法直连问答")
 
         query_id = str(uuid.uuid4())[:8]
-        system_prompt = (
-            "你是一个专业的 AI 助手，名为「燕麦智导」。"
-            "请用中文简洁、准确地回答用户的问题。"
-            "如果问题超出你的知识范围，请如实说明。"
-            "回答应结构清晰，适当使用要点列表。"
-        )
+
+        # 选择系统提示词与参数
+        if diagnose:
+            system_prompt = self.DIRECT_CHAT_DIAGNOSE_PROMPT
+            _temperature = min(temperature, 0.35)  # 诊断即快速
+            _max_tokens = min(max_tokens, fast and 512 or 640)
+            _timeout = min(LLM_CALL_TIMEOUT, fast and 30.0 or 45.0)
+        elif fast:
+            system_prompt = self.DIRECT_CHAT_FAST_PROMPT
+            _temperature = min(temperature, 0.35)
+            _max_tokens = min(max_tokens, 384)
+            _timeout = min(LLM_CALL_TIMEOUT, 30.0)
+        else:
+            system_prompt = (
+                "你是一个专业的 AI 助手，名为「燕麦智导」。"
+                "请用中文简洁、准确地回答用户的问题。"
+                "如果问题超出你的知识范围，请如实说明。"
+                "回答应结构清晰，适当使用要点列表。"
+            )
+            _temperature = temperature
+            _max_tokens = max_tokens
+            _timeout = LLM_CALL_TIMEOUT
 
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question},
         ]
-        # 部分模型不支持 system 角色，降级为 user
-        # normalize_roles 定义在 RAGPromptBuilder 上，KnowledgeBase 自身没有该方法
         messages = RAGPromptBuilder.normalize_roles(messages)
 
-        logger.info("[direct_chat] 直连 LLM | id=%s | q=%s", query_id, question[:60])
+        mode_tag = "fast" if fast else ("diagnose" if diagnose else "normal")
+        logger.info(
+            "[direct_chat] 直连 LLM | mode=%s | id=%s | q=%s",
+            mode_tag, query_id, question[:60],
+        )
 
         # 预检：LLM 客户端是否已配置
         if not self._llm_client.is_configured:
@@ -504,16 +575,16 @@ class KnowledgeBase:
             response = await asyncio.wait_for(
                 self._llm_client.chat(
                     messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+                    temperature=_temperature,
+                    max_tokens=_max_tokens,
                 ),
-                timeout=LLM_CALL_TIMEOUT,
+                timeout=_timeout,
             )
         except asyncio.TimeoutError:
-            logger.error("[direct_chat] LLM 调用超时 (%.0fs)", LLM_CALL_TIMEOUT)
+            logger.error("[direct_chat] LLM 调用超时 (%.0fs)", _timeout)
             return RAGQueryResult(
                 answer=(
-                    f"AI 生成超时（超过 {LLM_CALL_TIMEOUT:.0f} 秒）。"
+                    f"AI 生成超时（超过 {_timeout:.0f} 秒）。"
                     "可能是模型服务繁忙，请稍后重试或缩短问题长度。"
                 ),
                 sources=[],
@@ -541,8 +612,14 @@ class KnowledgeBase:
                 "total_tokens": response.usage.total_tokens,
             }
 
-        return RAGQueryResult(
-            answer=response.content,
+        # 诊断模式：提取诊断 JSON
+        answer_text = response.content
+        diagnosis = None
+        if diagnose:
+            answer_text, diagnosis = self._extract_diagnosis_json(answer_text)
+
+        result = RAGQueryResult(
+            answer=answer_text,
             sources=[],
             confidence=0.7,
             retrieval_count=0,
@@ -551,11 +628,19 @@ class KnowledgeBase:
             query_id=query_id,
         )
 
+        # 附加诊断数据到 result（通过私有属性）
+        if diagnosis is not None:
+            result._diagnosis = diagnosis  # type: ignore[attr-defined]
+
+        return result
+
     async def direct_chat_stream(
         self,
         question: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        fast: bool = False,
+        diagnose: bool = False,
     ) -> AsyncGenerator[str, None]:
         """直连大模型的流式问答（不经过检索增强）
 
@@ -578,12 +663,25 @@ class KnowledgeBase:
             yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
             return
 
-        system_prompt = (
-            "你是一个专业的 AI 助手，名为「燕麦智导」。"
-            "请用中文简洁、准确地回答用户的问题。"
-            "如果问题超出你的知识范围，请如实说明。"
-            "回答应结构清晰，适当使用要点列表。"
-        )
+        # 选择系统提示词与参数
+        if diagnose:
+            system_prompt = self.DIRECT_CHAT_DIAGNOSE_PROMPT
+            _temperature = min(temperature, 0.35)
+            _max_tokens = min(max_tokens, fast and 512 or 640)
+        elif fast:
+            system_prompt = self.DIRECT_CHAT_FAST_PROMPT
+            _temperature = min(temperature, 0.35)
+            _max_tokens = min(max_tokens, 384)
+        else:
+            system_prompt = (
+                "你是一个专业的 AI 助手，名为「燕麦智导」。"
+                "请用中文简洁、准确地回答用户的问题。"
+                "如果问题超出你的知识范围，请如实说明。"
+                "回答应结构清晰，适当使用要点列表。"
+            )
+            _temperature = temperature
+            _max_tokens = max_tokens
+
         messages = RAGPromptBuilder.normalize_roles(
             [
                 {"role": "system", "content": system_prompt},
@@ -591,18 +689,81 @@ class KnowledgeBase:
             ]
         )
 
+        full_content = ""
+        # 诊断模式：用状态机过滤诊断 JSON 块，避免暴露给用户
+        _diag_buf = ""          # 滑窗缓冲区，用于跨 chunk 检测标记
+        _in_diag_block = False  # 是否已进入 [*DIAG_START*] 区间
+        _diag_json = ""         # 累积的诊断 JSON 内容
+        _DIAG_START = "[*DIAG_START*]"
+        _DIAG_END = "[*DIAG_END*]"
         try:
             async for chunk in self._llm_client.chat_stream(
                 messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                temperature=_temperature,
+                max_tokens=_max_tokens,
             ):
-                if chunk.content:
+                if not chunk.content:
+                    continue
+                full_content += chunk.content
+
+                if not diagnose:
                     yield chunk.content
+                    continue
+
+                # ── 诊断模式：过滤 [*DIAG_START*]...[*DIAG_END*] 块 ──
+                _diag_buf += chunk.content
+
+                if not _in_diag_block:
+                    # 未进入诊断块：查找 [*DIAG_START*]
+                    idx = _diag_buf.find(_DIAG_START)
+                    if idx >= 0:
+                        # 找到开始标记：先产出标记之前的正常内容
+                        before = _diag_buf[:idx]
+                        if before:
+                            yield before
+                        # 切除已处理部分，含标记本身
+                        _diag_buf = _diag_buf[idx + len(_DIAG_START):]
+                        _in_diag_block = True
+                    else:
+                        # 没找到：保留尾部可能跨 chunk 的片段，其余安全产出
+                        tail_len = len(_DIAG_START) - 1
+                        if len(_diag_buf) > tail_len:
+                            safe = _diag_buf[:-tail_len]
+                            yield safe
+                            _diag_buf = _diag_buf[-tail_len:]
+                else:
+                    # 已在诊断块内：查找 [*DIAG_END*]
+                    idx = _diag_buf.find(_DIAG_END)
+                    if idx >= 0:
+                        # 诊断块结束：收集到诊断 JSON
+                        _diag_json = _diag_buf[:idx]
+                        # 切除诊断块 + 结束标记
+                        _diag_buf = _diag_buf[idx + len(_DIAG_END):]
+                        _in_diag_block = False
+                    else:
+                        # 仍在诊断块中，保留尾部等待结束标记
+                        tail_len = len(_DIAG_END) - 1
+                        if len(_diag_buf) > tail_len:
+                            _diag_json += _diag_buf[:-tail_len]
+                            _diag_buf = _diag_buf[-tail_len:]
+
         except Exception as e:  # noqa: BLE001
             logger.error("[direct_chat_stream] LLM 流式调用失败: %s", e)
             yield "\n\n[AI 生成过程中出现错误，请重试]"
             return
+
+        # 诊断块结束后可能还有残留正常内容
+        if _diag_buf and not _in_diag_block:
+            yield _diag_buf
+        # 如果仍在诊断块中（异常/未闭合），不产出，直接丢弃
+
+        # 诊断模式：将解析结果作为结构化 SSE 帧发送
+        if diagnose and _diag_json:
+            try:
+                diagnosis = json.loads(_diag_json.strip())
+                yield "<<DIAGNOSIS>>" + json.dumps(diagnosis, ensure_ascii=False)
+            except json.JSONDecodeError:
+                logger.warning("[direct_chat_stream] 诊断 JSON 解析失败，丢弃")
 
         yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
 

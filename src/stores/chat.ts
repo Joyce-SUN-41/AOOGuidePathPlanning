@@ -122,6 +122,16 @@ export const useChatStore = defineStore('chat', () => {
     if (data.queryId) lastQueryId.value = data.queryId
   }
 
+  /** 添加系统通知消息（非阻塞，追加到对话末尾） */
+  function addSystemMessage(content: string) {
+    messages.value.push({
+      id: generateId(),
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    })
+  }
+
   /** 添加系统的错误消息 */
   function addErrorMessage(errMsg: string) {
     // 移除最后一个空的 assistant placeholder
@@ -234,6 +244,7 @@ export const useChatStore = defineStore('chat', () => {
     addAssistantPlaceholder,
     appendToAssistant,
     finishAssistant,
+    addSystemMessage,
     addErrorMessage,
     clearChat,
     cancelStream,

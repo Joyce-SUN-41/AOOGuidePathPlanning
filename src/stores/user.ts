@@ -22,6 +22,9 @@ export const useUserStore = defineStore(
     /** JWT 令牌 */
     const token = ref<string>('')
 
+    /** 刷新令牌 (用于 access token 过期时静默续期) */
+    const refreshToken = ref<string>('')
+
     /** 用户信息 */
     const userInfo = ref<UserInfo | null>(null)
 
@@ -60,6 +63,7 @@ export const useUserStore = defineStore(
       try {
         const res = await authApi.login(params)
         token.value = res.token
+        refreshToken.value = res.refreshToken ?? ''
         userInfo.value = res.userInfo
         remember.value = params.remember ?? false
         trackEvent('user_login', { role: res.userInfo?.role ?? '', success: true })
@@ -76,6 +80,7 @@ export const useUserStore = defineStore(
       try {
         const res = await authApi.register(params)
         token.value = res.token
+        refreshToken.value = res.refreshToken ?? ''
         userInfo.value = res.userInfo
         remember.value = false
         trackEvent('user_register', { role: res.userInfo?.role ?? '', success: true })
@@ -91,6 +96,7 @@ export const useUserStore = defineStore(
     function logout(showMessage = true): void {
       trackEvent('user_logout', { role: userInfo.value?.role ?? '' })
       token.value = ''
+      refreshToken.value = ''
       userInfo.value = null
       // 立即清除所有认证相关的 localStorage 条目，避免 persist 插件恢复
       localStorage.removeItem('oat_token')
@@ -110,7 +116,16 @@ export const useUserStore = defineStore(
         // 通过获取当前用户接口刷新信息
         const { userApi } = await import('@/api/modules/user')
         const info = await userApi.getUserInfo()
+        // 保留本地已有的 avatar/phone，防止后端未返回时被清空
+        const oldAvatar = userInfo.value?.avatar
+        const oldPhone = userInfo.value?.phone
         userInfo.value = info
+        if (oldAvatar && !userInfo.value?.avatar) {
+          userInfo.value.avatar = oldAvatar
+        }
+        if (oldPhone && !userInfo.value?.phone) {
+          userInfo.value.phone = oldPhone
+        }
       } catch {
         // 获取失败时不清除现有数据；可能仅网络问题
         console.warn('[UserStore] 获取用户信息失败，保留缓存数据')
@@ -124,6 +139,14 @@ export const useUserStore = defineStore(
       token.value = newToken
     }
 
+    /** 刷新 token 后更新 access + refresh 令牌对 */
+    function setTokens(newToken: string, newRefreshToken?: string): void {
+      token.value = newToken
+      if (newRefreshToken) {
+        refreshToken.value = newRefreshToken
+      }
+    }
+
     /** 更新用户部分信息 */
     function updateUserInfo(info: Partial<UserInfo>): void {
       if (userInfo.value) {
@@ -131,9 +154,24 @@ export const useUserStore = defineStore(
       }
     }
 
+    /** 同步资料到服务端 */
+    async function syncProfileToServer(profile: Partial<UserInfo>): Promise<boolean> {
+      if (!token.value) return false
+      try {
+        const { userApi } = await import('@/api/modules/user')
+        const result = await userApi.updateProfile(profile)
+        // 用服务端返回的完整信息更新本地
+        userInfo.value = result
+        return true
+      } catch {
+        return false
+      }
+    }
+
     return {
       // State
       token,
+      refreshToken,
       userInfo,
       remember,
       _loading,
@@ -150,15 +188,17 @@ export const useUserStore = defineStore(
       logout,
       fetchUserInfo,
       setToken,
-      updateUserInfo
+      setTokens,
+      updateUserInfo,
+      syncProfileToServer
     }
   },
   {
     persist: {
       key: 'oat_user_store',
       storage: localStorage,
-      // 仅持久化 token / userInfo / remember (v3 使用 paths 字段)
-      paths: ['token', 'userInfo', 'remember'],
+      // 仅持久化 token / refreshToken / userInfo / remember (v3 使用 paths 字段)
+      paths: ['token', 'refreshToken', 'userInfo', 'remember'],
       // 退出登录后清空 storage
       afterRestore(ctx) {
         // 如果没有勾选"记住我"，退出时不保留 token

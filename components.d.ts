@@ -78,6 +78,7 @@ declare module 'vue' {
     GlobalLoading: typeof import('./src/components/GlobalLoading.vue')['default']
     LearningPathView: typeof import('./src/components/LearningPathView.vue')['default']
     OatDispersalBackground: typeof import('./src/components/OatDispersalBackground.vue')['default']
+    OatSwayBackground: typeof import('./src/components/OatSwayBackground.vue')['default']
     OptionChip: typeof import('./src/components/diagnosis/OptionChip.vue')['default']
     ProgressBar: typeof import('./src/components/diagnosis/ProgressBar.vue')['default']
     QuestionCard: typeof import('./src/components/diagnosis/QuestionCard.vue')['default']

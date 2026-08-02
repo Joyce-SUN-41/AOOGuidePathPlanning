@@ -15,6 +15,8 @@ class RAGQueryRequest(BaseModel):
     student_id: Optional[str] = Field(default=None, description="学生 ID（可选）")
     subject: Optional[str] = Field(default=None, description="学科过滤（可选）")
     skip_retrieval: bool = Field(default=False, description="跳过知识库检索，直接使用大模型回答")
+    fast_mode: bool = Field(default=False, description="快速模式：低温度、短回复、短超时，适合即时对话")
+    diagnose_mode: bool = Field(default=False, description="诊断模式：在回答中附加学习状态诊断 JSON")
     stream: bool = Field(
         default=False,
         description="是否以 SSE (text/event-stream) 流式返回。默认 False 保持整包 JSON 响应",
@@ -50,6 +52,39 @@ class RAGQueryResponse(BaseModel):
     model: str = Field(default="", description="使用的模型")
     token_usage: Optional[RAGTokenUsage] = Field(default=None, description="Token 用量")
     query_id: str = Field(default="", description="查询追踪 ID")
+    diagnosis: Optional[Dict[str, Any]] = Field(default=None, description="诊断模式下的学习评估数据")
+
+
+class AutoOptimizeRequest(BaseModel):
+    """对话诊断 → AOO 自动优化请求"""
+
+    mastery_estimates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="LLM 评估的知识点掌握度列表 [{\"kp_name\":\"...\", \"level\":0.x}]",
+    )
+    cognitive_load: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="认知负荷"
+    )
+    learning_intent: str = Field(
+        default="quick_fix",
+        description="学习意图: skill_improve|basic_review|deep_dive|quick_fix",
+    )
+    needs_optimization: bool = Field(
+        default=False,
+        description="LLM 判定是否需要优化",
+    )
+    auto_adopt: bool = Field(
+        default=False,
+        description="重规划后是否自动采纳新版本（默认 False，仅生成待采纳版本供用户一键采纳）",
+    )
+
+
+class AutoOptimizeResponse(BaseModel):
+    """对话诊断 → AOO 自动优化响应"""
+
+    triggered: bool = Field(..., description="是否触发 AOO 优化")
+    message: str = Field(default="", description="提示信息")
+    aoo_task_id: Optional[str] = Field(default=None, description="AOO 异步任务 ID")
 
 
 class RAGIndexRequest(BaseModel):

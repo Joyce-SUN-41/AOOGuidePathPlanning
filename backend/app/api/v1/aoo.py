@@ -22,6 +22,7 @@ from app.api.deps import get_current_user, get_db
 from app.models.diagnosis import DiagnosisRecord
 from app.models.learning_path import LearningPath
 from app.models.user import User
+from app.models.cognitive_profile import CognitiveProfileEvent
 from app.schemas.aoo_optimize import (
     AOOOptimizeConfig,
     AOOOptimizeRequest,
@@ -29,7 +30,9 @@ from app.schemas.aoo_optimize import (
     AOOOptimizeResult,
     AOOTaskStatusResponse,
     ConvergencePoint,
+    OptimizeFlexibleRequest,
 )
+from app.services.diagnosis.adapter import DiagnosisAdapter
 from app.schemas.common import ResponseBase
 from app.tasks.aoo_optimization import (
     get_task_convergence,
@@ -214,6 +217,191 @@ async def optimize_path(
         )
 
         logger.info("AOO 同步执行已启动: task_id=%s", sync_task_id)
+        return ResponseBase(
+            message="同步优化执行已启动",
+            data=AOOOptimizeResponse(
+                task_id=sync_task_id,
+                status="queued",
+                progress=0,
+                result=None,
+                error_message=None,
+            ),
+        )
+    except Exception as sync_exc:
+        logger.exception("同步执行启动失败")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AOO 优化服务暂时不可用: {str(sync_exc)}",
+        )
+
+
+# ============================================================
+# POST /optimize-flexible — 灵活重规划 (诊断 / 诊断+对话)
+# ============================================================
+
+
+@router.post(
+    "/optimize-flexible",
+    response_model=ResponseBase[AOOOptimizeResponse],
+    summary="灵活重规划 (基于任意历史诊断 / 诊断+对话)",
+    description=(
+        "支持两种重规划模式:\n"
+        "- mode='diagnosis': 仅基于指定的一次「学习诊断」重新规划, 不混入对话信号\n"
+        "- mode='diagnosis+chat': 基于指定诊断掌握度 + 当前「智能问答对话画像」融合后重规划\n"
+        "  (融合逻辑: 诊断掌握度为基底, 对话画像按 λ 加权叠加, 复用 adapter.fuse_mastery)\n\n"
+        "前端重规划选择器可列出历史诊断任选其一, 并勾选是否叠加对话分析。"
+    ),
+)
+async def optimize_flexible(
+    request: OptimizeFlexibleRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """灵活重规划入口
+
+    - 与 /optimize 的区别: 允许任选历史诊断, 并支持叠加「对话画像」
+    - 任务提交逻辑复用同一套 Celery/同步兜底
+    """
+    # 解析最终模式 (use_chat_profile 兼容覆盖)
+    mode = request.mode
+    if request.use_chat_profile is not None:
+        mode = "diagnosis+chat" if request.use_chat_profile else "diagnosis"
+
+    # ── 第一步: 读取指定诊断记录 (任意一次历史诊断) ──
+    try:
+        diag_id = uuid.UUID(request.diagnosis_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的 diagnosis_id: {request.diagnosis_id}",
+        )
+
+    stmt = select(DiagnosisRecord).where(DiagnosisRecord.id == diag_id)
+    result = await session.execute(stmt)
+    diagnosis_record = result.scalar_one_or_none()
+    if diagnosis_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到诊断记录 diagnosis_id={request.diagnosis_id}",
+        )
+
+    # ── 自动补全 student_id ──
+    student_id = request.student_id or str(diagnosis_record.student_id)
+    if str(current_user.id) != student_id and current_user.role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能为自己的诊断数据创建优化任务",
+        )
+
+    # ── 提取诊断掌握度 (基底) ──
+    raw_mastery = diagnosis_record.mastery_levels or {}
+    base_mastery: Dict[str, float] = {}
+    for kp_id, data in raw_mastery.items():
+        if isinstance(data, dict):
+            base_mastery[kp_id] = float(data.get("mastery", 0.5))
+        else:
+            base_mastery[kp_id] = float(data)
+    if not base_mastery:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该诊断记录中无 mastery_levels 数据，请重新完成认知诊断",
+        )
+
+    # ── 补全认知负荷 ──
+    cognitive_load = request.cognitive_load
+    if cognitive_load is None:
+        cognitive_load = (
+            diagnosis_record.cognitive_load_index
+            if diagnosis_record.cognitive_load_index is not None
+            else 0.5
+        )
+
+    # ── 第二步: 诊断+对话 模式 → 融合对话画像 ──
+    final_mastery = base_mastery
+    if mode == "diagnosis+chat":
+        try:
+            adapter = DiagnosisAdapter(
+                db=session, user_id=uuid.UUID(student_id)
+            )
+            chat_profile = await adapter.get_chat_profile()
+            chat_mastery: Dict[str, float] = {
+                item["kp_id"]: item["level"]
+                for item in chat_profile.get("items", [])
+            }
+            if chat_mastery:
+                final_mastery = await adapter.fuse_mastery(
+                    session=session,
+                    student_id=uuid.UUID(student_id),
+                    chat_mastery=chat_mastery,
+                )
+            else:
+                logger.info(
+                    "[optimize-flexible] 对话画像为空, 退化为单纯诊断重规划 (diag=%s)",
+                    diag_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[optimize-flexible] 对话画像融合失败, 回退纯诊断: %s", exc)
+            final_mastery = base_mastery
+
+    # ── 提取超参配置 ──
+    if request.config:
+        config_dict = request.config.model_dump(exclude_none=True)
+    else:
+        config_dict = {
+            "population_size": 50,
+            "max_iterations": 500,
+            "alpha": 0.6,
+            "beta": 0.4,
+        }
+
+    logger.info(
+        "AOO 灵活重规划: mode=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        mode, request.diagnosis_id, student_id, len(final_mastery), cognitive_load,
+    )
+
+    # ── 第三步: 提交任务 (Celery 优先, 同步兜底) ──
+    celery_available = False
+    try:
+        inspect = run_aoo_optimization.app.control.inspect(timeout=2)
+        workers = inspect.ping()
+        celery_available = bool(workers)
+    except Exception:
+        celery_available = False
+
+    if celery_available:
+        try:
+            celery_task = run_aoo_optimization.delay(
+                diagnosis_id=request.diagnosis_id,
+                student_id=student_id,
+                mastery_levels=final_mastery,
+                cognitive_load=cognitive_load,
+                config=config_dict,
+            )
+            return ResponseBase(
+                message="灵活优化任务已提交",
+                data=AOOOptimizeResponse(
+                    task_id=celery_task.id,
+                    status="queued",
+                    progress=0,
+                    result=None,
+                    error_message=None,
+                ),
+            )
+        except Exception as celery_exc:
+            logger.warning("Celery 不可用, 使用同步执行兜底: %s", celery_exc)
+    else:
+        logger.info("Celery Worker 离线, 直接使用同步执行")
+
+    from app.tasks.aoo_optimization import run_aoo_optimization_sync
+
+    try:
+        sync_task_id = run_aoo_optimization_sync(
+            diagnosis_id=request.diagnosis_id,
+            student_id=student_id,
+            mastery_levels=final_mastery,
+            cognitive_load=cognitive_load,
+            config=config_dict,
+        )
         return ResponseBase(
             message="同步优化执行已启动",
             data=AOOOptimizeResponse(
@@ -813,3 +1001,249 @@ def _parse_optimize_result(raw: dict) -> AOOOptimizeResult:
         pareto_front=raw.get("pareto_front", {}),
         execution_time=raw.get("execution_time", 0),
     )
+
+
+# ============================================================
+# P2 重规划版本管理: 待采纳版本 / 一键采纳 / 版本差异
+# ============================================================
+
+
+def _extract_path_tasks(path: "LearningPath") -> list:
+    """从 path_data.best_path 提取扁平化任务列表: [{kp_id, name, day, type, minutes}]"""
+    tasks: list = []
+    bp = (path.path_data or {}).get("best_path", {}) or {}
+    for day_data in bp.get("days", []):
+        day_idx = day_data.get("day", 1)
+        for t in day_data.get("tasks", []):
+            tasks.append({
+                "kp_id": str(t.get("knowledge_point") or ""),
+                "name": t.get("name", ""),
+                "day": day_idx,
+                "type": t.get("type", "reading"),
+                "minutes": t.get("duration", 0),
+            })
+    return tasks
+
+
+def _build_diff(old_path: "LearningPath", new_path: "LearningPath") -> dict:
+    """计算两个路径版本的任务级差异"""
+    old_tasks = {t["kp_id"]: t for t in _extract_path_tasks(old_path)}
+    new_tasks = {t["kp_id"]: t for t in _extract_path_tasks(new_path)}
+
+    added = [new_tasks[k] for k in new_tasks if k not in old_tasks]
+    removed = [old_tasks[k] for k in old_tasks if k not in new_tasks]
+    # 共有关键点: 对比所在天 / 类型变化
+    changed = []
+    for k in new_tasks:
+        if k in old_tasks:
+            o, n = old_tasks[k], new_tasks[k]
+            diffs = {}
+            if o["day"] != n["day"]:
+                diffs["day"] = {"from": o["day"], "to": n["day"]}
+            if o["type"] != n["type"]:
+                diffs["type"] = {"from": o["type"], "to": n["type"]}
+            if o["minutes"] != n["minutes"]:
+                diffs["minutes"] = {"from": o["minutes"], "to": n["minutes"]}
+            if diffs:
+                changed.append({"kp_id": k, "name": n["name"], **diffs})
+
+    return {
+        "old_version": old_path.version if old_path else 0,
+        "new_version": new_path.version,
+        "old_path_id": str(old_path.id) if old_path else None,
+        "new_path_id": str(new_path.id),
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "summary": (
+            f"新增 {len(added)} 个、移除 {len(removed)} 个、调整 {len(changed)} 个知识点任务"
+        ),
+    }
+
+
+async def _fetch_path_explanation(
+    path_id: uuid.UUID, student_id: uuid.UUID, session: AsyncSession
+) -> Optional[str]:
+    """P4: 读取该路径生成时写入的 path_regenerate 事件的 reasoning，作为可读解释。
+
+    返回形如: 「基于对话中的掌握度变化，本次重规划生成第 N 版路径，适应度 X.XX；
+    已为您保留为待采纳版本，可在「路径」页查看具体改动后决定是否应用。」
+    """
+    try:
+        stmt = (
+            select(CognitiveProfileEvent)
+            .where(
+                CognitiveProfileEvent.student_id == student_id,
+                CognitiveProfileEvent.event_type == "path_regenerate",
+                CognitiveProfileEvent.payload.op("->>")("path_id") == str(path_id),
+            )
+            .order_by(CognitiveProfileEvent.created_at.desc())
+            .limit(1)
+        )
+        ev = (await session.execute(stmt)).scalar_one_or_none()
+        if ev and ev.reasoning:
+            return ev.reasoning
+    except Exception as e:  # best-effort，绝不阻断主链路
+        logger.warning("[_fetch_path_explanation] 读取解释失败: %s", e)
+    return None
+
+
+@router.get(
+    "/pending-path",
+    summary="查询待采纳的重规划版本",
+    description="返回当前学生最新一条 is_active=False 的路径（对话触发生成的新版本），供前端展示 diff 与采纳。无则返回空。",
+)
+async def get_pending_path(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """查询待采纳版本（P2 重规划默认生成的版本，需用户一键采纳）"""
+    stmt = (
+        select(LearningPath)
+        .where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == False,  # noqa: E712
+        )
+        .order_by(LearningPath.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    pending = result.scalars().first()
+    if pending is None:
+        return ResponseBase(data=None, message="当前没有待采纳的重规划版本")
+
+    # 计算与当前生效（父）版本的 diff
+    diff = None
+    if pending.parent_path_id is not None:
+        parent = await session.get(LearningPath, pending.parent_path_id)
+        if parent is not None:
+            diff = _build_diff(parent, pending)
+
+    # P4: 读取 path_regenerate 事件的 reasoning 作为「为什么路径变了」的可读解释
+    explanation = await _fetch_path_explanation(pending.id, current_user.id, session)
+
+    bp = (pending.path_data or {}).get("best_path", {}) or {}
+    return ResponseBase(
+        data={
+            "path_id": str(pending.id),
+            "version": pending.version,
+            "parent_path_id": str(pending.parent_path_id) if pending.parent_path_id else None,
+            "total_days": pending.estimated_completion_days,
+            "total_minutes": pending.total_duration,
+            "fitness_score": pending.fitness_score,
+            "task_count": len(_extract_path_tasks(pending)),
+            "created_at": pending.created_at.isoformat() if pending.created_at else None,
+            "diff": diff,
+            "explanation": explanation,
+            "best_path_preview": {
+                "total_days": bp.get("total_days"),
+                "total_tasks": bp.get("total_tasks"),
+            },
+        },
+        message="找到待采纳版本",
+    )
+
+
+@router.post(
+    "/paths/{path_id}/adopt",
+    summary="一键采纳重规划版本",
+    description="将指定路径置为 is_active=True（生效），其原生效路径置 is_active=False。",
+)
+async def adopt_path(
+    path_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """一键采纳指定重规划版本（P2）"""
+    try:
+        pid = uuid.UUID(path_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的 path_id: {path_id}",
+        )
+
+    target = await session.get(LearningPath, pid)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="路径不存在",
+        )
+    if str(target.student_id) != str(current_user.id) and current_user.role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能采纳自己的学习路径",
+        )
+    if target.is_active:
+        return ResponseBase(data={"path_id": path_id, "adopted": True}, message="该路径已生效")
+
+    # 下线当前生效版本，上线目标版本
+    old_active = await session.execute(
+        select(LearningPath).where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == True,  # noqa: E712
+            LearningPath.id != pid,
+        )
+    )
+    for old in old_active.scalars().all():
+        old.is_active = False
+        session.add(old)
+
+    target.is_active = True
+    session.add(target)
+    await session.commit()
+
+    logger.info(
+        "[adopt] 学生 %s 采纳路径 v%d (path_id=%s)",
+        current_user.id, target.version, pid,
+    )
+    return ResponseBase(
+        data={"path_id": path_id, "adopted": True, "version": target.version},
+        message=f"已采纳学习路径 v{target.version}",
+    )
+
+
+@router.get(
+    "/paths/{path_id}/diff",
+    summary="计算路径版本差异",
+    description="返回指定路径相对其父版本（或指定 other_path_id）的任务级 diff，供前端高亮。",
+)
+async def get_path_diff(
+    path_id: str,
+    other_path_id: Optional[str] = Query(default=None, description="对比的目标版本 path_id，缺省为父版本"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """计算路径版本差异（P2 diff 高亮数据来源）"""
+    try:
+        pid = uuid.UUID(path_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的 path_id: {path_id}",
+        )
+
+    new_path = await session.get(LearningPath, pid)
+    if new_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="路径不存在")
+
+    old_path = None
+    if other_path_id:
+        try:
+            oid = uuid.UUID(other_path_id)
+            old_path = await session.get(LearningPath, oid)
+        except (ValueError, AttributeError):
+            pass
+    elif new_path.parent_path_id is not None:
+        old_path = await session.get(LearningPath, new_path.parent_path_id)
+
+    if old_path is None:
+        return ResponseBase(data=None, message="无对比基准版本（如首个版本）")
+
+    if str(new_path.student_id) != str(current_user.id) and current_user.role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权查看该路径差异",
+        )
+
+    return ResponseBase(data=_build_diff(old_path, new_path), message="版本差异计算完成")

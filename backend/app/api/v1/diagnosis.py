@@ -1,6 +1,7 @@
 """诊断 API — 认知诊断测验 提交 / 获取题目 / 历史查询"""
 
 import logging
+import random
 import uuid
 from typing import Optional
 
@@ -37,12 +38,17 @@ router = APIRouter()
     summary="获取诊断题目",
 )
 async def get_questions(
-    count: int = Query(default=15, ge=5, le=30, description="题目数量"),
+    count: int = Query(default=50, ge=1, le=200, description="抽取题目数量"),
     subject: str = Query(default="人工智能导论", description="学科"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取诊断题库, 优先从数据库读取, 降级到内置 Mock 数据"""
+    """获取诊断题库, 优先从数据库读取, 降级到内置 Mock 数据.
+
+    机制:
+      - 从题库中随机抽取 `count` 道题 (题目顺序随机)
+      - 每道题的选项顺序随机打乱 (选项 id 与 correct_option_id 保持不变, 判分不受影响)
+    """
     # 尝试从 DB 加载
     try:
         bank = await diagnosis_service.get_question_bank_from_db(db, subject=subject)
@@ -51,7 +57,19 @@ async def get_questions(
     except Exception:
         bank = diagnosis_service.get_question_bank()
 
-    questions = bank[:count]
+    # 随机抽取 count 道题 (题目顺序随机)
+    if count >= len(bank):
+        sampled = list(bank)
+    else:
+        sampled = random.sample(bank, count)
+
+    # 每道题选项顺序随机打乱 (保持 option.id 与 correct_option_id 不变, 判分安全)
+    for q in sampled:
+        options = q.get("options") or []
+        if options:
+            shuffled_options = options[:]
+            random.shuffle(shuffled_options)
+            q["options"] = shuffled_options
 
     question_schemas = [
         DiagnosisQuestion(
@@ -65,7 +83,7 @@ async def get_questions(
             correct_option_id=q["correct_option_id"],
             expected_time_sec=q["expected_time_sec"],
         )
-        for q in questions
+        for q in sampled
     ]
 
     return ResponseBase(

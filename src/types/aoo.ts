@@ -123,7 +123,10 @@ export interface AOOLearningPathResult {
 export interface AOOLearningPathResponse {
   taskId: string
   status: AOOOptimizationStatus
-  /** 进度百分比 [0, 100] */
+  /**
+   * 进度比例 [0, 1]（后端原始单位，非百分比）。
+   * 后端 aoo.py 返回 `progress / 100.0`，完成时为 1.0。
+   */
   progress: number
   /** 完成后返回路径 + 收敛数据 */
   result?: AOOLearningPathResult

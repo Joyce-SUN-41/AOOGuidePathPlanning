@@ -24,6 +24,14 @@ export const ragApi = {
     )
   },
 
+  /** 获取智能问答对话画像（仅来自对话梳理出的掌握特点）
+   *
+   * 后端端点: GET /api/v1/rag/chat-profile
+   */
+  getChatProfile(): Promise<ChatProfileData> {
+    return request.get<ChatProfileData>(`${BASE}/chat-profile`)
+  },
+
   /** 索引文档目录 */
   index(data: RAGIndexRequest): Promise<RAGIndexResponse> {
     return request.post<RAGIndexResponse>(
@@ -91,6 +99,7 @@ export function ragQueryStream(
           retrieval_count: 0,
           model: '',
           query_id: '',
+          diagnosis: undefined,
         }
         // 后端以 {"error": "..."} 帧上报错误，暂存后在 [DONE] 时统一抛出
         let streamError = ''
@@ -128,12 +137,17 @@ export function ragQueryStream(
                 full.retrieval_count = parsed.sources.length
                 continue
               }
+              // 诊断帧
+              if (parsed.diagnosis) {
+                full.diagnosis = parsed.diagnosis
+                continue
+              }
               // query_id 帧
               if (parsed.query_id) {
                 full.query_id = String(parsed.query_id)
                 continue
               }
-              // 增量内容帧（兼容旧的 {type:'chunk'} 形态）
+              // 增量内容帧
               const delta: string =
                 typeof parsed.content === 'string' ? parsed.content : ''
               if (delta) {
@@ -165,4 +179,55 @@ export function ragQueryStream(
       if (err.name === 'AbortError') return
       onError(err instanceof Error ? err : new Error(String(err)))
     })
+}
+
+// ── 自动优化（对话诊断 → AOO 路径规划） ──
+export interface AutoOptimizeParams {
+  mastery_estimates: Array<{ kp_name: string; level: number }>
+  cognitive_load: number
+  learning_intent: string
+  needs_optimization: boolean
+  /** 重规划后是否自动采纳新版本（默认 false，仅生成待采纳版本供用户一键采纳） */
+  auto_adopt?: boolean
+}
+
+export interface AutoOptimizeResult {
+  triggered: boolean
+  message: string
+  aoo_task_id?: string
+}
+
+/** 对话诊断 → AOO 自动路径优化 */
+export async function autoOptimize(
+  params: AutoOptimizeParams
+): Promise<AutoOptimizeResult> {
+  const response = await request.post<AutoOptimizeResult>(
+    `${BASE}/auto-optimize`,
+    params as unknown as Record<string, unknown>,
+    { timeout: 15000 }
+  )
+  return response
+}
+
+// ── 对话画像（仅来自智能问答梳理出的掌握特点） ──
+export interface ChatProfileItem {
+  kp_id: string
+  kp_name: string
+  /** 对话梳理出的掌握度 [0,1] */
+  level: number
+  /** 置信度 [0,1] */
+  confidence: number
+  /** 被对话修正的次数 */
+  n: number
+  /** 最近更新时间 ISO */
+  last_at: string | null
+  source: string
+}
+
+export interface ChatProfileData {
+  exists: boolean
+  chat_signal_count: number
+  last_chat_at: string | null
+  updated_at: string | null
+  items: ChatProfileItem[]
 }

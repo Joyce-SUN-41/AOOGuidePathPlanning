@@ -61,8 +61,11 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env.docker
+    environment:
+      # 开发环境显式开启调试与 API 文档（覆盖 .env.docker 的 DEBUG=false）
+      DEBUG: "true"
     working_dir: /app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000} --reload"
     ports:
       - "8000:8000"
     volumes:

@@ -112,5 +112,84 @@ export const pathApi = {
   /** 删除学习路径 */
   deletePath(pathId: string): Promise<void> {
     return request.delete<void>(`/learning-paths/${pathId}`)
+  },
+
+  // ── P2 重规划版本管理（后端 /aoo/*） ──
+
+  /** 查询待采纳的重规划版本（对话触发生成的新版本） */
+  getPendingPath(): Promise<PendingPath | null> {
+    return request
+      .get<PendingPath | null>('/aoo/pending-path')
+      .then((resp) => resp ?? null)
+  },
+
+  /** 一键采纳指定重规划版本 */
+  adoptPath(pathId: string): Promise<{ path_id: string; adopted: boolean; version: number }> {
+    return request.post<{ path_id: string; adopted: boolean; version: number }>(
+      `/aoo/paths/${pathId}/adopt`,
+      {} as Record<string, unknown>
+    )
+  },
+
+  /** 计算路径版本差异（相对父版本或指定版本） */
+  getPathDiff(pathId: string, otherPathId?: string): Promise<PathDiff | null> {
+    const qs = otherPathId ? `?other_path_id=${otherPathId}` : ''
+    return request
+      .get<PathDiff | null>(`/aoo/paths/${pathId}/diff${qs}`)
+      .then((resp) => resp ?? null)
+  },
+
+  /** 灵活重规划（基于任意历史诊断 / 诊断 + 当前对话画像融合）
+   *
+   * 后端端点: POST /api/v1/aoo/optimize-flexible
+   * @param diagnosisId 任意一次历史诊断 ID（基底）
+   * @param useChatProfile 是否叠加当前「智能问答对话画像」(mode='diagnosis+chat')
+   * @param studentId 教师端代操作时可传
+   */
+  optimizeFlexible(diagnosisId: string, useChatProfile: boolean = false, studentId?: string): Promise<GeneratePathResponse> {
+    const payload: Record<string, unknown> = {
+      diagnosis_id: diagnosisId,
+      mode: useChatProfile ? 'diagnosis+chat' : 'diagnosis',
+    }
+    if (studentId) payload['student_id'] = studentId
+    return request.post<GeneratePathResponse>('/aoo/optimize-flexible', payload)
   }
+}
+
+// ── P2 类型 ──
+export interface PathDiffTask {
+  kp_id: string
+  name: string
+  day?: number
+  type?: string
+  minutes?: number
+}
+
+export interface PathDiff {
+  old_version: number
+  new_version: number
+  old_path_id: string | null
+  new_path_id: string
+  added: PathDiffTask[]
+  removed: PathDiffTask[]
+  changed: Array<PathDiffTask & {
+    day?: { from: number; to: number }
+    type?: { from: string; to: string }
+    minutes?: { from: number; to: number }
+  }>
+  summary: string
+}
+
+export interface PendingPath {
+  path_id: string
+  version: number
+  parent_path_id: string | null
+  total_days: number
+  total_minutes: number
+  fitness_score: number | null
+  task_count: number
+  created_at: string | null
+  diff: PathDiff | null
+  explanation: string | null
+  best_path_preview: { total_days?: number; total_tasks?: number } | null
 }

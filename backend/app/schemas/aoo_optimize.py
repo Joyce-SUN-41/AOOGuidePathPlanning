@@ -94,6 +94,47 @@ class AOOOptimizeRequest(CamelModel):
         return v
 
 
+class OptimizeFlexibleRequest(CamelModel):
+    """POST /api/v1/aoo/optimize-flexible — 灵活重规划
+
+    两种重规划模式:
+      - mode="diagnosis":    仅基于指定的一次「学习诊断」重新规划 (最纯粹，不混入对话)
+      - mode="diagnosis+chat": 基于指定诊断 + 当前「智能问答对话画像」融合后重规划
+                               (融合逻辑复用 adapter.fuse_mastery: 诊断掌握度为基底,
+                                对话画像按 λ 加权叠加)
+
+    前端重规划选择器: 列出历史诊断(可任选其一) + 是否勾选「叠加对话分析」。
+    """
+
+    diagnosis_id: str = Field(
+        ...,
+        min_length=1,
+        description="用于重规划的诊断结果 ID (必填)，可选任意一次历史诊断",
+    )
+    mode: str = Field(
+        default="diagnosis",
+        pattern=r"^(diagnosis|diagnosis\+chat)$",
+        description="重规划模式: diagnosis=仅诊断; diagnosis+chat=诊断+对话画像融合",
+    )
+    use_chat_profile: Optional[bool] = Field(
+        default=None,
+        description="(废弃兼容字段) 是否叠加对话画像; 若提供则覆盖 mode 推断",
+    )
+    student_id: Optional[str] = Field(
+        default=None,
+        description="学生用户 ID (UUID)，省略时从诊断记录自动补全",
+    )
+    cognitive_load: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="综合认知负荷指数，省略时从诊断记录提取",
+    )
+    config: Optional[AOOOptimizeConfig] = Field(
+        default=None, description="可选的 AOO 超参数覆盖"
+    )
+
+
 # ============================================================
 # 收敛数据 (增量上报)
 # ============================================================

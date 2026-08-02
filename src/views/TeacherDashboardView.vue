@@ -1002,62 +1002,9 @@ function getFallbackTrend(): MasteryTrendPoint[] {
 }
 
 function getFallbackAlerts(): AlertStudent[] {
-  return [
-    {
-      studentId: '1',
-      name: 'zhangsan',
-      nickname: '张三',
-      avgMastery: 0.32,
-      cognitiveLoad: 0.82,
-      reason: 'both',
-      severity: 'danger'
-    },
-    {
-      studentId: '3',
-      name: 'wangwu',
-      nickname: '王五',
-      avgMastery: 0.41,
-      cognitiveLoad: 0.76,
-      reason: 'both',
-      severity: 'danger'
-    },
-    {
-      studentId: '9',
-      name: 'qianyue',
-      nickname: '钱月',
-      avgMastery: 0.55,
-      cognitiveLoad: 0.79,
-      reason: 'highLoad',
-      severity: 'warning'
-    },
-    {
-      studentId: '12',
-      name: 'huangshan',
-      nickname: '黄山',
-      avgMastery: 0.28,
-      cognitiveLoad: 0.45,
-      reason: 'lowMastery',
-      severity: 'warning'
-    },
-    {
-      studentId: '4',
-      name: 'zhaoliu',
-      nickname: '赵六',
-      avgMastery: 0.36,
-      cognitiveLoad: 0.71,
-      reason: 'both',
-      severity: 'danger'
-    },
-    {
-      studentId: '14',
-      name: 'maxue',
-      nickname: '马雪',
-      avgMastery: 0.35,
-      cognitiveLoad: 0.68,
-      reason: 'lowMastery',
-      severity: 'warning'
-    }
-  ]
+  // 接口失败时不再编造具体学生的"危险预警"（会造成真实教学干预误判），
+  // 直接返回空数组，由模板 <a-empty description="暂无预警，全班学情状态良好"> 兜底
+  return []
 }
 
 function getFallbackStudentDetail(student: StudentSummary): StudentDetail {

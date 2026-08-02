@@ -223,6 +223,59 @@ export const usePathStore = defineStore(
       }
     }
 
+    /**
+     * 灵活重规划（基于任意历史诊断 / 诊断 + 当前对话画像）
+     *
+     * @param diagnosisId 任意一次历史诊断 ID（基底）
+     * @param useChatProfile 是否叠加当前「智能问答对话画像」(mode='diagnosis+chat')
+     *
+     * 复用与 generatePath 相同的轮询闭环；不同点在于基底来源可在诊断与对话之间组合。
+     */
+    async function regeneratePathFlexible(
+      diagnosisId: string,
+      useChatProfile: boolean = false
+    ): Promise<boolean> {
+      if (isGenerating.value && optimizationStatus.value !== 'idle') {
+        message.warning('路径正在生成中，请耐心等待')
+        return false
+      }
+
+      isGenerating.value = true
+      optimizationStatus.value = 'pending'
+      generationProgress.value = 0
+      error.value = null
+      _generateStartedAt = Date.now()
+      trackEvent('path_regenerate_flexible', { diagnosisId, useChatProfile })
+
+      try {
+        const response = await pathApi.optimizeFlexible(diagnosisId, useChatProfile) as any
+
+        taskId.value = response.taskId || response.task_id || null
+        if (!taskId.value) {
+          throw new Error('后端未返回任务 ID')
+        }
+        optimizationStatus.value = 'queued'
+        generationProgress.value = 5
+        message.info(
+          useChatProfile
+            ? '已基于「诊断 + 对话分析」启动重规划'
+            : '已基于所选诊断启动重规划'
+        )
+
+        startPolling()
+        return true
+      } catch (e: any) {
+        isGenerating.value = false
+        optimizationStatus.value = 'failed'
+        error.value = '重规划启动失败，请稍后重试'
+        const detail =
+          e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message
+        console.error('[PathStore] 灵活重规划失败:', e)
+        message.error(detail ? `重规划失败：${detail}` : '重规划失败，请稍后重试')
+        return false
+      }
+    }
+
     /** 开始轮询 AOO 任务状态 */
     function startPolling(): void {
       stopPolling()
@@ -281,12 +334,22 @@ export const usePathStore = defineStore(
             stopPolling()
             break
 
-          case 'processing':
+          case 'processing': {
             optimizationStatus.value = 'processing'
-            generationProgress.value = Math.min(status.progress, 95)
+            // 后端 AOOTaskStatusResponse.progress 的单位是 0~1（不是百分比），
+            // 这里统一归一化为 0~100 的百分比再驱动进度条。
+            // 兼容性处理：若后端未来改回 0~100，>1 的值按百分比直接使用。
+            const raw = Number(status.progress) || 0
+            const percent = raw <= 1 ? raw * 100 : raw
+            // 进度条只增不减，避免因后端回退导致动画倒退
+            generationProgress.value = Math.max(
+              generationProgress.value,
+              Math.min(percent, 95)
+            )
             // 继续轮询
             _pollTimer = setTimeout(_poll, POLL_INTERVAL)
             break
+          }
 
           case 'pending':
           case 'queued':
@@ -621,6 +684,7 @@ export const usePathStore = defineStore(
       generationTime,
       // Actions
       generatePath,
+      regeneratePathFlexible,
       fetchCurrentPath,
       fetchPath,
       selectAlternativePath,

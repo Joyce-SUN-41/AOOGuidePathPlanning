@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       assetsDir: 'assets',
       sourcemap: false,
+      // 生产构建剔除调试语句（仅 console/debugger；业务提示走 antMessage 不受影响）
+      esbuild: {
+        drop: ['console', 'debugger'],
+      },
       chunkSizeWarningLimit: 1500,
       rollupOptions: {
         output: {

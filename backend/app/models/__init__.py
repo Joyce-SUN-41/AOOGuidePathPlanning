@@ -9,6 +9,10 @@ from app.models.chat_history import ChatHistory
 from app.models.aoo_optimization_log import AOOOptimizationLog
 from app.models.diagnosis import DiagnosisRecord
 from app.models.question import Question
+from app.models.cognitive_profile import (
+    StudentCognitiveProfile,
+    CognitiveProfileEvent,
+)
 
 __all__ = [
     "User",
@@ -22,4 +26,6 @@ __all__ = [
     "AOOOptimizationLog",
     "DiagnosisRecord",
     "Question",
+    "StudentCognitiveProfile",
+    "CognitiveProfileEvent",
 ]

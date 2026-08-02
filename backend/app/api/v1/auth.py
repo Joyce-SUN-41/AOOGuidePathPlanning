@@ -1,10 +1,10 @@
 """认证接口 — 登录 / 注册 / Token 刷新"""
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, login_rate_limit
 from app.core.database import get_db
 from app.core.security import (
     create_access_token,
@@ -16,7 +16,7 @@ from app.core.security import (
 from app.models.user import User
 from app.schemas.common import ResponseBase
 from app.schemas.token import AuthResponse, LoginRequest, Token, UserInfoResponse
-from app.schemas.user import UserCreate, UserOut
+from app.schemas.user import UserCreate, UserOut, UserUpdate
 
 router = APIRouter()
 
@@ -28,6 +28,8 @@ def _build_user_info(user: User) -> UserInfoResponse:
         username=user.username,
         nickname=user.nickname or user.username,
         email=user.email,
+        phone=getattr(user, "phone", "") or "",
+        avatar=getattr(user, "avatar", "") or "",
         role=user.role,
         status=1 if user.is_active else 0,
         createTime=user.created_at.isoformat() if user.created_at else "",
@@ -41,6 +43,7 @@ def _build_user_info(user: User) -> UserInfoResponse:
 )
 async def login(
     request: LoginRequest,
+    http_request: Request = Depends(login_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """使用用户名和密码登录，返回 access + refresh token 和用户信息"""
@@ -156,7 +159,24 @@ async def refresh_token(
     ))
 
 
-@router.get("/me", response_model=ResponseBase[UserOut], summary="获取当前用户信息")
+@router.get("/me", response_model=ResponseBase[UserInfoResponse], summary="获取当前用户信息")
 async def get_me(current_user: User = Depends(get_current_user)):
     """返回当前登录用户的详细信息"""
-    return ResponseBase(data=current_user)
+    return ResponseBase(data=_build_user_info(current_user))
+
+
+@router.put("/me", response_model=ResponseBase[UserInfoResponse], summary="更新当前用户资料")
+async def update_me(
+    body: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新当前登录用户的昵称/邮箱/手机号/头像"""
+    update_data = body.model_dump(exclude_unset=True, exclude={"username", "password", "role", "is_active"})
+    if not update_data:
+        raise HTTPException(status_code=400, detail="没有提供要更新的字段")
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+    await db.commit()
+    await db.refresh(current_user)
+    return ResponseBase(data=_build_user_info(current_user))

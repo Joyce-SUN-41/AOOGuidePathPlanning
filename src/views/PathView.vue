@@ -41,7 +41,13 @@ import {
   LeftOutlined,
   ExperimentOutlined,
   SettingOutlined,
-  AimOutlined
+  AimOutlined,
+  DiffOutlined,
+  CheckOutlined,
+  PlusCircleOutlined,
+  MinusCircleOutlined,
+  SwapOutlined,
+  BulbOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
@@ -108,6 +114,51 @@ const cognitiveLoadIndex = computed(() => {
   const avg = curve.reduce((s: number, v: number) => s + v, 0) / curve.length
   return Math.round((avg / 5) * 100)
 })
+
+// ============================================================
+//   P2 待采纳重规划版本（对话触发生成的新版本）
+// ============================================================
+const pendingPath = ref<import('@/api/modules/path').PendingPath | null>(null)
+const pendingLoading = ref(false)
+const adopting = ref(false)
+const diffVisible = ref(false)
+
+async function loadPendingPath() {
+  pendingLoading.value = true
+  try {
+    const p = await pathApi.getPendingPath()
+    pendingPath.value = p
+  } catch (e) {
+    pendingPath.value = null
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
+async function handleAdopt() {
+  if (!pendingPath.value) return
+  adopting.value = true
+  try {
+    await pathApi.adoptPath(pendingPath.value.path_id)
+    message.success(`已采纳学习路径 v${pendingPath.value.version}`)
+    pendingPath.value = null
+    // 刷新当前路径
+    await refreshPath()
+  } catch (e) {
+    message.error('采纳失败，请稍后重试')
+  } finally {
+    adopting.value = false
+  }
+}
+
+async function refreshPath() {
+  loading.value = true
+  try {
+    await pathStore.fetchCurrentPath()
+  } finally {
+    loading.value = false
+  }
+}
 
 /** 认知负荷等级 */
 const cognitiveLoadLevel = computed(() => {
@@ -476,6 +527,7 @@ async function handleRegenerate(diagnosisId?: string | number) {
 // ── 重新规划：选择诊断历史 ──
 const replanModalVisible = ref(false)
 const replanLoading = ref(false)
+const replanUseChat = ref(false)
 const replanHistory = ref<ReplanDiagItem[]>([])
 
 interface ReplanDiagItem {
@@ -504,7 +556,19 @@ async function openReplanModal() {
 
 function confirmReplan(item: ReplanDiagItem) {
   replanModalVisible.value = false
-  handleRegenerate(item.id)
+  // 若勾选「叠加对话分析」→ 诊断 + 对话画像融合重规划；否则纯诊断重规划
+  if (replanUseChat.value) {
+    regenerating.value = true
+    pathStore
+      .regeneratePathFlexible(String(item.id), true)
+      .then((ok) => {
+        if (ok) message.success('已基于「诊断 + 对话分析」启动重规划')
+      })
+      .catch(() => message.error('重规划启动失败，请稍后重试'))
+      .finally(() => (regenerating.value = false))
+  } else {
+    handleRegenerate(item.id)
+  }
 }
 
 function handleExport() {
@@ -576,6 +640,8 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // P2: 检查是否有对话触发生成的待采纳重规划版本
+  await loadPendingPath()
 })
 
 onUnmounted(() => {
@@ -607,6 +673,46 @@ onUnmounted(() => {
         </a-button>
         <a-button class="action-btn" type="primary" ghost @click="handleShare">
           <ShareAltOutlined /> 分享路径
+        </a-button>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         P2 待采纳重规划版本（对话触发生成，需用户一键采纳）
+         ========================================================= -->
+    <div
+      v-if="pendingPath && !isGenerating"
+      class="pending-banner"
+    >
+      <div class="pending-icon"><ExperimentOutlined /></div>
+      <div class="pending-body">
+        <div class="pending-title">
+          检测到新版本学习路径 v{{ pendingPath.version }}
+          <a-tag color="gold" class="pending-tag">待采纳</a-tag>
+        </div>
+        <div class="pending-desc">
+          {{ pendingPath.diff?.summary || '对话触发了路径重规划，点击查看变更详情' }}
+          <span class="pending-meta">
+            · {{ pendingPath.total_days }} 天 · {{ pendingPath.task_count }} 个任务
+            · 适应度 {{ (pendingPath.fitness_score ?? 0).toFixed(2) }}
+          </span>
+        </div>
+        <div v-if="pendingPath.explanation" class="pending-explanation">
+          <BulbOutlined class="explain-icon" />
+          <span>{{ pendingPath.explanation }}</span>
+        </div>
+      </div>
+      <div class="pending-actions">
+        <a-button size="small" @click="diffVisible = true">
+          <DiffOutlined /> 查看变更
+        </a-button>
+        <a-button
+          type="primary"
+          size="small"
+          :loading="adopting"
+          @click="handleAdopt"
+        >
+          <CheckOutlined /> 一键采纳
         </a-button>
       </div>
     </div>
@@ -1070,6 +1176,15 @@ onUnmounted(() => {
       <p class="replan-tip">
         请选择本次重新规划所依据的一次认知诊断结果，系统将根据该次诊断的薄弱知识点与掌握度重新优化路径。
       </p>
+      <div class="replan-chat-switch">
+        <a-switch v-model:checked="replanUseChat" :disabled="replanLoading" />
+        <div class="rcs-text">
+          <span class="rcs-title">叠加「智能问答对话分析」</span>
+          <span class="rcs-desc">
+            将所选诊断作为基底，并融合「对话画像」中梳理出的掌握特点（按动态权重 λ 叠加），生成更贴合近期对话情况的路径。
+          </span>
+        </div>
+      </div>
       <div v-if="replanLoading" class="replan-loading">
         <a-spin tip="正在加载诊断历史..." />
       </div>
@@ -1106,6 +1221,85 @@ onUnmounted(() => {
           </a-list-item>
         </template>
       </a-list>
+    </a-modal>
+
+    <!-- =========================================================
+         P2 待采纳版本：变更详情（diff 高亮）
+         ========================================================= -->
+    <a-modal
+      v-model:visible="diffVisible"
+      title="路径变更详情"
+      :footer="null"
+      width="680px"
+      class="path-diff-modal"
+    >
+      <template v-if="pendingPath?.diff">
+        <a-alert
+          :message="pendingPath.diff.summary"
+          type="info"
+          show-icon
+          class="diff-summary"
+        />
+        <div v-if="pendingPath.explanation" class="diff-explain">
+          <div class="diff-explain-title">
+            <BulbOutlined /> 为什么路径变了？
+          </div>
+          <p class="diff-explain-body">{{ pendingPath.explanation }}</p>
+        </div>
+        <div class="diff-section" v-if="pendingPath.diff.added.length">
+          <div class="diff-section-title diff-added-title">
+            <PlusCircleOutlined /> 新增 {{ pendingPath.diff.added.length }} 个
+          </div>
+          <div
+            v-for="t in pendingPath.diff.added"
+            class="diff-row diff-row--added"
+          >
+            <span class="diff-kp">{{ t.name || t.kp_id }}</span>
+            <span class="diff-meta">第 {{ t.day }} 天 · {{ t.type }}</span>
+          </div>
+        </div>
+        <div class="diff-section" v-if="pendingPath.diff.removed.length">
+          <div class="diff-section-title diff-removed-title">
+            <MinusCircleOutlined /> 移除 {{ pendingPath.diff.removed.length }} 个
+          </div>
+          <div
+            v-for="t in pendingPath.diff.removed"
+            class="diff-row diff-row--removed"
+          >
+            <span class="diff-kp">{{ t.name || t.kp_id }}</span>
+            <span class="diff-meta">原第 {{ t.day }} 天</span>
+          </div>
+        </div>
+        <div class="diff-section" v-if="pendingPath.diff.changed.length">
+          <div class="diff-section-title diff-changed-title">
+            <SwapOutlined /> 调整 {{ pendingPath.diff.changed.length }} 个
+          </div>
+          <div
+            v-for="t in pendingPath.diff.changed"
+            class="diff-row diff-row--changed"
+          >
+            <span class="diff-kp">{{ t.name || t.kp_id }}</span>
+            <span class="diff-meta">
+              <template v-if="t.day">
+                第 {{ t.day.from }} 天 → 第 {{ t.day.to }} 天
+              </template>
+              <template v-if="t.type">
+                · 类型 {{ t.type.from }} → {{ t.type.to }}
+              </template>
+            </span>
+          </div>
+        </div>
+      </template>
+      <a-empty v-else description="无对比基准（如首个版本）" />
+      <div class="diff-footer">
+        <a-button
+          type="primary"
+          :loading="adopting"
+          @click="handleAdopt"
+        >
+          <CheckOutlined /> 一键采纳此版本
+        </a-button>
+      </div>
     </a-modal>
   </div>
 </template>
@@ -2015,6 +2209,182 @@ onUnmounted(() => {
     min-height: 220px;
   }
 }
+
+// ============================================================
+//   P2 待采纳重规划版本横幅
+// ============================================================
+.pending-banner {
+  display: flex;
+  align-items: center;
+  gap: @spacing-md;
+  margin-bottom: @spacing-lg;
+  padding: @spacing-md @spacing-lg;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(212, 163, 115, 0.12), rgba(74, 108, 247, 0.08));
+  border: 1px solid rgba(212, 163, 115, 0.35);
+
+  .pending-icon {
+    font-size: 22px;
+    color: @brand-oat-300;
+    flex-shrink: 0;
+  }
+
+  .pending-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pending-title {
+    font-size: @font-size-base;
+    font-weight: 600;
+    color: @gray-50;
+    display: flex;
+    align-items: center;
+    gap: @spacing-xs;
+
+    .pending-tag {
+      margin: 0;
+    }
+  }
+
+  .pending-desc {
+    font-size: 12.5px;
+    color: @gray-300;
+    margin-top: 2px;
+
+    .pending-meta {
+      color: @gray-400;
+      margin-left: 4px;
+    }
+  }
+
+  .pending-explanation {
+    margin-top: @spacing-xs;
+    font-size: 12px;
+    line-height: 1.6;
+    color: @gray-200;
+    background: rgba(74, 108, 247, 0.10);
+    border-left: 2px solid @brand-blue-400;
+    border-radius: 4px;
+    padding: 6px 10px;
+    display: flex;
+    gap: 6px;
+
+    .explain-icon {
+      color: @brand-blue-400;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+  }
+
+  .pending-actions {
+    display: flex;
+    gap: @spacing-sm;
+    flex-shrink: 0;
+  }
+}
+
+// ============================================================
+//   P2 路径变更详情（diff 高亮）
+// ============================================================
+.path-diff-modal {
+  .diff-summary {
+    margin-bottom: @spacing-md;
+  }
+
+  .diff-explain {
+    margin-bottom: @spacing-md;
+    padding: @spacing-md;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(74, 108, 247, 0.12), rgba(0, 212, 255, 0.06));
+    border: 1px solid rgba(74, 108, 247, 0.3);
+
+    .diff-explain-title {
+      font-size: @font-size-sm;
+      font-weight: 600;
+      color: @brand-blue-400;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .diff-explain-body {
+      margin: 0;
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: @gray-200;
+      white-space: pre-wrap;
+    }
+  }
+
+  .diff-section {
+    margin-bottom: @spacing-md;
+
+    .diff-section-title {
+      font-size: @font-size-sm;
+      font-weight: 600;
+      margin-bottom: @spacing-xs;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diff-added-title {
+      color: #4ade80;
+    }
+
+    .diff-removed-title {
+      color: #f87171;
+    }
+
+    .diff-changed-title {
+      color: @brand-oat-300;
+    }
+
+    .diff-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      font-size: 12.5px;
+
+      .diff-kp {
+        color: @gray-50;
+        font-weight: 500;
+      }
+
+      .diff-meta {
+        color: @gray-300;
+        font-size: 12px;
+      }
+    }
+
+    .diff-row--added {
+      background: rgba(74, 222, 128, 0.10);
+      border-left: 3px solid #4ade80;
+    }
+
+    .diff-row--removed {
+      background: rgba(248, 113, 113, 0.10);
+      border-left: 3px solid #f87171;
+      text-decoration: line-through;
+      opacity: 0.8;
+    }
+
+    .diff-row--changed {
+      background: rgba(212, 163, 115, 0.10);
+      border-left: 3px solid @brand-oat-300;
+    }
+  }
+
+  .diff-footer {
+    text-align: right;
+    margin-top: @spacing-md;
+  }
+}
 </style>
 
 <!-- 重新规划对话框（a-modal teleport 到 body，需非 scoped 样式） -->
@@ -2045,6 +2415,32 @@ onUnmounted(() => {
   font-size: 13px;
   line-height: 1.6;
   margin: 0 0 16px;
+}
+.replan-chat-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: rgba(74, 108, 247, 0.08);
+  border: 1px solid rgba(74, 108, 247, 0.25);
+  border-radius: 10px;
+
+  .rcs-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rcs-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+  }
+  .rcs-desc {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.55;
+  }
 }
 .replan-loading {
   display: flex;

@@ -39,6 +39,8 @@ class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=3, max_length=50)
     nickname: Optional[str] = Field(None, max_length=50)
     email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=20)
+    avatar: Optional[str] = None
     password: Optional[str] = Field(None, min_length=8, max_length=128)
     role: Optional[str] = None
     is_active: Optional[bool] = None
@@ -52,6 +54,8 @@ class UserOut(BaseModel):
     username: str
     nickname: Optional[str] = None
     email: Optional[str] = None
+    phone: Optional[str] = None
+    avatar: Optional[str] = None
     role: str = "student"
     is_active: bool
     is_superuser: bool

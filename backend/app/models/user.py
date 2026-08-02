@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,11 @@ if TYPE_CHECKING:
     from app.models.chat_history import ChatHistory
     from app.models.aoo_optimization_log import AOOOptimizationLog
     from app.models.diagnosis import DiagnosisRecord
+    from app.models.cognitive_profile import (
+        StudentCognitiveProfile,
+        CognitiveProfileEvent,
+        ChatMasteryProfile,
+    )
 
 
 class User(Base):
@@ -61,6 +66,12 @@ class User(Base):
         onupdate=func.now(),
         comment="更新时间",
     )
+    avatar: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, default=None, comment="头像 (Base64 data URL)"
+    )
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, default=None, comment="手机号"
+    )
 
     # ---- 关系 ----
     student_knowledge: Mapped[List["StudentKnowledge"]] = relationship(
@@ -80,6 +91,15 @@ class User(Base):
     )
     diagnosis_records: Mapped[List["DiagnosisRecord"]] = relationship(
         back_populates="student", cascade="all, delete-orphan"
+    )
+    cognitive_profiles: Mapped[List["StudentCognitiveProfile"]] = relationship(
+        back_populates="student", cascade="all, delete-orphan"
+    )
+    cognitive_profile_events: Mapped[List["CognitiveProfileEvent"]] = relationship(
+        back_populates="student", cascade="all, delete-orphan"
+    )
+    chat_mastery_profile: Mapped[Optional["ChatMasteryProfile"]] = relationship(
+        back_populates="student", cascade="all, delete-orphan", uselist=False
     )
 
     def __repr__(self) -> str:

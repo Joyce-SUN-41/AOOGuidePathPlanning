@@ -309,9 +309,10 @@ async function loadQuestions() {
   try {
     const data = await diagnosisApi.getQuestions()
     // API 返回 QuestionsResponse { questions: [...], total, subject, estimated_duration_min }
+    // 后端已负责: 从题库随机抽取题目 + 每题选项顺序随机打乱, 前端直接使用完整结果
     const qList = data.questions
     if (Array.isArray(qList) && qList.length >= 10) {
-      questions.value = shuffleArray(qList).slice(0, 15)
+      questions.value = qList
     } else {
       throw new Error('题库不足')
     }
@@ -475,7 +476,8 @@ function computeMockResult(): DiagnosisResult {
       knowledgePoint: KP_MAP[topic] || topic,
       mastery,
       level,
-      confidence: 0.7 + Math.random() * 0.25
+      // 置信度基于客观答题统计推导，不随机生成；样本越多置信度越高（确定性）
+      confidence: Math.min(0.95, 0.6 + Math.min(stats.total, 20) * 0.02)
     })
 
     if (level === 'weak' || level === 'developing') {
@@ -846,7 +848,7 @@ watch(pageMode, (mode) => {
 <template>
   <div class="diagnose-page">
     <!-- ═══════ 认知神经网络动态背景（全诊断页常驻，更炫酷精致） ═══════ -->
-    <CognitiveAuraBackground :density="38" :opacity="0.85" />
+    <CognitiveAuraBackground :density="40" :opacity="0.92" />
 
     <!-- ═══════ 加载态 ═══════ -->
     <div v-if="pageMode === 'loading'" class="diagnose-loading">

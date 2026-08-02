@@ -75,6 +75,8 @@ export interface RegisterParams {
 export interface LoginResult {
   token: string
   userInfo: UserInfo
+  /** 刷新令牌 (后端 AuthResponse.refreshToken)，用于 access token 过期时静默续期 */
+  refreshToken?: string
 }
 
 // ============= 路由相关 =============
@@ -293,7 +295,12 @@ export interface GeneratePathResponse {
 export interface TaskStatusResponse {
   taskId: string
   status: TaskStatus
-  progress: number // 0-100
+  /**
+   * 任务进度。
+   * 注意：后端 AOOTaskStatusResponse.progress 的实际单位是 **0~1**（小数比例），
+   * 不是 0~100 的百分比。消费方需自行乘 100 转换，参见 stores/path.ts 的 _poll()。
+   */
+  progress: number // 0-1（后端原始单位）
   /**
    * 优化完成后的完整结果。
    * 后端字段名为 convergenceData / alternativePaths（camelCase），

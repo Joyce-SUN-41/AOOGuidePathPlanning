@@ -36,7 +36,9 @@ interface InterpolatedFrame {
   phaseRatio: number
   phase: SeedPhase
   positions: [number, number][]
+  fitnessValues: number[]
   bestIndex: number
+  bestFitness: number
   diversity: number
 }
 
@@ -275,6 +277,53 @@ function getTrailSize(age: number): number {
 }
 
 // ═══════════════════════════════════════════
+// Fitness Landscape Utilities
+// ═══════════════════════════════════════════
+
+/**
+ * IDW (Inverse Distance Weighting) 插值
+ * 从散落粒子的适应度值估算搜索空间中任意点的适应度，用于生成适应度热力图 / 3D 地形
+ */
+function idwInterpolate(
+  x: number,
+  y: number,
+  positions: [number, number][],
+  fitnessValues: number[],
+  power: number = 2.5
+): number {
+  let weightedSum = 0
+  let weightTotal = 0
+  for (let i = 0; i < positions.length; i++) {
+    const [px, py] = positions[i]!
+    const dx = x - px
+    const dy = y - py
+    const dist2 = dx * dx + dy * dy + 1e-6
+    const w = 1 / Math.pow(dist2, power / 2)
+    weightedSum += w * (fitnessValues[i] ?? 0)
+    weightTotal += w
+  }
+  return weightTotal > 0 ? weightedSum / weightTotal : 0
+}
+
+/** 构建适应度采样网格（供 2D 热力图 / 3D 地形使用） */
+function buildFitnessGrid(
+  positions: [number, number][],
+  fitnessValues: number[],
+  gridRes: number
+): [number, number, number][] {
+  const data: [number, number, number][] = []
+  const step = 1 / (gridRes - 1)
+  for (let row = 0; row < gridRes; row++) {
+    for (let col = 0; col < gridRes; col++) {
+      const x = col * step
+      const y = row * step
+      data.push([x, y, idwInterpolate(x, y, positions, fitnessValues)])
+    }
+  }
+  return data
+}
+
+// ═══════════════════════════════════════════
 // Simple PRNG (deterministic for consistent replay)
 // ═══════════════════════════════════════════
 
@@ -306,13 +355,16 @@ function precomputeFrames(): InterpolatedFrame[] {
     // 只有 1 个快照时，生成单帧
     if (snapshots && snapshots.length === 1) {
       const s = snapshots[0]!
+      const fvs = s.fitnessValues
       return [
         {
           iteration: iterations[0] ?? 1,
           phaseRatio: 0,
           phase: 'exploration',
           positions: s.positionsX.map((x, j) => [x, s.positionsY[j]!] as [number, number]),
+          fitnessValues: fvs,
           bestIndex: s.bestIndex,
+          bestFitness: fvs[s.bestIndex] ?? 0,
           diversity: diversityArr[0] ?? 1
         }
       ]
@@ -402,18 +454,39 @@ function precomputeFrames(): InterpolatedFrame[] {
         positions.push([Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))])
       }
 
-      result.push({ iteration: iter, phaseRatio, phase, positions, bestIndex: bestIdx, diversity })
+      // 线性插值适应度
+      const fitnessValues: number[] = []
+      for (let j = 0; j < N; j++) {
+        fitnessValues.push(
+          (s0.fitnessValues[j] ?? 0) + ((s1.fitnessValues[j] ?? 0) - (s0.fitnessValues[j] ?? 0)) * alpha
+        )
+      }
+      const bestFitness = fitnessValues[bestIdx] ?? 0
+
+      result.push({
+        iteration: iter,
+        phaseRatio,
+        phase,
+        positions,
+        fitnessValues,
+        bestIndex: bestIdx,
+        bestFitness,
+        diversity
+      })
     }
   }
 
   // 追加最后一帧（准确快照位置）
   const last = snapshots[snapshots.length - 1]!
+  const lastFvs = last.fitnessValues
   result.push({
     iteration: totalIter,
     phaseRatio: 1,
     phase: 'ejection',
     positions: last.positionsX.map((x, j) => [x, last.positionsY[j]!] as [number, number]),
+    fitnessValues: lastFvs,
     bestIndex: last.bestIndex,
+    bestFitness: lastFvs[last.bestIndex] ?? 0,
     diversity: diversityArr[snapshots.length - 1] ?? 0
   })
 
@@ -476,36 +549,149 @@ function render2DFrame(frame: InterpolatedFrame): void {
 
   const idx = frameIndex.value
   const maxAge = MAX_TRAIL_AGE.value
+  const { positions, fitnessValues, bestIndex, phaseRatio } = frame
 
-  // ── 构建拖尾数据 ──
+  // ── 防御：适应度数据不存在则直接不渲染 ──
+  if (!fitnessValues || fitnessValues.length === 0) return
+
+  // ── 适应度归一化 ──
+  const fitMin = Math.min(...fitnessValues)
+  const fitMax = Math.max(...fitnessValues)
+  const fitRange = fitMax - fitMin || 1
+  const normFit = (f: number) => (f - fitMin) / fitRange
+
+  // ══════ 0. 适应度密度场 (Fitness Landscape) ══════
+  // 用 scatter rect 网格近似热力图，避免 heatmap + visualMap 在 cartesian2d value 轴下的静默失败
+  const gridRes = 18
+  const gridStep = 1 / (gridRes - 1)
+  const landscapeData: {
+    value: [number, number]
+    symbolSize: number
+    symbol: string
+    itemStyle: { color: string; borderWidth: number; opacity: number }
+  }[] = []
+  // 适应度 → 颜色映射（从深色底透明到燕麦金）
+  const fitColor = (n: number) => {
+    if (n < 0.2) return `rgba(0,212,255,${(n * 0.2).toFixed(2)})`
+    if (n < 0.5) return `rgba(74,108,247,${(0.04 + n * 0.3).toFixed(2)})`
+    if (n < 0.75) return `rgba(110,130,247,${(0.12 + n * 0.3).toFixed(2)})`
+    return `rgba(212,163,115,${(0.15 + n * 0.25).toFixed(2)})`
+  }
+  for (let row = 0; row < gridRes; row++) {
+    for (let col = 0; col < gridRes; col++) {
+      const x = col * gridStep
+      const y = row * gridStep
+      const fitVal = idwInterpolate(x, y, positions, fitnessValues)
+      const n = normFit(fitVal)
+      landscapeData.push({
+        value: [x, y],
+        symbolSize: Math.max(2, 4 + n * 6),
+        symbol: 'rect',
+        itemStyle: {
+          color: fitColor(n),
+          borderWidth: 0,
+          opacity: 0.55 + n * 0.4
+        }
+      })
+    }
+  }
+
+  // ══════ 1. 拖尾轨迹 (Comet Trails) ══════
   const trailScatterData: {
     value: [number, number]
     symbolSize: number
-    itemStyle: { color: string; opacity: number }
+    itemStyle: { color: string; borderColor: string; borderWidth: number; opacity: number; shadowBlur: number; shadowColor: string }
   }[] = []
 
   const trailStart = Math.max(0, idx - maxAge)
   for (let t = trailStart; t < idx; t++) {
     const buf = trailBuffer[t]
     if (!buf) continue
-    // age 相对当前帧现算，保证回退/拖拽后拖尾始终正确
     const age = idx - t
     if (age <= 0 || age > maxAge) continue
     const size = getTrailSize(age)
     const opacity = getTrailOpacity(age)
     for (const entry of buf) {
+      const c = getPhaseColor(entry.phaseRatio)
       trailScatterData.push({
         value: [entry.x, entry.y],
         symbolSize: size,
         itemStyle: {
-          color: getPhaseColor(entry.phaseRatio),
-          opacity
+          color: c,
+          borderColor: c,
+          borderWidth: 0,
+          opacity,
+          shadowBlur: size * 0.6,
+          shadowColor: c
         }
       })
     }
   }
 
-  // ── 当前帧粒子数据 ──
+  // ══════ 2. 最优个体历史轨迹 ══════
+  const bestTrajectoryData: [number, number][] = []
+  const traceExtent = maxAge * 6
+  const traceStart = Math.max(0, idx - traceExtent)
+  for (let t = traceStart; t <= idx; t++) {
+    if (t < frames.length && trailBuffer[t] && frames[t]) {
+      const entry = trailBuffer[t]![frames[t]!.bestIndex]
+      if (entry) bestTrajectoryData.push([entry.x, entry.y])
+    }
+  }
+
+  // ══════ 3. 最优路径里程碑节点 ══════
+  const bestNodesData: any[] = []
+  if (bestTrajectoryData.length >= 4) {
+    const interval = Math.max(1, Math.floor(bestTrajectoryData.length / 6))
+    for (let i = 0; i < bestTrajectoryData.length; i += interval) {
+      bestNodesData.push({
+        value: bestTrajectoryData[i],
+        symbolSize: 6,
+        symbol: 'diamond',
+        itemStyle: {
+          color: '#FFFFFF',
+          borderColor: '#D4A373',
+          borderWidth: 1.8,
+          shadowBlur: 8,
+          shadowColor: 'rgba(212,163,115,0.7)'
+        }
+      })
+    }
+    // 再加当前终点
+    const last = bestTrajectoryData[bestTrajectoryData.length - 1]
+    if (last) {
+      bestNodesData.push({
+        value: last,
+        symbolSize: 9,
+        symbol: 'diamond',
+        itemStyle: {
+          color: '#FFFFFF',
+          borderColor: '#D4A373',
+          borderWidth: 2,
+          shadowBlur: 14,
+          shadowColor: 'rgba(212,163,115,0.9)'
+        }
+      })
+    }
+  }
+
+  // ══════ 4. 收敛区域环 ══════
+  const convRadius = 0.48 * Math.pow(1 - phaseRatio, 2.2) + 0.03
+  const convRingData: [number, number][] = []
+  if (convRadius > 0.015 && bestTrajectoryData.length > 0) {
+    const lastTrace = bestTrajectoryData[bestTrajectoryData.length - 1]!
+    const cx = lastTrace[0]!, cy = lastTrace[1]!
+    const ringPoints = 48
+    for (let i = 0; i <= ringPoints; i++) {
+      const angle = (i / ringPoints) * Math.PI * 2
+      convRingData.push([
+        cx + Math.cos(angle) * convRadius,
+        cy + Math.sin(angle) * convRadius * 0.75
+      ])
+    }
+  }
+
+  // ══════ 5. 当前种群粒子 (按适应度缩放) ══════
   const currentScatterData: {
     value: [number, number]
     symbolSize: number
@@ -515,132 +701,197 @@ function render2DFrame(frame: InterpolatedFrame): void {
       borderWidth: number
       shadowBlur: number
       shadowColor: string
+      opacity: number
     }
   }[] = []
 
-  for (let j = 0; j < frame.positions.length; j++) {
-    const [x, y] = frame.positions[j]!
-    const isBest = j === frame.bestIndex
-    const color = getPhaseColor(frame.phaseRatio)
+  for (let j = 0; j < positions.length; j++) {
+    const [x, y] = positions[j]!
+    const isBest = j === bestIndex
+    const fit = fitnessValues[j] ?? fitMin
+    const nFit = normFit(fit)
+    const color = getPhaseColor(phaseRatio)
+
+    // 粒子大小随适应度 6–20，最优个体固定 20
+    const baseSize = isBest ? 20 : 6 + nFit * 14
+
     currentScatterData.push({
       value: [x, y],
-      symbolSize: isBest ? 16 : 9,
+      symbolSize: baseSize,
       itemStyle: {
         color: isBest ? '#FFFFFF' : color,
-        // 深色底上给普通粒子描一圈更亮的同色边，提升小点的辨识度
-        borderColor: color,
-        borderWidth: isBest ? 3 : 1.2,
-        shadowBlur: isBest ? 16 : 6,
-        shadowColor: color
+        borderColor: isBest ? '#D4A373' : color,
+        borderWidth: isBest ? 2.5 : 0.8,
+        shadowBlur: isBest ? 22 : 3 + nFit * 16,
+        shadowColor: isBest ? 'rgba(212,163,115,0.9)' : color,
+        opacity: isBest ? 1 : 0.88
       }
     })
   }
 
-  // ── 最优个体历史轨迹（折线） ──
-  const bestTrajectoryData: [number, number][] = []
-  const traceStart = Math.max(0, idx - maxAge * 3)
-  for (let t = traceStart; t <= idx; t++) {
-    if (t < frames.length && trailBuffer[t] && frames[t]) {
-      const entry = trailBuffer[t]![frames[t]!.bestIndex]
-      if (entry) {
-        bestTrajectoryData.push([entry.x, entry.y])
-      }
-    }
-  }
+  // ══════ 6. 最优个体脉冲标记 ══════
+  const bestPos = positions[bestIndex] ?? [0.5, 0.5]
 
+  // ── 组装 ECharts option ──
   const option: EChartsOption = {
-    animation: false, // 逐帧渲染，无需入场动画
-
+    animation: false,
     backgroundColor: 'transparent',
 
     tooltip: {
       trigger: 'item' as const,
-      backgroundColor: 'rgba(20, 27, 43, 0.95)',
-      borderColor: 'rgba(148, 163, 184, 0.25)',
-      textStyle: { color: '#E2E8F0', fontSize: 12 },
+      backgroundColor: 'rgba(15, 22, 35, 0.96)',
+      borderColor: 'rgba(212, 163, 115, 0.3)',
+      borderWidth: 1,
+      textStyle: { color: '#E2E8F0', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" },
       formatter: (params: any) => {
         if (!params.value || params.value.length < 2) return ''
         const [x, y] = params.value
-        return `${params.seriesName}<br/>X: ${x.toFixed(3)}<br/>Y: ${y.toFixed(3)}`
+        const fitStr = params.value[2] !== undefined && params.seriesIndex === 0
+          ? `<br/>适应度: ${(params.value[2] as number).toFixed(4)}`
+          : ''
+        const nameStr = params.seriesName || ''
+        return `<span style="color:#D4A373;font-weight:600">${nameStr}</span><br/>X: ${x.toFixed(3)} &nbsp; Y: ${y.toFixed(3)}${fitStr}`
       }
     } as any,
 
     grid: {
-      top: 16,
-      right: 20,
-      bottom: 16,
-      left: 20,
+      top: 14, right: 18, bottom: 14, left: 18,
       containLabel: false
     },
 
     xAxis: {
       type: 'value' as const,
-      min: -0.05,
-      max: 1.05,
+      min: -0.04, max: 1.04,
       show: true,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#94A3B8', fontSize: 10 },
+      axisLabel: { color: '#64748B', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" },
       splitLine: {
         show: true,
-        lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' as const }
+        lineStyle: { color: 'rgba(255,255,255,0.06)', type: 'dashed' as const }
       }
     },
 
     yAxis: {
       type: 'value' as const,
-      min: -0.05,
-      max: 1.05,
+      min: -0.04, max: 1.04,
       show: true,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#94A3B8', fontSize: 10 },
+      axisLabel: { color: '#64748B', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" },
       splitLine: {
         show: true,
-        lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed' as const }
+        lineStyle: { color: 'rgba(255,255,255,0.06)', type: 'dashed' as const }
       }
     },
 
     series: [
-      // ① 拖尾轨迹
+      // L0 — 适应度密度场（底层地形，scatter rect 模拟热力图）
+      {
+        name: '适应度地形',
+        type: 'scatter' as const,
+        data: landscapeData as any,
+        emphasis: { disabled: true },
+        silent: true,
+        zlevel: 0
+      } as ScatterSeriesOption,
+      // L1 — 收敛区域椭圆环
+      {
+        name: '收敛区域',
+        type: 'line',
+        data: convRingData,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: {
+          color: 'rgba(212, 163, 115, 0.28)',
+          width: 1.2,
+          type: 'dashed'
+        },
+        silent: true,
+        zlevel: 0
+      },
+      // L2 — 最优轨迹辉光（宽 + 透明）
+      {
+        name: '最优轨迹辉光',
+        type: 'line',
+        data: bestTrajectoryData,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: {
+          color: 'rgba(212, 163, 115, 0.30)',
+          width: 9,
+          shadowBlur: 20,
+          shadowColor: 'rgba(212, 163, 115, 0.40)'
+        },
+        silent: true,
+        zlevel: 1
+      },
+      // L3 — 最优轨迹主线（细 + 亮）
+      {
+        name: '最优轨迹',
+        type: 'line',
+        data: bestTrajectoryData,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: {
+          color: '#D4A373',
+          width: 2,
+          shadowBlur: 8,
+          shadowColor: 'rgba(212, 163, 115, 0.75)'
+        },
+        zlevel: 2
+      },
+      // L4 — 最优路径关键节点（菱形标记）
+      {
+        name: '路径节点',
+        type: 'scatter' as const,
+        data: bestNodesData,
+        emphasis: { scale: 1.3 },
+        silent: true,
+        zlevel: 3
+      } as ScatterSeriesOption,
+      // L5 — 粒子拖尾云
       {
         name: '粒子轨迹',
         type: 'scatter' as const,
         data: trailScatterData as any,
-        emphasis: { scale: 1.3 },
-        zlevel: 0
+        emphasis: { scale: 1.2 },
+        silent: true,
+        zlevel: 4
       } as ScatterSeriesOption,
-      // ② 最优个体历史轨迹线
-      {
-        name: '最优轨迹',
-        type: 'line' as const,
-        data: bestTrajectoryData,
-        smooth: true,
-        symbol: 'none',
-        // 最优轨迹用燕麦金实线，与彩色粒子云区分开，
-        // 深色底上辅以同色辉光，路径走向一目了然
-        lineStyle: {
-          color: '#D4A373',
-          width: 2.5,
-          shadowBlur: 10,
-          shadowColor: 'rgba(212, 163, 115, 0.55)'
-        },
-        zlevel: 1
-      },
-      // ③ 当前种群粒子
+      // L6 — 当前种群粒子
       {
         name: '种群粒子',
         type: 'scatter' as const,
         data: currentScatterData as any,
-        emphasis: { scale: 1.5 },
-        zlevel: 3
-      } as ScatterSeriesOption
+        emphasis: { scale: 1.45 },
+        zlevel: 5
+      } as ScatterSeriesOption,
+      // L7 — 最优个体脉冲标记 (effectScatter)
+      {
+        name: '最优个体',
+        type: 'effectScatter' as const,
+        data: [{ value: bestPos }],
+        symbolSize: 24,
+        showEffectOn: 'render',
+        rippleEffect: {
+          brushType: 'stroke' as const,
+          scale: 4.5,
+          period: 3.2,
+          color: '#D4A373'
+        },
+        itemStyle: {
+          color: '#FFFFFF',
+          shadowBlur: 22,
+          shadowColor: 'rgba(212, 163, 115, 0.9)',
+          borderColor: '#D4A373',
+          borderWidth: 2.5
+        },
+        zlevel: 6
+      } as any
     ] as EChartsOption['series']
   }
 
-  // 关键：不能用 notMerge:true。
-  // 每帧整体替换 option 会让 ECharts 销毁并重建全部 series/坐标系，
-  // 高频调用时产生肉眼可见的闪烁。合并更新只做增量 diff，稳定得多。
   chart2D.setOption(option, { notMerge: false, lazyUpdate: false, silent: true })
 }
 
@@ -673,17 +924,53 @@ async function init3DChart(): Promise<boolean> {
 function render3DFrame(frame: InterpolatedFrame): void {
   if (!chart3D || !echartsGL3DLoaded) return
 
-  const data: [number, number, number][] = []
-  const colorList: string[] = []
+  const { positions, fitnessValues, bestIndex, phaseRatio } = frame
 
-  for (let j = 0; j < frame.positions.length; j++) {
-    const [x, y] = frame.positions[j]!
-    // Z 轴 = 适应度（若无则用相位比模拟）
-    const z = frame.phaseRatio + frame.diversity * 0.3 * (1 - frame.phaseRatio)
-    data.push([x, y, Math.max(0, Math.min(1, z))])
-    colorList.push(frame.bestIndex === j ? '#FFFFFF' : getPhaseColor(frame.phaseRatio))
+  // ── 适应度归一化 ──
+  const fitMin = Math.min(...fitnessValues)
+  const fitMax = Math.max(...fitnessValues)
+  const fitRange = fitMax - fitMin || 1
+  const normFit = (f: number) => (f - fitMin) / fitRange
+
+  // ══════ 适应度地形表面 (Fitness Landscape Surface) ══════
+  // 用 20x20 IDW 网格生成 3D 地形，展示适应度在搜索空间的起伏
+  const surfaceRes = 20
+  const surfaceData = buildFitnessGrid(positions, fitnessValues, surfaceRes)
+
+  // ══════ 粒子散点 ══════
+  // Z 轴使用真实归一化适应度（替代旧的合成公式）
+  const scatterData: any[] = []
+  for (let j = 0; j < positions.length; j++) {
+    const [x, y] = positions[j]!
+    const fitZ = normFit(fitnessValues[j] ?? fitMin)
+    const isBest = j === bestIndex
+    const color = getPhaseColor(phaseRatio)
+    scatterData.push({
+      value: [x, y, fitZ],
+      itemStyle: {
+        color: isBest ? '#FFFFFF' : color,
+        borderColor: isBest ? '#D4A373' : color,
+        borderWidth: isBest ? 2.5 : 0.4,
+        opacity: 0.92,
+        shadowBlur: isBest ? 18 : 3,
+        shadowColor: isBest ? 'rgba(212,163,115,0.8)' : color
+      }
+    })
   }
 
+  // ══════ 最优个体 3D 轨迹线 ══════
+  const bestTrajectory3D: [number, number, number][] = []
+  const traceExtent = MAX_TRAIL_AGE.value * 4
+  const traceStart = Math.max(0, frameIndex.value - traceExtent)
+  for (let t = traceStart; t <= frameIndex.value; t++) {
+    if (t < frames.length && frames[t] && trailBuffer[t]) {
+      const entry = trailBuffer[t]![frames[t]!.bestIndex]
+      const fv = frames[t]!.fitnessValues[frames[t]!.bestIndex] ?? fitMin
+      if (entry) bestTrajectory3D.push([entry.x, entry.y, normFit(fv)])
+    }
+  }
+
+  // ── 组装 echarts-gl 3D option ──
   const option: any = {
     animation: false,
     backgroundColor: 'transparent',
@@ -691,34 +978,113 @@ function render3DFrame(frame: InterpolatedFrame): void {
     grid3D: {
       viewControl: {
         autoRotate: isPlaying.value,
-        autoRotateSpeed: 2,
-        distance: 180,
-        alpha: 35,
-        beta: 45
+        autoRotateSpeed: 2.8,
+        autoRotateDirection: 'cw',
+        distance: 195,
+        alpha: 32,
+        beta: 52,
+        center: [0, 0, 0],
+        minAlpha: 10,
+        maxAlpha: 70,
+        minDistance: 120,
+        maxDistance: 320
       },
       boxWidth: 100,
       boxHeight: 100,
-      boxDepth: 60
+      boxDepth: 80,
+      axisPointer: { show: false },
+      // 环境光 — 底部 mesh 需要光照才有深度感
+      light: {
+        main: {
+          intensity: 1.4,
+          shadow: false,
+          alpha: 35,
+          beta: 40
+        },
+        ambient: {
+          intensity: 0.55
+        }
+      },
+      // 网格线配色
+      splitLine: {
+        xAxis: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        yAxis: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        zAxis: { lineStyle: { color: 'rgba(212,163,115,0.12)' } }
+      }
     },
 
-    xAxis3D: { type: 'value', min: -0.05, max: 1.05, name: '维度 1' },
-    yAxis3D: { type: 'value', min: -0.05, max: 1.05, name: '维度 2' },
-    zAxis3D: { type: 'value', min: 0, max: 1, name: '适应度' },
+    xAxis3D: {
+      type: 'value', min: -0.05, max: 1.05,
+      name: '维度 1',
+      nameTextStyle: { color: '#94A3B8', fontSize: 10 },
+      axisLabel: { color: '#64748B', fontSize: 9 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.12)' } }
+    },
+    yAxis3D: {
+      type: 'value', min: -0.05, max: 1.05,
+      name: '维度 2',
+      nameTextStyle: { color: '#94A3B8', fontSize: 10 },
+      axisLabel: { color: '#64748B', fontSize: 9 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.12)' } }
+    },
+    zAxis3D: {
+      type: 'value', min: -0.02, max: 1.02,
+      name: '适应度',
+      nameTextStyle: { color: '#94A3B8', fontSize: 10 },
+      axisLabel: {
+        color: '#64748B', fontSize: 9,
+        formatter: (v: number) => v < 0.05 || v > 0.95 ? '' : v.toFixed(1)
+      },
+      axisLine: { lineStyle: { color: 'rgba(212,163,115,0.25)' } }
+    },
 
     series: [
+      // L0 — 适应度地形表面（半透明 + 线框）
+      {
+        type: 'surface',
+        data: surfaceData,
+        dataShape: [surfaceRes, surfaceRes] as [number, number],
+        shading: 'lambert',
+        itemStyle: {
+          color: 'rgba(74, 108, 247, 0.32)',
+          opacity: 0.32
+        },
+        wireframe: {
+          show: true,
+          lineStyle: {
+            color: 'rgba(74, 108, 247, 0.15)',
+            width: 0.5
+          }
+        },
+        silent: true,
+        zlevel: 0
+      },
+      // L1 — 最优个体 3D 轨迹
+      {
+        type: 'line3D',
+        data: bestTrajectory3D,
+        lineStyle: {
+          color: '#D4A373',
+          width: 2.5,
+          shadowBlur: 14,
+          shadowColor: 'rgba(212,163,115,0.55)'
+        },
+        zlevel: 2
+      },
+      // L2 — 当前种群粒子（大小由适应度决定）
       {
         type: 'scatter3D',
-        data: data.map((d, i) => ({
-          value: d,
-          itemStyle: {
-            color: colorList[i],
-            borderColor: frame.bestIndex === i ? getPhaseColor(frame.phaseRatio) : 'transparent',
-            borderWidth: frame.bestIndex === i ? 2 : 0,
-            opacity: 0.85
-          }
-        })),
-        symbolSize: (_value: number[], params: { dataIndex: number }) =>
-          frame.bestIndex === params.dataIndex ? 12 : 6
+        data: scatterData,
+        symbolSize: (_value: number[], params: { dataIndex: number }) => {
+          const j = params.dataIndex
+          if (j === bestIndex) return 14
+          const fitZ = normFit(fitnessValues[j] ?? fitMin)
+          return 4 + fitZ * 9
+        },
+        emphasis: {
+          itemStyle: { borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' }
+        },
+        zlevel: 3
       }
     ]
   }

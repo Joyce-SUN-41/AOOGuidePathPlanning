@@ -10,7 +10,12 @@ export const userApi = {
     return request.get<UserInfo>('/auth/me')
   },
 
-  /** 更新用户信息 */
+  /** 更新当前用户资料 (昵称/邮箱/手机号/头像) */
+  updateProfile(data: Partial<UserInfo>) {
+    return request.put<UserInfo>('/auth/me', data)
+  },
+
+  /** 更新用户信息 (超级管理员) */
   updateUserInfo(data: Partial<UserInfo>) {
     if (!data.id) {
       throw new Error('更新用户信息时缺少用户ID')

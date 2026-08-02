@@ -19,6 +19,8 @@ Thumbs.db
 .env.local
 .env.*.local
 backend/.env
+# 含真实第三方密钥/凭据，禁止入库（已不慎提交过，请用 git rm --cached 取消跟踪并清洗历史）
+backend/.env.docker
 
 # Logs
 *.log
@@ -36,8 +38,26 @@ coverage/
 *.tmp
 *.temp
 temp/
+
+# 调试 / 构建产物（模式匹配，避免逐条打地鼠式遗漏）
+tsc_*.txt
+vue_tsc_*.txt
+*_errors.txt
+*_out.txt
+*_check.txt
+.alembic*.txt
+.chk_*.js
+.vite_dev.log
 error_files.txt
 vue_tsc_errors.txt
+
+# 根目录调试脚本与探针（以下划线/前缀开头的临时脚本，非业务代码）
+_*.py
+*.verify.py
+test_*.py
+test_*.json
+$null
+0.5.0
 
 # Python (for IDE usage without Docker)
 __pycache__/

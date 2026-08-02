@@ -169,6 +169,7 @@ def run_aoo_optimization(
     mastery_levels: Dict[str, float],
     cognitive_load: float,
     config: Optional[Dict[str, Any]] = None,
+    auto_adopt: bool = False,
 ) -> Dict[str, Any]:
     """执行 AOO 路径优化 (Celery 异步任务)
 
@@ -178,6 +179,7 @@ def run_aoo_optimization(
         mastery_levels: 知识点掌握度 {kp_id: value}
         cognitive_load: 综合认知负荷指数
         config: AOO 超参数覆盖 (可选)
+        auto_adopt: 重规划后是否自动采纳新版本 (默认 False, 仅生成待采纳版本)
 
     Returns:
         优化结果字典 (task_id, status, result)
@@ -246,6 +248,7 @@ def run_aoo_optimization(
                 progress_callback=progress_cb,
                 iteration_callback=iteration_cb,
                 task_id=task_id,
+                auto_adopt=auto_adopt,
             )
         )
     except asyncio.TimeoutError:
@@ -519,6 +522,7 @@ def run_aoo_optimization_sync(
     mastery_levels: Dict[str, float],
     cognitive_load: float,
     config: Optional[Dict[str, Any]] = None,
+    auto_adopt: bool = False,
 ) -> str:
     """在后台线程同步执行 AOO 优化 (不需要 Celery)
 
@@ -531,6 +535,7 @@ def run_aoo_optimization_sync(
         mastery_levels: 知识点掌握度 {kp_id: value}
         cognitive_load: 综合认知负荷指数
         config: AOO 超参数覆盖 (可选)
+        auto_adopt: 重规划后是否自动采纳新版本 (默认 False)
 
     Returns:
         task_id (str): 用于轮询进度的任务 ID
@@ -587,6 +592,7 @@ def run_aoo_optimization_sync(
                     progress_callback=progress_cb,
                     iteration_callback=iteration_cb,
                     task_id=task_id,
+                    auto_adopt=auto_adopt,
                 )
             )
         except Exception as exc:

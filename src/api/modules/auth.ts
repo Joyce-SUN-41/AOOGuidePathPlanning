@@ -7,6 +7,8 @@ import type { LoginParams, LoginResult, RegisterParams, UserInfo } from '@/types
  */
 interface AuthResponseRaw {
   token: string
+  /** 刷新令牌，用于 access token 过期时静默续期 */
+  refreshToken?: string
   userInfo: {
     id: string
     username: string
@@ -44,7 +46,7 @@ export const authApi = {
     const userJson = await userResp.json()
     const userInfo: UserInfo = (userJson.data ?? userJson) as UserInfo
 
-    return { token: accessToken, userInfo }
+    return { token: accessToken, userInfo, refreshToken: authResp.refreshToken }
   },
 
   /** 用户注册 */
@@ -65,7 +67,7 @@ export const authApi = {
     const userJson = await userResp.json()
     const userInfo: UserInfo = (userJson.data ?? userJson) as UserInfo
 
-    return { token: accessToken, userInfo }
+    return { token: accessToken, userInfo, refreshToken: authResp.refreshToken }
   },
 
   /** 退出登录 */

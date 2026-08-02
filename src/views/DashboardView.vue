@@ -1276,20 +1276,21 @@ watch(
           class="dashboard-section"
           :class="{ visible: sectionVisible.progress }"
         >
-          <a-alert
+          <div
             v-if="!hasDiagnosis"
-            type="info"
-            show-icon
-            class="diagnosis-tip"
-            message="尚未完成认知诊断"
-            description="完成诊断后，下方将为你展示知识雷达、薄弱点与 AI 学习建议。当前展示基础学习概览。"
+            class="diagnosis-notice"
           >
-            <template #action>
+            <InfoCircleOutlined class="diagnosis-notice-icon" />
+            <div class="diagnosis-notice-body">
+              <div class="diagnosis-notice-title">尚未完成认知诊断</div>
+              <div class="diagnosis-notice-desc">
+                完成诊断后，下方将为你展示知识雷达、薄弱点与 AI 学习建议。当前展示基础学习概览。
+              </div>
               <a-button type="primary" size="small" @click="handleGoDiagnose">
                 开始诊断
               </a-button>
-            </template>
-          </a-alert>
+            </div>
+          </div>
           <div class="progress-cards">
             <!-- 综合评分仪表盘 -->
             <div class="stat-card score-card">
@@ -1530,9 +1531,9 @@ watch(
           class="dashboard-section"
           :class="{ visible: sectionVisible.weakpointSuggestion }"
         >
-          <div class="section-row-2col">
+          <div class="section-row-2col wp-sg-layout">
             <!-- 薄弱点详细列表 -->
-            <div class="section-card">
+            <div class="section-card wp-sg-card">
               <div class="card-header">
                 <h3><AimOutlined /> 薄弱点详情</h3>
                 <span class="card-hint" v-if="weakPoints.length"
@@ -1585,12 +1586,19 @@ watch(
             </div>
 
             <!-- AI 学习建议 -->
-            <div class="section-card">
+            <div class="section-card wp-sg-card">
               <div class="card-header">
                 <h3><BulbOutlined /> AI 学习建议</h3>
                 <span class="card-hint">基于星火大模型分析</span>
               </div>
               <div class="suggestions-list">
+                <div
+                  v-if="!suggestions.length"
+                  class="weak-empty"
+                >
+                  <BulbOutlined style="font-size: 24px; margin-bottom: 8px; opacity: 0.5" />
+                  <span>暂无 AI 学习建议</span>
+                </div>
                 <div
                   v-for="(sg, idx) in suggestions"
                   :key="idx"
@@ -1782,6 +1790,46 @@ watch(
 }
 
 // ============================================================
+//   Diagnosis Notice — 纯手写 div，不依赖 Ant Design Alert 样式
+// ============================================================
+.diagnosis-notice {
+  display: flex;
+  gap: 16px;
+  padding: 20px 24px;
+  background: rgba(30, 41, 59, 0.92);
+  border: 1px solid rgba(74, 108, 247, 0.4);
+  border-left: 4px solid #4a6cf7;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+
+.diagnosis-notice-icon {
+  font-size: 24px;
+  color: #4a6cf7;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.diagnosis-notice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.diagnosis-notice-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 6px;
+}
+
+.diagnosis-notice-desc {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.65;
+  margin-bottom: 12px;
+}
+
+// ============================================================
 //   Section Animation
 // ============================================================
 .dashboard-section {
@@ -1969,6 +2017,63 @@ watch(
   grid-template-columns: 1.6fr 1fr;
   gap: 16px;
   align-items: start;
+}
+
+// Section 4: 薄弱点详情 + AI 学习建议 —— 等高协调布局
+.wp-sg-layout {
+  grid-template-columns: 1.1fr 1fr;
+  align-items: stretch;
+  max-height: 460px;
+}
+
+.wp-sg-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+
+  // 卡片内部内容区填充并独立滚动，使两卡底部齐平
+  .weak-points-detailed {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .suggestions-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
+
+  // 无数据时垂直居中，避免贴顶与右卡失衡
+  .weak-empty {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 100%;
+    margin: 0;
+    padding: 24px @card-padding;
+  }
+
+  // 统一两卡内部滚动条风格
+  .weak-points-detailed,
+  .suggestions-list {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 3px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+  }
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
-<<<<<<< HEAD
 # 🏗️ 燕麦智导 — AI 智能学习路径规划平台
+
+针对应用型高校人工智能通识课"统一教学"与"个体差异"的矛盾，本课题依托认知负荷理论，以团队前期 ESI 高被引的 AOO 算法为工具，构建多目标学习路径推荐模型。通过认知诊断识别学生认知负荷与知识掌握水平，以学习效果最大化和认知负荷最小化为目标，通过 AOO 算法求解最优学习路径。准实验验证该路径对学习效果的提升及负荷的降低效果，为人工智能通识课从经验驱动向算法驱动的精准教学转型提供依据。
 
 基于 **AOO（Animated Oat Optimization）算法**的智能学习路径规划系统，结合认知诊断、大语言模型与 RAG 知识库，为教师和学生提供个性化学习路径推荐。
 
@@ -27,7 +28,7 @@
 - **SQLAlchemy 2.0** + **asyncpg** — 异步 ORM + PostgreSQL
 - **Celery** + **Redis** — 异步任务队列
 - **NumPy** — AOO 算法数值计算
-- **ChromaDB** — 向量数据库（RAG 支持）
+- **NumPy 向量存储** — 自研轻量向量库（RAG 支持，余弦相似度 + JSON 持久化，零额外依赖）
 
 ### 基础设施
 - **PostgreSQL 16** — 主数据库
@@ -78,17 +79,31 @@ docker compose up -d
 
 ## 📦 生产部署
 
+生产编排使用 `backend/.env.docker` 作为环境变量来源，已内置强随机 `SECRET_KEY` 与数据库密码，可直接一键启动：
+
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+# 1. (可选) 调整环境变量：复制并编辑后端环境变量
+cp backend/.env.docker backend/.env.docker.local
+# 至少填写讯飞大模型密钥（否则智能对话/诊断不可用，其余功能正常）：
+#   XF_APP_ID / XF_API_KEY / XF_API_SECRET  — 讯飞星火（WebSocket 优先）
+#   XF_ASSISTANT_ID                          — 讯飞星辰 Agent（对话）
+#   SPARK_API_PASSWORD / SPARK_API_ACCOUNT  — 星辰鉴权（可选）
+
+# 2. 一键启动（带 env 文件）
+docker compose --env-file=backend/.env.docker -f docker-compose.prod.yml up -d
 ```
 
 生产模式特点：
-- 前端通过 Nginx 提供静态服务（端口 80）
-- API 通过 Nginx 反向代理到后端
+- 前端通过 Nginx 提供静态服务（端口 80），API 经 Nginx 反向代理 `/api`
 - Redis 启用内存限制（256MB LRU）
-- 关闭热重载和源码挂载
+- 关闭热重载与源码挂载；FastAPI 在生产模式关闭 `/docs`、`/redoc`、`/openapi.json`
+- 容器启动时自动执行 `alembic upgrade head` 建表 + 创建 Demo 账号 + 种子数据
 
-访问：http://localhost
+访问：http://localhost （健康检查 http://localhost/health）
+
+> 提示：若不使用 Docker，请先 `pip install -r backend/requirements.txt`，设置好环境变量后
+> 执行 `cd backend && alembic upgrade head` 建表，再 `uvicorn app.main:app --host 0.0.0.0 --port 8000`。
+> 生产环境务必将 `DEBUG=false` 并更换 `SECRET_KEY` 与数据库密码。
 
 ## 📁 项目结构
 
@@ -170,7 +185,3 @@ MIT
 ---
 
 **燕麦智导** — 让每一条学习路径都如燕麦生长般自然高效 🌾
-=======
-# AOOGuidePathPlanning
-针对应用型高校人工智能通识课“统一教学”与“个体差异”的矛盾，本课题依托认知负荷理论，以团队前期ESI高被引的AOO算法为工具，构建多目标学习路径推荐模型。通过认知诊断识别学生认知负荷与知识掌握水平，以学习效果最大化和认知负荷最小化为目标，通过AOO算法求解最优学习路径。准实验验证该路径对学习效果的提升及负荷的降低效果，为人工智能通识课从经验驱动向算法驱动的精准教学转型提供依据。
->>>>>>> ad070cfe3ed37e9ce80699bc99be39c355d18785

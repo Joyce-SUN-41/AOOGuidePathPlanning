@@ -73,13 +73,13 @@ async def ensure_seed_data():
                 )
                 return
 
-            logger.info("🌱 Initializing seed data (knowledge points + graph + questions)...")
+            logger.info("Initializing seed data (knowledge points + graph + questions)...")
             id_map = await seed_knowledge_points(db)
             if id_map:
                 await seed_knowledge_graph(db, id_map)
                 await seed_questions(db, id_map)
             logger.info(
-                "✅ Seed data initialized: %d knowledge points, 20 questions",
+                "Seed data initialized: %d knowledge points, 20 questions",
                 len(id_map),
             )
     except Exception as exc:
@@ -97,11 +97,15 @@ async def lifespan(app: FastAPI):
     # 运行时配置校验 — 警告不安全默认值
     config_warnings = settings.validate_critical_settings()
     for w in config_warnings:
-        logger.warning("⚠ CONFIG: %s", w)
+        logger.warning("CONFIG WARNING: %s", w)
 
     if await check_db_connection():
         logger.info("Database connection: OK")
-        await ensure_demo_users()
+        # Demo 用户仅在显式开启 ENABLE_DEMO_USERS 时创建，避免生产环境后门账号
+        if getattr(settings, "ENABLE_DEMO_USERS", False):
+            await ensure_demo_users()
+        else:
+            logger.info("Demo users creation skipped (ENABLE_DEMO_USERS=false)")
         await ensure_seed_data()
     else:
         logger.warning("Database connection: FAILED (check PostgreSQL)")
@@ -116,13 +120,16 @@ async def lifespan(app: FastAPI):
 
 
 # ---- 创建 FastAPI 实例 ----
+# 生产环境(DEBUG=false)关闭交互式 API 文档与 OpenAPI JSON，降低攻击面；
+# 本地/预发(DEBUG=true)保留 /docs /redoc 便于开发调试
+_is_prod = not bool(getattr(settings, "DEBUG", True))
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=settings.PROJECT_DESCRIPTION,
     version=settings.VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
     lifespan=lifespan,
     contact={
         "name": "燕麦智导开发团队",

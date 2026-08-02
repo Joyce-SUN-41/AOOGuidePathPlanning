@@ -22,11 +22,18 @@ from app.core.database import get_db
 from app.models.user import User
 from app.schemas.common import ResponseBase
 from app.schemas.rag import (
+    AutoOptimizeRequest,
+    AutoOptimizeResponse,
     RAGIndexRequest,
     RAGIndexResponse,
     RAGQueryRequest,
     RAGQueryResponse,
     RAGStatsResponse,
+)
+from app.services.diagnosis.adapter import DiagnosisAdapter
+from app.services.diagnosis.throttle import (
+    acquire_optimize_slot,
+    release_optimize_slot,
 )
 from app.services.rag import get_knowledge_base, reset_knowledge_base
 from app.services.rag.knowledge_base import KnowledgeBase
@@ -41,6 +48,7 @@ def _to_query_response(result) -> RAGQueryResponse:
     token_usage = None
     if getattr(result, "token_usage", None):
         token_usage = result.token_usage
+    diagnosis = getattr(result, "_diagnosis", None)
     return RAGQueryResponse(
         answer=result.answer,
         sources=result.sources,
@@ -49,6 +57,7 @@ def _to_query_response(result) -> RAGQueryResponse:
         model=result.model,
         token_usage=token_usage,
         query_id=result.query_id,
+        diagnosis=diagnosis,
     )
 
 
@@ -63,6 +72,7 @@ async def _get_kb() -> KnowledgeBase:
 
 # KnowledgeBase.query_stream 用于分隔来源信息的哨兵标记
 _SOURCES_SENTINEL = "<<SOURCES>>"
+_DIAGNOSIS_SENTINEL = "<<DIAGNOSIS>>"
 
 
 def _sse(payload: dict) -> str:
@@ -79,6 +89,7 @@ async def _rag_sse_generator(
     帧格式（与前端 ragQueryStream 约定一致）:
     - {"content": "增量文本"}      增量内容
     - {"sources": [...]}            检索来源（结束前发送一次）
+    - {"diagnosis": {...}}          诊断数据（诊断模式下发送）
     - {"error": "错误信息"}         错误
     - [DONE]                        终止标记
     """
@@ -93,6 +104,8 @@ async def _rag_sse_generator(
                 question=payload.question,
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
+                fast=payload.fast_mode,
+                diagnose=payload.diagnose_mode,
             )
         else:
             stream = kb.query_stream(
@@ -112,6 +125,14 @@ async def _rag_sse_generator(
                 except (ValueError, TypeError):
                     sources = []
                 yield _sse({"sources": sources})
+                continue
+            if chunk.startswith(_DIAGNOSIS_SENTINEL):
+                raw = chunk[len(_DIAGNOSIS_SENTINEL):]
+                try:
+                    diagnosis = json.loads(raw) if raw else {}
+                except (ValueError, TypeError):
+                    diagnosis = {}
+                yield _sse({"diagnosis": diagnosis})
                 continue
             yield _sse({"content": chunk})
             # 让出事件循环，确保分块及时刷出而非被缓冲成整包
@@ -158,6 +179,8 @@ async def rag_query(
                 question=payload.question,
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
+                fast=payload.fast_mode,
+                diagnose=payload.diagnose_mode,
             )
         else:
             result = await kb.query(
@@ -234,3 +257,182 @@ async def rag_reset(
     """重置知识库（清空索引并释放资源）"""
     await reset_knowledge_base()
     return ResponseBase[dict](data={"message": "知识库已重置"})
+
+
+@router.post("/auto-optimize", response_model=ResponseBase[AutoOptimizeResponse])
+async def rag_auto_optimize(
+    payload: AutoOptimizeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ResponseBase[AutoOptimizeResponse] | dict:
+    """对话诊断 → AOO 自动路径优化
+    
+    当 LLM 在对话中检测到薄弱知识点时，前端调用此端点触发 AOO 优化。
+    适配器会将 LLM 推测与历史答题诊断数据置信度加权融合，生成 AOO 标准输入，
+    并复用现有 Celery 异步优化流水线。
+    
+    边界: 严格恪守"LLM 只做认知感知 → AOO 专注数学寻优"的松耦合原则
+    """
+    adapter = DiagnosisAdapter(user_id=current_user.id, db=db)
+
+    chat_diagnosis = {
+        "mastery_estimates": payload.mastery_estimates,
+        "cognitive_load": payload.cognitive_load,
+        "learning_intent": payload.learning_intent,
+        "needs_optimization": payload.needs_optimization,
+    }
+
+    aoo_params = await adapter.build_aoo_params(chat_diagnosis)
+
+    # 可观测性: 记录被丢弃的未对齐知识点，便于后续排查 LLM 输出质量
+    unresolved = aoo_params.get("unresolved_names") or []
+    if unresolved:
+        logger.warning(
+            "[auto-optimize] %d 个知识点信号未对齐已丢弃 | user=%s | names=%s",
+            len(unresolved), current_user.id, unresolved,
+        )
+
+    if not aoo_params["can_optimize"]:
+        if aoo_params.get("resolved_count", 0) == 0 and unresolved:
+            msg = (
+                "本轮对话提到的知识点暂未收录到知识图谱中，"
+                "无法据此优化学习路径。"
+            )
+        else:
+            msg = (
+                f"当前检测到 {aoo_params['weak_count']} 个薄弱知识点，"
+                "未达到自动优化阈值。完成诊断答题后可获得更精准的路径推荐。"
+            )
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(triggered=False, message=msg)
+        )
+
+    # 获取诊断记录 ID（优先用历史诊断记录）
+    diagnosis_id = aoo_params.get("diagnosis_id")
+
+    if not diagnosis_id:
+        # 没有历史诊断记录: 无法直接调用 AOO（AOO 需要 diagnosis_id）
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(
+                triggered=False,
+                message=(
+                    "检测到薄弱知识点，但尚未完成正式诊断答题。"
+                    "请在学情诊断页面完成答题后，系统将自动生成最优学习路径。"
+                ),
+            )
+        )
+
+    # 节流: 冷却窗口内不重复触发，避免连续追问并发多个 AOO 任务互相覆盖
+    acquired, retry_after = await acquire_optimize_slot(str(current_user.id))
+    if not acquired:
+        logger.info(
+            "[auto-optimize] 命中冷却窗口，跳过本次触发 | user=%s | retry_after=%ss",
+            current_user.id, retry_after,
+        )
+        minutes = max(1, round(retry_after / 60))
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(
+                triggered=False,
+                message=(
+                    f"学习路径刚刚已根据对话优化过，约 {minutes} 分钟后可再次优化。"
+                    "本轮对话的诊断结果已记录。"
+                ),
+            )
+        )
+
+    # P3: CHAT_PROFILE_ENABLED 总开关 — 关闭时即使前端请求也不触发 AOO 重规划，
+    # 但 adapter 在 build_aoo_params 中已 best-effort 落库聊天信号（受 λ 控制），
+    # 数据真实性不受损，仅停止"自动改路径"这一动作。
+    from app.core.config import settings as _settings
+    profile_enabled = bool(getattr(_settings, "CHAT_PROFILE_ENABLED", True))
+    if not profile_enabled:
+        logger.info(
+            "[auto-optimize] CHAT_PROFILE_ENABLED=False, 关闭自动重规划总开关 | user=%s",
+            current_user.id,
+        )
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(
+                triggered=False,
+                message=(
+                    "学习路径自动优化功能已全局关闭。"
+                    "本轮对话的诊断结果已记录，但不会自动调整路径。"
+                ),
+            )
+        )
+
+    # 触发 AOO 异步优化（复用现有 AOO 接口逻辑）
+    try:
+        from app.tasks.aoo_optimization import run_aoo_optimization
+
+        # 组装 AOO 参数
+        mastery_dict = aoo_params.get("mastery_levels", {})
+        load_value = aoo_params.get("cognitive_load", 0.5)
+
+        # 启动 Celery 异步任务
+        task = run_aoo_optimization.delay(
+            diagnosis_id=str(diagnosis_id),
+            student_id=str(current_user.id),
+            mastery_levels=mastery_dict,
+            cognitive_load=float(load_value),
+            auto_adopt=bool(payload.auto_adopt),
+        )
+
+        logger.info(
+            "[auto-optimize] AOO 优化已入队 | user=%s | diagnosis=%s | task=%s",
+            current_user.id, diagnosis_id, task.id,
+        )
+
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(
+                triggered=True,
+                message="检测到薄弱知识点，已自动生成学习路径优化方案。",
+                aoo_task_id=task.id,
+            )
+        )
+    except Exception as e:
+        # 投递失败 → 释放冷却名额，避免白白占用窗口
+        await release_optimize_slot(str(current_user.id))
+        logger.error("[auto-optimize] AOO 优化触发失败: %s", e, exc_info=True)
+        return ResponseBase[AutoOptimizeResponse](
+            data=AutoOptimizeResponse(
+                triggered=False,
+                message="学习路径优化暂时无法启动，请稍后重试。",
+            )
+        )
+
+
+# ============================================================
+# GET /chat-profile — 读取该生「仅来自智能问答」的对话画像
+# ============================================================
+
+
+@router.get(
+    "/chat-profile",
+    response_model=ResponseBase[dict],
+    summary="获取智能问答对话画像",
+    description=(
+        "返回该生通过智能问答对话梳理出的知识点掌握特点 (绝对掌握度视图)。\n"
+        "与「学习诊断」的客观答题掌握度严格分离，仅用于展示与「诊断+对话」重规划融合。"
+    ),
+)
+async def get_chat_profile(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """读取对话画像 — 前端智能问答页「对话画像」抽屉的数据源"""
+    try:
+        adapter = DiagnosisAdapter(db=session, user_id=current_user.id)
+        profile = await adapter.get_chat_profile()
+        return ResponseBase(message="ok", data=profile)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[chat-profile] 读取失败: %s", exc)
+        return ResponseBase(
+            message="读取对话画像失败",
+            data={
+                "exists": False,
+                "chat_signal_count": 0,
+                "last_chat_at": None,
+                "updated_at": None,
+                "items": [],
+            },
+        )

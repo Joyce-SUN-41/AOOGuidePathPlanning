@@ -19,6 +19,7 @@ import {
   BulbOutlined
 } from '@ant-design/icons-vue'
 import { dashboardApi } from '@/api/modules/dashboard'
+import OatSwayBackground from '@/components/OatSwayBackground.vue'
 
 // ============================================================
 //   Store & Router
@@ -161,8 +162,9 @@ onUnmounted(() => {
          1. Hero 区域
          ========================================================= -->
     <section class="hero">
-      <!-- 背景装饰 -->
+      <!-- 背景装饰：流沙麦浪 + 光斑 -->
       <div class="hero-bg">
+        <OatSwayBackground :density="96" :opacity="0.9" />
         <div class="hero-orb hero-orb--1" />
         <div class="hero-orb hero-orb--2" />
         <div class="hero-orb hero-orb--3" />
@@ -987,9 +989,15 @@ onUnmounted(() => {
           >
         </div>
         <div class="footer-bottom-right">
-          <GithubOutlined class="footer-social-icon" />
-          <GlobalOutlined class="footer-social-icon" />
-          <MailOutlined class="footer-social-icon" />
+          <a href="https://github.com/Joyce-SUN-41/AOOGuidePathPlanning" target="_blank" rel="noopener" class="footer-social-link">
+            <GithubOutlined class="footer-social-icon" />
+          </a>
+          <a href="https://ai.fifedu.com/agent/landings/HomeCompetition" target="_blank" rel="noopener" class="footer-social-link">
+            <GlobalOutlined class="footer-social-icon" />
+          </a>
+          <a href="mailto:sunhaoran0401@126.com" class="footer-social-link">
+            <MailOutlined class="footer-social-icon" />
+          </a>
         </div>
       </div>
     </footer>
@@ -1081,12 +1089,14 @@ onUnmounted(() => {
   z-index: 0;
 }
 
-/* 背景光斑 */
+/* 背景光斑 + 流沙层 */
 .hero-bg {
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .hero-orb {
@@ -1215,10 +1225,10 @@ onUnmounted(() => {
   margin: 0 0 12px 0;
 }
 
-/* 副标题 — 带燕麦金渐变下划线 */
+/* 副标题 — 带燕麦金渐变下划线，文字投影增强可读性 */
 .hero-subtitle {
   font-size: 15px;
-  color: #94a3b8;
+  color: #cbd5e1;
   line-height: 1.8;
   margin: 0 0 32px 0;
   max-width: 600px;
@@ -1227,6 +1237,7 @@ onUnmounted(() => {
   padding-bottom: 8px;
   border-bottom: 2px solid;
   border-image: linear-gradient(90deg, transparent 10%, #d4a373 50%, transparent 90%) 1;
+  text-shadow: 0 1px 8px rgba(10, 13, 20, 0.8), 0 0 2px rgba(10, 13, 20, 0.6);
 }
 
 .text-accent {
@@ -1814,6 +1825,13 @@ onUnmounted(() => {
   gap: 16px;
 }
 
+.footer-social-link {
+  display: flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
 .footer-social-icon {
   font-size: 18px;
   color: #64748b;
@@ -1821,7 +1839,7 @@ onUnmounted(() => {
   transition: color 0.2s;
 }
 
-.footer-social-icon:hover {
+.footer-social-link:hover .footer-social-icon {
   color: #d4a373;
 }
 

@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.aoo_optimization_log import AOOOptimizationLog
+from app.models.cognitive_profile import CognitiveProfileEvent
 from app.models.learning_path import LearningPath
 from app.models.knowledge_graph import KnowledgeGraphEdge
 from app.models.knowledge_point import KnowledgePoint
@@ -79,6 +80,7 @@ class OptimizationService:
         progress_callback: Optional[callable] = None,
         iteration_callback: Optional[callable] = None,
         task_id: Optional[str] = None,
+        auto_adopt: bool = False,
     ) -> Dict[str, Any]:
         """执行完整 AOO 优化工作流
 
@@ -91,6 +93,7 @@ class OptimizationService:
             progress_callback: 进度回调 callable(progress_pct, current_iter, max_iter, best_f)
             iteration_callback: 每代回调 callable(iter, best_f, avg_f, diversity)，用于实时收敛上报
             task_id: Celery 任务 ID (用于 DB 关联)
+            auto_adopt: 重规划后是否自动采纳新版本（默认 False，仅生成待采纳版本）
 
         Returns:
             AOO 优化结果字典
@@ -108,8 +111,10 @@ class OptimizationService:
         aoo_config = self._build_config(config, dim=len(kp_metas))
 
         # 3. 获取已有掌握度 (合并 mastery_levels)
+        #    valid_kp_ids 作为白名单，拦截任何非法/非 UUID 键流入下游
+        valid_kp_ids = {str(k.id) for k in kp_metas}
         full_mastery = await self._merge_student_mastery(
-            student_id, mastery_levels
+            student_id, mastery_levels, valid_kp_ids=valid_kp_ids
         )
 
         # 4. 转换知识点数据为 FitnessCalculator 所需格式
@@ -128,9 +133,11 @@ class OptimizationService:
             preferences["max_daily_minutes"] = config["max_daily_minutes"]
 
         # 6. 确定薄弱知识点
+        #    P0 修复: 必须是 AOO 认识的真实 kp_id，否则 focus_areas 会被污染
+        #    (历史上中文 kp_name 曾混入此处，导致优化目标失效)
         focus_areas = [
             kp_id for kp_id, v in full_mastery.items()
-            if v < 0.6
+            if v < 0.6 and kp_id in valid_kp_ids
         ]
 
         # 7. 上报进度
@@ -174,6 +181,8 @@ class OptimizationService:
                 optimize_result=optimize_result,
                 aoo_config=aoo_config,
                 task_id=task_id,
+                auto_adopt=auto_adopt,
+                focus_areas=focus_areas,
             )
         except Exception as exc:
             logger.error(
@@ -216,10 +225,36 @@ class OptimizationService:
         self,
         student_id: str,
         incoming: Dict[str, float],
+        valid_kp_ids: Optional[set] = None,
     ) -> Dict[str, float]:
-        """合并请求中的掌握度与数据库中的历史掌握度"""
-        merged = dict(incoming)
+        """显式三源合并学生掌握度，键空间统一为 kp_id (UUID 字符串)
 
+        优先级 (高 → 低):
+          1. incoming   — 本次请求携带的掌握度 (诊断结果 / 已融合的问答修正)
+          2. StudentKnowledge — 客观答题记录沉淀
+          3. 缺省       — 不填充，交由 FitnessCalculator 使用其默认值
+
+        P0 修复说明:
+          旧实现用 `if kp_id not in merged` 做"先到先得填空"，语义模糊；
+          且不校验键合法性，导致非 UUID 键（如 LLM 输出的中文名）
+          可以一路流到 focus_areas 污染优化目标。
+          现改为显式覆盖语义 + 白名单过滤。
+
+        Args:
+            valid_kp_ids: 合法 kp_id 白名单。非 None 时，不在白名单内的键
+                          将被丢弃并记录日志（不静默吞掉，保证可观测）。
+        """
+        merged: Dict[str, float] = {}
+        dropped: List[str] = []
+
+        def _accept(kp_id: str, value: float) -> bool:
+            if valid_kp_ids is not None and kp_id not in valid_kp_ids:
+                dropped.append(kp_id)
+                return False
+            merged[kp_id] = max(0.0, min(1.0, float(value)))
+            return True
+
+        # 源 2: 答题记录 (先写入，允许被高优先级源覆盖)
         try:
             engine = _get_engine()
             async with AsyncSession(engine) as session:
@@ -228,13 +263,27 @@ class OptimizationService:
                         StudentKnowledge.student_id == UUID(student_id)
                     )
                 )
-                records = result.scalars().all()
-                for r in records:
-                    kp_id = str(r.kp_id)
-                    if kp_id not in merged:
-                        merged[kp_id] = float(r.mastery_level)
+                for r in result.scalars().all():
+                    try:
+                        _accept(str(r.kp_id), float(r.mastery_level))
+                    except (TypeError, ValueError):
+                        continue
         except Exception as exc:
             logger.warning("加载历史掌握度失败: %s", exc)
+
+        # 源 1: 请求携带 (最高优先级，显式覆盖答题记录)
+        for kp_id, value in (incoming or {}).items():
+            try:
+                _accept(str(kp_id), float(value))
+            except (TypeError, ValueError):
+                continue
+
+        if dropped:
+            logger.warning(
+                "[aoo] 已丢弃 %d 个非法/未知知识点键 (前 5 个: %s)，"
+                "疑似上游未做 kp_name→kp_id 对齐",
+                len(dropped), dropped[:5],
+            )
 
         return merged
 
@@ -377,11 +426,33 @@ class OptimizationService:
         optimize_result: Dict[str, Any],
         aoo_config: AOOConfig,
         task_id: Optional[str] = None,
+        auto_adopt: bool = False,
+        focus_areas: Optional[List[str]] = None,
     ) -> None:
-        """将优化结果保存到 learning_paths / path_tasks / aoo_optimization_logs"""
+        """将优化结果保存到 learning_paths / path_tasks / aoo_optimization_logs
+
+        P2 重规划版本管理:
+          - 若存在当前生效路径 (is_active=True)，新路径作为其子版本 (parent_path_id)
+          - 新路径 version = 父版本 + 1
+          - 新路径默认 is_active=False（待采纳）；auto_adopt=True 时直接采纳
+          - 采纳时，旧生效路径置 is_active=False
+        """
         engine = _get_engine()
         async with AsyncSession(engine) as session:
             try:
+                # ── 查找当前生效路径作为父版本 ──
+                parent_path = await session.scalar(
+                    select(LearningPath)
+                    .where(
+                        LearningPath.student_id == student_id,
+                        LearningPath.is_active == True,  # noqa: E712
+                    )
+                    .order_by(LearningPath.created_at.desc())
+                    .limit(1)
+                )
+                parent_id = parent_path.id if parent_path else None
+                new_version = (parent_path.version + 1) if parent_path else 1
+
                 # ── 保存 LearningPath ──
                 best_path = result.get("best_path", {})
                 best_fitness = result.get("best_path_fitness", {})
@@ -393,6 +464,10 @@ class OptimizationService:
 
                 path = LearningPath(
                     student_id=student_id,
+                    parent_path_id=parent_id,
+                    version=new_version,
+                    # 默认待采纳；auto_adopt 时直接生效
+                    is_active=bool(auto_adopt),
                     path_data={
                         "task_id": task_id,
                         "diagnosis_id": diagnosis_id,
@@ -408,6 +483,11 @@ class OptimizationService:
                 )
                 session.add(path)
                 await session.flush()
+
+                # 采纳：旧生效路径下线
+                if auto_adopt and parent_path is not None:
+                    parent_path.is_active = False
+                    session.add(parent_path)
 
                 # ── 保存 PathTasks ──
                 task_order = 0
@@ -451,6 +531,52 @@ class OptimizationService:
                         },
                     )
                     session.add(log_entry)
+
+                # ── 写可观测性事件: 路径重规划 (含 reasoning) ──
+                # P4: 真正解释"为什么路径变了" —— 引用薄弱点驱动 + 适应度变化
+                weak_count = len(focus_areas or [])
+                weak_hint = ""
+                if focus_areas:
+                    sample = ", ".join(str(k) for k in focus_areas[:3])
+                    weak_hint = f"本次重规划主攻 {weak_count} 个薄弱知识点（如 {sample}）。"
+                parent_fit = (
+                    float(parent_path.fitness_score)
+                    if parent_path and parent_path.fitness_score is not None
+                    else None
+                )
+                new_fit = best_fitness.get("total_fitness")
+                fit_hint = ""
+                if isinstance(parent_fit, float) and isinstance(new_fit, (int, float)):
+                    delta_fit = round(float(new_fit) - parent_fit, 4)
+                    fit_hint = (
+                        f"适应度由 v{parent_path.version} 的 {parent_fit} "
+                        f"变化为 {new_fit}（{delta_fit:+.4f}）；"
+                    )
+                regen_reason = (
+                    f"为什么路径变了：本轮对话诊断信号显示你的掌握度出现变化，"
+                    f"{weak_hint}{fit_hint}"
+                    f"因此生成新版本 v{new_version}"
+                    + (f"（基于 v{parent_path.version}）" if parent_path else "（首个版本）")
+                    + f"，适应度 {new_fit}。"
+                    + ("已自动采纳，旧版本已下线。"
+                       if auto_adopt
+                       else "已生成待采纳版本，可在「路径」页查看具体改动后决定是否应用。")
+                )
+                session.add(
+                    CognitiveProfileEvent(
+                        student_id=student_id,
+                        event_type="path_regenerate",
+                        payload={
+                            "path_id": str(path.id),
+                            "parent_path_id": str(parent_id) if parent_id else None,
+                            "version": new_version,
+                            "auto_adopt": bool(auto_adopt),
+                            "fitness_score": best_fitness.get("total_fitness"),
+                            "task_count": task_order,
+                        },
+                        reasoning=regen_reason,
+                    )
+                )
 
                 await session.commit()
                 logger.info(

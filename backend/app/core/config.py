@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根目录 (backend/)
@@ -32,6 +33,32 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     DEBUG: bool = False
+
+    # ---- Demo 用户 (⚠ 默认关闭，避免生产环境自动创建后门账号) ----
+    # 仅在开发/演示环境显式置为 true 时，启动才会自动创建 student_demo/teacher_demo
+    ENABLE_DEMO_USERS: bool = False
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def _parse_debug(cls, v):
+        # 容错：允许大小写/前后空格/1|0 等写法，避免 .env 手抖导致后端启动崩溃
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        return s in ("1", "true", "yes", "on", "t", "y")
+
+    @field_validator("ENABLE_DEMO_USERS", mode="before")
+    @classmethod
+    def _parse_demo_users(cls, v):
+        # 容错：与 DEBUG 保持一致的解析策略
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        return s in ("1", "true", "yes", "on", "t", "y")
 
     # ---- JWT 认证 (⚠ SECRET_KEY 必须通过环境变量设置，生产环境不能使用默认值) ----
     SECRET_KEY: str = "change-me-prod-env-var-at-least-32-chars!!"
@@ -117,6 +144,20 @@ class Settings(BaseSettings):
     RAG_TOP_K: int = 5
     RAG_MAX_CONTEXT_CHARS: int = 4000
 
+    # ---- 对话即诊断 / 认知画像 (CSP) ----
+    # CHAT_PROFILE_ENABLED: 问答信号是否参与 AOO 输入 (P3 总开关，可秒回滚)
+    # CHAT_PROFILE_LAMBDA: 问答影响强度系数 λ ∈ [0,1]，初期 0.3
+    # CHAT_PROFILE_MAX_DELTA: 单知识点相对诊断基线的最大偏移 δ_max
+    # CHAT_PROFILE_PRIOR: 无任何基线时的先验掌握度 (向其回归，而非归零)
+    # CHAT_KP_FUZZY_THRESHOLD: kp_name → kp_id 模糊匹配相似度阈值
+    # CHAT_AUTO_OPTIMIZE_COOLDOWN: 自动重规划最小间隔(秒)，防连续追问并发刷 AOO
+    CHAT_PROFILE_ENABLED: bool = True
+    CHAT_PROFILE_LAMBDA: float = 0.3
+    CHAT_PROFILE_MAX_DELTA: float = 0.25
+    CHAT_PROFILE_PRIOR: float = 0.5
+    CHAT_KP_FUZZY_THRESHOLD: float = 0.85
+    CHAT_AUTO_OPTIMIZE_COOLDOWN: int = 600
+
     # ---- 日志 ----
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "console"  # json | console
@@ -125,6 +166,11 @@ class Settings(BaseSettings):
     # ---- CORS ----
     CORS_ORIGINS: str = '["http://localhost:5173","http://localhost:3000"]'
 
+    # ---- 受信任代理 (用于安全解析 X-Forwarded-For / X-Real-IP) ----
+    # 仅当请求来自受信任代理时才采信这些头，防止客户端伪造 XFF 绕过限流/IP 审计。
+    # 默认包含私有网段与常见 Docker 桥接网关；生产可在 .env 追加真实边界代理 IP/CIDR。
+    TRUSTED_PROXIES: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1,::1"
+
     @property
     def cors_origins_list(self) -> List[str]:
         """解析 CORS_ORIGINS JSON 字符串为列表"""
@@ -132,6 +178,13 @@ class Settings(BaseSettings):
             return json.loads(self.CORS_ORIGINS)
         except (json.JSONDecodeError, TypeError):
             return ["http://localhost:5173", "http://localhost:3000"]
+
+    @property
+    def trusted_proxies_list(self) -> List[str]:
+        """解析 TRUSTED_PROXIES 逗号分隔列表"""
+        if not self.TRUSTED_PROXIES:
+            return []
+        return [p.strip() for p in self.TRUSTED_PROXIES.split(",") if p.strip()]
 
     def validate_critical_settings(self) -> List[str]:
         """运行时校验关键配置是否使用不安全默认值，返回警告列表"""
