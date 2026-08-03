@@ -11,6 +11,22 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = process.env.VITE_PROXY_TARGET || env.VITE_PROXY_TARGET || 'http://localhost:8000'
 
+  // 允许的内网穿透 / 自定义域名白名单（ngrok 免费域名前缀随机，故默认放行整域）
+  // 环境变量 VITE_ALLOWED_HOSTS 可追加额外域名，逗号分隔
+  const defaultAllowedHosts = [
+    '.ngrok-free.dev',   // ngrok 免费域（每次随机前缀，用通配前缀放行整域）
+    '.ngrok.io',         // ngrok 付费域
+    '.ngrok.app',
+    'localhost',
+    '127.0.0.1',
+    '.localhost'
+  ]
+  const extraHosts = (process.env.VITE_ALLOWED_HOSTS || env.VITE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean)
+  const allowedHosts = [...new Set([...defaultAllowedHosts, ...extraHosts])]
+
   return {
     plugins: [
       vue(),
@@ -30,6 +46,8 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 5173,
+      // 放行内网穿透 / 自定义域名，避免 "Blocked request. This host is not allowed"
+      allowedHosts,
       proxy: {
         '/api': {
           target: proxyTarget,
@@ -43,6 +61,10 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       assetsDir: 'assets',
       sourcemap: false,
+      // 编译目标降到 es2018，兼容 Safari 14 / 旧版 Chrome 等浏览器，
+      // 避免默认 esnext 语法在旧浏览器解析失败导致白屏（不同浏览器适配）
+      target: 'es2018',
+      cssCodeSplit: true,
       // 生产构建剔除调试语句（仅 console/debugger；业务提示走 antMessage 不受影响）
       esbuild: {
         drop: ['console', 'debugger'],

@@ -8,17 +8,24 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserBase(BaseModel):
-    """用户基础字段"""
-    username: str = Field(..., min_length=3, max_length=50, description="用户名")
+    """用户基础字段
+
+    username 最小长度与前端登录/注册表单规则保持一致 (>=2)，避免前端放行后
+    后端校验拒绝导致 422。
+    """
+    username: str = Field(..., min_length=2, max_length=50, description="用户名")
 
 
 class UserCreate(UserBase):
-    """创建用户（注册）"""
+    """创建用户（注册）
+
+    password 最小长度与前端 RegisterView 表单规则保持一致 (>=6)，修复 422。
+    """
     password: str = Field(
         ...,
-        min_length=8,
+        min_length=6,
         max_length=128,
-        description="密码 (至少8位，含大小写字母和数字)",
+        description="密码 (至少6位)",
         json_schema_extra={"example": "SecurePass123"},
     )
     nickname: Optional[str] = Field(None, max_length=50, description="昵称（显示名称）")

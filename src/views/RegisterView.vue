@@ -98,7 +98,7 @@ async function handleRegister() {
         @finish="handleRegister"
       >
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :xs="24" :span="12">
             <a-form-item name="username">
               <a-input
                 v-model:value="formState.username"
@@ -111,7 +111,7 @@ async function handleRegister() {
               </a-input>
             </a-form-item>
           </a-col>
-          <a-col :span="12">
+          <a-col :xs="24" :span="12">
             <a-form-item name="nickname">
               <a-input v-model:value="formState.nickname" placeholder="昵称（显示名称）">
                 <template #prefix>
@@ -324,5 +324,59 @@ export default {
   font-size: 13px;
   color: #94a3b8;
   margin-top: 16px;
+}
+
+/* ============================================================
+   响应式适配（平板 / 手机 / 小屏手机 + 刘海安全区）
+   ============================================================ */
+.register-page {
+  /* 适配 iOS 刘海 / 手势条安全区 */
+  padding: calc(40px + env(safe-area-inset-top)) calc(40px + env(safe-area-inset-right))
+    calc(40px + env(safe-area-inset-bottom)) calc(40px + env(safe-area-inset-left));
+}
+
+@media (max-width: 768px) {
+  .register-page {
+    padding: 24px 16px;
+    padding-top: calc(24px + env(safe-area-inset-top));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    align-items: flex-start;
+  }
+
+  .register-container {
+    padding: 32px 24px 24px;
+    border-radius: 12px;
+    /* 移动端关闭毛玻璃以提升渲染性能与兼容性 */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .register-title {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 480px) {
+  .register-page {
+    padding: 16px 12px;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .register-container {
+    padding: 28px 18px 20px;
+  }
+
+  .register-header {
+    margin-bottom: 24px;
+  }
+
+  .register-title {
+    font-size: 20px;
+  }
+
+  .register-subtitle {
+    font-size: 13px;
+  }
 }
 </style>

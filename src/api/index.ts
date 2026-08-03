@@ -98,6 +98,10 @@ instance.interceptors.response.use(
         case 403:
           antMessage.error('没有权限访问')
           break
+        case 409:
+          // 资源冲突：注册时用户名/邮箱已存在，透传后端具体原因
+          antMessage.error(data?.detail || '该用户名或邮箱已被注册')
+          break
         case 404:
           antMessage.error('请求的资源不存在')
           break

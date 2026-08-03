@@ -136,6 +136,10 @@ const menuItems = computed(() => {
 /** 菜单点击 */
 function handleMenuClick({ key }: { key: string }) {
   router.push(key)
+  // 移动端（窄屏）点击菜单后自动收起侧栏抽屉，避免遮挡内容
+  if (window.innerWidth <= 768 && !appStore.collapsed) {
+    appStore.toggleCollapsed()
+  }
 }
 
 // 路由变化时同步选中菜单
@@ -480,6 +484,15 @@ function handleLogout() {
   z-index: 0;
   pointer-events: none;
   opacity: 0.5;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* 尊重系统「减少动态效果」偏好：直接隐藏常驻动画层，省电省性能 */
+@media (prefers-reduced-motion: reduce) {
+  .app-aurora {
+    display: none;
+  }
 }
 
 /* HUD 状态条（冷酷终端风）— 硬边、等宽、方点 */
@@ -897,6 +910,57 @@ function handleLogout() {
 
   .header-logo {
     margin-right: 8px;
+  }
+
+  /* HUD 状态条在窄屏隐藏，避免挤压用户区 */
+  .hud-status {
+    display: none;
+  }
+
+  /* 顶部栏与安全区对齐（刘海屏） */
+  .top-header {
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* 主体整体下移，补偿刘海安全区 */
+  .layout-body {
+    margin-top: calc(56px + env(safe-area-inset-top));
+  }
+
+  /* 主内容区收窄 padding，并保证底部安全区 */
+  .content-wrapper {
+    padding: 12px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* 侧边栏在移动端变为覆盖式抽屉：展开滑入，折叠隐藏 */
+  .app-sider {
+    position: fixed;
+    left: 0;
+    top: calc(56px + env(safe-area-inset-top));
+    z-index: 90;
+    height: calc(100vh - 56px - env(safe-area-inset-top));
+    transform: translateX(0);
+    transition: transform 0.2s ease-out;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  }
+
+  .app-sider.ant-layout-sider-collapsed {
+    transform: translateX(-100%);
+  }
+}
+
+@media (max-width: 480px) {
+  .top-header {
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+  }
+
+  .content-wrapper {
+    padding: 10px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 }
 </style>

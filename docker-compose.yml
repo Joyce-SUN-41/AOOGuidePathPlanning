@@ -122,6 +122,9 @@ services:
     environment:
       # Docker 容器内 Vite 代理目标使用服务名（通过内部网络通信）
       VITE_PROXY_TARGET: http://backend:8000
+      # 如需放行非 ngrok 的自定义域名，逗号分隔填入，例如: aoo.example.com,test.abc.dev
+      # ngrok 免费域已在 vite.config.ts 默认整域放行，一般无需填写
+      VITE_ALLOWED_HOSTS: ""
     ports:
       - "5173:5173"
     volumes:
