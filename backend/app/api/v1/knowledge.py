@@ -47,17 +47,26 @@ def _role_guard(current_user: User) -> None:
 async def list_knowledge_points(
     subject: Optional[str] = Query(default=None, description="学科筛选"),
     layer: Optional[str] = Query(default=None, description="层级筛选"),
+    page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(default=200, ge=1, le=200, description="每页数量，上限 200"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取所有知识点 (支持学科/层级筛选)  — 所有用户可读"""
-    stmt = select(KnowledgePoint)
-    if subject:
-        stmt = stmt.where(KnowledgePoint.subject == subject)
-    if layer:
-        stmt = stmt.where(KnowledgePoint.layer == layer)
-    stmt = stmt.order_by(KnowledgePoint.difficulty_level, KnowledgePoint.name)
+    """获取所有知识点 (支持学科/层级筛选 + 分页上限保护)  — 所有用户可读
 
+    默认 page_size=200 即一次返回全量，保持对前端的向后兼容；
+    数据量增长后可通过 page/page_size 分页，避免一次性撑爆响应。
+    """
+    base = select(KnowledgePoint)
+    if subject:
+        base = base.where(KnowledgePoint.subject == subject)
+    if layer:
+        base = base.where(KnowledgePoint.layer == layer)
+    base = base.order_by(KnowledgePoint.difficulty_level, KnowledgePoint.name)
+
+    # 分页上限保护（默认 page_size=200 等于全量返回）
+    offset = (page - 1) * page_size
+    stmt = base.offset(offset).limit(page_size)
     result = await db.execute(stmt)
     kps = result.scalars().all()
 

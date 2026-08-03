@@ -148,37 +148,65 @@ async def get_class_overview(
 async def get_teacher_students(
     sort_by: str = Query(default="avgMastery", alias="sortBy"),
     order: str = Query(default="desc"),
+    page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(default=50, ge=1, le=200, description="每页数量，上限 200"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取所有学生的学情摘要列表"""
+    """获取学生列表 (分页 + 批量聚合最新诊断/路径，避免 N+1)"""
     _ensure_teacher(current_user)
 
+    # 学生总数
+    total = (
+        await db.execute(
+            select(func.count(User.id)).where(User.role == "student")
+        )
+    ).scalar() or 0
+
+    # 分页取学生
+    offset = (page - 1) * page_size
     result = await db.execute(
-        select(User).where(User.role == "student").order_by(User.created_at.desc())
+        select(User)
+        .where(User.role == "student")
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
     )
     students = result.scalars().all()
 
-    # 批量获取最新诊断
+    if not students:
+        return ResponseBase(data={"students": [], "total": total, "page": page, "page_size": page_size})
+
+    student_ids = [s.id for s in students]
+
+    # 批量获取每个学生的「最新」诊断（按 created_at 取每组最大）
+    diag_rows = (
+        await db.execute(
+            select(DiagnosisRecord)
+            .where(DiagnosisRecord.student_id.in_(student_ids))
+            .order_by(DiagnosisRecord.student_id, DiagnosisRecord.created_at.desc())
+        )
+    ).scalars().all()
+    latest_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    for d in diag_rows:
+        latest_diag.setdefault(d.student_id, d)
+
+    # 批量获取每个学生的「最新」学习路径
+    path_rows = (
+        await db.execute(
+            select(LearningPath)
+            .where(LearningPath.student_id.in_(student_ids))
+            .order_by(LearningPath.student_id, LearningPath.created_at.desc())
+        )
+    ).scalars().all()
+    latest_path: Dict[uuid.UUID, LearningPath] = {}
+    for p in path_rows:
+        latest_path.setdefault(p.student_id, p)
+
+    # 汇总
     items: List[Dict[str, Any]] = []
     for s in students:
-        diag_result = await db.execute(
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id == s.id)
-            .order_by(DiagnosisRecord.created_at.desc())
-            .limit(1)
-        )
-        diag = diag_result.scalar_one_or_none()
-
-        path_result = await db.execute(
-            select(LearningPath)
-            .where(LearningPath.student_id == s.id)
-            .order_by(LearningPath.created_at.desc())
-            .limit(1)
-        )
-        path = path_result.scalar_one_or_none()
-
-        items.append(_student_summary(s, diag, path))
+        items.append(_student_summary(s, latest_diag.get(s.id), latest_path.get(s.id)))
 
     # 排序
     reverse = order.lower() == "desc"
@@ -186,7 +214,9 @@ async def get_teacher_students(
 
     return ResponseBase(data={
         "students": items,
-        "total": len(items),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     })
 
 
@@ -326,17 +356,27 @@ async def get_alerts(
         select(User).where(User.role == "student")
     )
     students = student_result.scalars().all()
+    if not students:
+        return ResponseBase(data=[])
+
+    student_ids = [s.id for s in students]
+
+    # 批量拉取每个学生的最新诊断（按 student_id 分组取每组 created_at 最大）
+    diag_rows = (
+        await db.execute(
+            select(DiagnosisRecord)
+            .where(DiagnosisRecord.student_id.in_(student_ids))
+            .order_by(DiagnosisRecord.student_id, DiagnosisRecord.created_at.desc())
+        )
+    ).scalars().all()
+    latest_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    for d in diag_rows:
+        latest_diag.setdefault(d.student_id, d)
 
     alerts: List[Dict[str, Any]] = []
     for s in students:
-        diag_result = await db.execute(
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id == s.id)
-            .order_by(DiagnosisRecord.created_at.desc())
-            .limit(1)
-        )
-        diag = diag_result.scalar_one_or_none()
-        if not diag:
+        diag = latest_diag.get(s.id)
+        if diag is None:
             continue
 
         cl = diag.cognitive_load or {}

@@ -52,6 +52,17 @@ async def readiness_check():
         checks["checks"]["redis"] = f"error: {e}"
         checks["status"] = "degraded"
 
+    # Celery broker 检查（broker 不可达时标记 degraded，但不影响服务存活）
+    try:
+        from app.tasks.celery_app import celery_app
+
+        conn = celery_app.broker_connection()
+        conn.ensure_connection(max_retries=1, timeout=2)
+        checks["checks"]["celery_broker"] = "ok"
+    except Exception as e:
+        checks["checks"]["celery_broker"] = f"error: {e}"
+        checks["status"] = "degraded"
+
     return checks
 
 

@@ -90,6 +90,42 @@ class AOOConfig:
     def __post_init__(self) -> None:
         """从环境变量覆盖默认值"""
         self._load_from_env()
+        self._validate_weights()
+
+    def _validate_weights(self) -> None:
+        """校验权重归一化 (防御性)
+
+        学习效果权重 (coverage_weight + mastery_weight) 与适应度权重
+        (alpha + beta) 理论上应各自和为 1。若环境/手动误配导致严重失衡，
+        则按比例归一化，避免后续 fitness 计算出现量纲偏移。
+        仅记录告警，不强制中断，保证既有调优结果向后兼容。
+        """
+        effect_sum = self.coverage_weight + self.mastery_weight
+        if effect_sum <= 0:
+            logger.warning(
+                "AOOConfig: coverage_weight+mastery_weight=%.4f 非法, 回退 0.3/0.7",
+                effect_sum,
+            )
+            self.coverage_weight, self.mastery_weight = 0.3, 0.7
+        elif abs(effect_sum - 1.0) > 1e-6:
+            logger.warning(
+                "AOOConfig: 学习效果权重和=%.4f (≠1), 自动归一化", effect_sum
+            )
+            self.coverage_weight /= effect_sum
+            self.mastery_weight /= effect_sum
+
+        fitness_sum = self.alpha + self.beta
+        if fitness_sum <= 0:
+            logger.warning(
+                "AOOConfig: alpha+beta=%.4f 非法, 回退 0.6/0.4", fitness_sum
+            )
+            self.alpha, self.beta = 0.6, 0.4
+        elif abs(fitness_sum - 1.0) > 1e-6:
+            logger.warning(
+                "AOOConfig: 适应度权重和=%.4f (≠1), 自动归一化", fitness_sum
+            )
+            self.alpha /= fitness_sum
+            self.beta /= fitness_sum
 
     def _load_from_env(self) -> None:
         """读取 AOO_* 环境变量并覆盖对应字段"""

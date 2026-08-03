@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: str = ""
     REDIS_URL: str = ""
+    # Redis 连接池上限, 防止连接泄漏时无限增长 (建议96: SessionManager 显式设置)
+    REDIS_MAX_CONNECTIONS: int = 50
 
     @property
     def redis_url(self) -> str:

@@ -556,7 +556,29 @@ async def _get_optimize_status_inner(task_id: str):
             ),
         )
 
-    # 6b. Failed — 执行失败或超时
+    # 6b. Skipped — 重复提交被去重锁拦截
+    if actual_status == "skipped":
+        max_iters = (
+            progress_data.get("max_iterations", 500) if progress_data
+            else (meta_data.get("config", {}).get("max_iterations", 500) if meta_data else 500)
+        )
+        return ResponseBase(
+            data=AOOTaskStatusResponse(
+                task_id=task_id,
+                status="skipped",
+                progress=0,
+                current_iteration=0,
+                max_iterations=max_iters,
+                current_best_fitness=None,
+                convergence_data=None,
+                result=None,
+                error="该学生已有进行中的优化任务, 请勿重复提交",
+                created_at=created_at,
+                updated_at=updated_at,
+            ),
+        )
+
+    # 6c. Failed — 执行失败或超时
     if actual_status == "failed":
         err_msg = "任务执行失败"
         if error_data:
@@ -716,6 +738,9 @@ def _resolve_status(
     # 1. 优先使用 Redis 中的明确状态
     if redis_status in ("completed", "failed"):
         return redis_status
+    if redis_status == "skipped":
+        # 重复提交被去重锁拦截: 视为终态, 前端提示"已有任务进行中"
+        return "skipped"
     if redis_status in ("processing", "started"):
         return "processing"
     if redis_status == "queued":

@@ -52,6 +52,10 @@ class DocumentLoader:
     # 支持的文件扩展名
     SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown"}
 
+    # 单文件大小上限 (MB), 防止超大文档在解析阶段阻塞 worker。
+    # 解析为同步 CPU 操作, 超限直接拒绝而非尝试解析。
+    MAX_DOCUMENT_SIZE_MB = 50.0
+
     @classmethod
     def is_supported(cls, file_path: str) -> bool:
         ext = Path(file_path).suffix.lower()
@@ -63,6 +67,13 @@ class DocumentLoader:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
+
+        # 文件大小上限防护: 同步解析超大文档会长时间阻塞调用线程/进程
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if size_mb > cls.MAX_DOCUMENT_SIZE_MB:
+            raise ValueError(
+                f"文件过大 ({size_mb:.1f}MB > 上限 {cls.MAX_DOCUMENT_SIZE_MB:.0f}MB): {file_path}"
+            )
 
         ext = path.suffix.lower()
         file_name = path.name

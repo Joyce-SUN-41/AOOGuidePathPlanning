@@ -74,10 +74,14 @@ class SessionManager:
 
     async def _get_redis(self) -> aioredis.Redis:
         if self._redis is None:
+            # 显式设置 max_connections 防止连接泄漏时无限增长；
+            # from_url 内部创建连接池, close() 会释放。调用方应在
+            # 应用关闭时调用 SessionManager.close() 回收连接池。
             self._redis = aioredis.Redis.from_url(
                 settings.redis_url,
                 decode_responses=True,
                 socket_connect_timeout=5,
+                max_connections=settings.redis_max_connections,
             )
             logger.debug("SessionManager Redis connection created")
         return self._redis
@@ -288,18 +292,35 @@ class SessionManager:
         self,
         user_id: str,
     ) -> List[Dict[str, Any]]:
-        """获取用户所有会话的详细信息"""
+        """获取用户所有会话的详细信息
+
+        用 pipeline 批量拉取每个会话的元数据与 TTL，避免 N 个会话触发 N+1 次
+        Redis 往返（smembers 1 次 + 每会话 hgetall + ttl 各 1 次）。
+        """
         session_ids = await self.get_user_sessions(user_id)
+        if not session_ids:
+            return []
+
+        redis = await self._get_redis()
+        # 收集每个会话的 meta_key，按顺序批量发起 hgetall / ttl
+        meta_keys = [KEY_SESSION_META.format(session_id=sid) for sid in session_ids]
+        async with redis.pipeline(transaction=False) as pipe:
+            for mk in meta_keys:
+                pipe.hgetall(mk)
+            for mk in meta_keys:
+                pipe.ttl(mk)
+            responses = await pipe.execute()
+
+        # 前半段是各会话的 hgetall，后半段是对应的 ttl
+        metas = responses[: len(session_ids)]
+        ttls = responses[len(session_ids):]
+
         result = []
-        for sid in session_ids:
-            meta = await self.get_meta(sid)
+        for sid, meta, ttl in zip(session_ids, metas, ttls):
             if meta:
-                # 计算剩余 TTL
-                meta_key = KEY_SESSION_META.format(session_id=sid)
-                redis = await self._get_redis()
-                ttl = await redis.ttl(meta_key)
+                meta = dict(meta)
                 meta["session_id"] = sid
-                meta["ttl_seconds"] = ttl if ttl > 0 else 0
+                meta["ttl_seconds"] = ttl if isinstance(ttl, int) and ttl > 0 else 0
                 meta["message_count"] = int(meta.get("message_count", "0"))
                 result.append(meta)
 
@@ -346,10 +367,25 @@ class SessionManager:
         return True
 
     async def clear_all_user_sessions(self, user_id: str) -> int:
-        """清除用户的所有会话"""
+        """清除用户的所有会话
+
+        批量删除: 收集会话 key 后用 pipeline 一次性 unlink (异步删除,
+        不阻塞主线程) 所有数据, 并单次 srem 从用户集合移除全部 sid,
+        避免会话数较多时的串行 N 次往返 (建议100)。
+        """
         sessions = await self.get_user_sessions(user_id)
-        for sid in sessions:
-            await self.delete_session(sid)
+        if not sessions:
+            return 0
+
+        redis = await self._get_redis()
+        user_key = KEY_USER_SESSIONS.format(user_id=user_id)
+        async with redis.pipeline(transaction=False) as pipe:
+            for sid in sessions:
+                meta_key = KEY_SESSION_META.format(session_id=sid)
+                msg_key = KEY_SESSION_MESSAGES.format(session_id=sid)
+                pipe.unlink(meta_key, msg_key)
+            pipe.srem(user_key, *sessions)
+            await pipe.execute()
 
         logger.info("All sessions cleared for user %s | count=%d", user_id, len(sessions))
         return len(sessions)

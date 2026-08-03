@@ -1,6 +1,7 @@
 """学情看板 API — 认知负荷趋势 / 学习日历 / AI 建议 / 概览"""
 
-from datetime import datetime
+import asyncio
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -282,23 +283,60 @@ async def get_overview(
     except Exception:  # noqa: BLE001
         pass
 
-    # 最新诊断
-    diag_result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id == current_user.id)
-        .order_by(desc(DiagnosisRecord.created_at))
-        .limit(1)
-    )
-    diag = diag_result.scalar_one_or_none()
+    # 并发拉取多个相互独立的聚合查询（最新诊断 / 最新路径 / 诊断数 / 路径数 / 全部诊断日期）
+    async def _latest_diag() -> Optional[DiagnosisRecord]:
+        r = await db.execute(
+            select(DiagnosisRecord)
+            .where(DiagnosisRecord.student_id == current_user.id)
+            .order_by(desc(DiagnosisRecord.created_at))
+            .limit(1)
+        )
+        return r.scalar_one_or_none()
 
-    # 最新路径
-    path_result = await db.execute(
-        select(LearningPath)
-        .where(LearningPath.student_id == current_user.id)
-        .order_by(desc(LearningPath.created_at))
-        .limit(1)
+    async def _latest_path() -> Optional[LearningPath]:
+        r = await db.execute(
+            select(LearningPath)
+            .where(LearningPath.student_id == current_user.id)
+            .order_by(desc(LearningPath.created_at))
+            .limit(1)
+        )
+        return r.scalar_one_or_none()
+
+    async def _diag_count() -> int:
+        r = await db.execute(
+            select(func.count(DiagnosisRecord.id)).where(
+                DiagnosisRecord.student_id == current_user.id
+            )
+        )
+        return int(r.scalar() or 0)
+
+    async def _path_count() -> int:
+        r = await db.execute(
+            select(func.count(LearningPath.id)).where(
+                LearningPath.student_id == current_user.id
+            )
+        )
+        return int(r.scalar() or 0)
+
+    async def _all_diag_dates() -> set:
+        r = await db.execute(
+            select(DiagnosisRecord.created_at)
+            .where(DiagnosisRecord.student_id == current_user.id)
+            .order_by(desc(DiagnosisRecord.created_at))
+        )
+        dates: set = set()
+        for (created_at,) in r:
+            if created_at:
+                dates.add(created_at.date())
+        return dates
+
+    diag, path, total_diagnoses, total_paths, diag_dates_set = await asyncio.gather(
+        _latest_diag(),
+        _latest_path(),
+        _diag_count(),
+        _path_count(),
+        _all_diag_dates(),
     )
-    path = path_result.scalar_one_or_none()
 
     # 计算总学习时长
     total_study_minutes = 0
@@ -325,33 +363,6 @@ async def get_overview(
         )
         if path is None:
             total_study_minutes = int(diag.average_time_spent * diag.total_questions)
-
-    # 真实计数：已完成诊断数 / 学习路径数
-    diag_count_result = await db.execute(
-        select(func.count(DiagnosisRecord.id)).where(
-            DiagnosisRecord.student_id == current_user.id
-        )
-    )
-    total_diagnoses = diag_count_result.scalar() or 0
-
-    path_count_result = await db.execute(
-        select(func.count(LearningPath.id)).where(
-            LearningPath.student_id == current_user.id
-        )
-    )
-    total_paths = path_count_result.scalar() or 0
-
-    # 计算连续学习天数 (基于诊断记录日期)
-    from datetime import date, timedelta
-    all_diag_dates_result = await db.execute(
-        select(DiagnosisRecord.created_at)
-        .where(DiagnosisRecord.student_id == current_user.id)
-        .order_by(desc(DiagnosisRecord.created_at))
-    )
-    diag_dates_set = set()
-    for (created_at,) in all_diag_dates_result:
-        if created_at:
-            diag_dates_set.add(created_at.date())
 
     streak = 0
     today = date.today()

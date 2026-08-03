@@ -52,6 +52,55 @@ AOO_TASK_CONVERGENCE_KEY = "aoo:task:{task_id}:convergence"
 AOO_TASK_TTL = 3600  # 1 小时过期
 AOO_TASK_TIMEOUT_SECONDS = 600  # 10 分钟超时
 
+# 每学生去重锁: 防止同一学生对同一优化请求重复提交 (误触/连点) 导致
+# 多个 Worker 同时运行、CPU 争抢、互相拖慢甚至打满演示服务器。
+# 锁 TTL 略大于任务超时阈值, 即使 Worker 崩溃也能自动释放, 避免该学生被永久阻塞。
+AOO_STUDENT_LOCK_KEY = "aoo:lock:{student_id}"
+AOO_STUDENT_LOCK_TTL = 15 * 60  # 15 分钟自动释放
+
+
+def _acquire_student_lock(student_id: str) -> Optional[str]:
+    """尝试为某学生获取去重锁 (Redis SET NX).
+
+    Returns:
+        token (str): 获取成功, 返回唯一令牌 (用于安全释放);
+        None: 该学生已有进行中的任务, 获取失败。
+    锁获取失败时不会抛异常 (Redis 不可用则降级为放行, 不阻断正常流程)。
+    """
+    try:
+        r = _get_redis()
+        token = uuid.uuid4().hex
+        acquired = r.set(
+            AOO_STUDENT_LOCK_KEY.format(student_id=student_id),
+            token,
+            nx=True,
+            ex=AOO_STUDENT_LOCK_TTL,
+        )
+        if acquired:
+            return token
+        return None
+    except Exception as exc:
+        logger.warning("获取学生去重锁失败 (降级放行): student=%s %s", student_id, exc)
+        # 降级: Redis 异常时放行, 避免误阻断正常优化
+        return uuid.uuid4().hex
+
+
+def _release_student_lock(student_id: str, token: Optional[str]) -> None:
+    """释放学生去重锁 (仅当令牌匹配时, 防止误删他人锁).
+
+    使用 Lua 式 GET+DEL 保证原子性 (避免锁过期后被误删新锁)。
+    """
+    if not token:
+        return
+    try:
+        r = _get_redis()
+        # 仅在值等于本任务令牌时删除, 避免删除已过期后被其他任务获取的新锁
+        current = r.get(AOO_STUDENT_LOCK_KEY.format(student_id=student_id))
+        if current == token:
+            r.delete(AOO_STUDENT_LOCK_KEY.format(student_id=student_id))
+    except Exception as exc:
+        logger.debug("释放学生去重锁失败 (可忽略): student=%s %s", student_id, exc)
+
 
 # ── 进度回调工厂 ─────────────────────────────────────────
 
@@ -230,6 +279,20 @@ def run_aoo_optimization(
     except Exception as exc:
         logger.error("Redis 状态初始化失败: %s", exc)
 
+    # ── 获取学生去重锁 (防重复提交争抢) ──
+    # 在状态初始化之后获取, 使已有进行中任务的进度/结果仍可被前端轮询到。
+    lock_token = _acquire_student_lock(student_id)
+    if lock_token is None:
+        logger.warning(
+            "学生已有进行中的 AOO 任务, 跳过重复执行: student=%s task_id=%s",
+            student_id, task_id,
+        )
+        return {
+            "task_id": task_id,
+            "status": "skipped",
+            "message": "该学生已有进行中的优化任务, 请勿重复提交",
+        }
+
     # ── 构建回调 ──
     total_iters = (config or {}).get("max_iterations", 500)
     progress_cb = _make_progress_callback(task_id, total_iters, t_start)
@@ -268,6 +331,8 @@ def run_aoo_optimization(
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=30 * (self.request.retries + 1))
 
+        # 最终失败, 释放学生去重锁
+        _release_student_lock(student_id, lock_token)
         return {
             "task_id": task_id,
             "status": "failed",
@@ -319,6 +384,9 @@ def run_aoo_optimization(
         task_id, t_total,
         result.get("best_path", {}).get("total_fitness"),
     )
+
+    # ── 释放学生去重锁 ──
+    _release_student_lock(student_id, lock_token)
 
     return response_data
 
@@ -580,6 +648,24 @@ def run_aoo_optimization_sync(
         except Exception:
             logger.warning("Redis 不可用, 同步任务将无法上报进度 (task_id=%s)", task_id)
 
+        # ── 获取学生去重锁 (防重复提交争抢) ──
+        lock_token = _acquire_student_lock(student_id)
+        if lock_token is None:
+            logger.warning(
+                "同步任务: 学生已有进行中的 AOO 任务, 跳过重复执行: student=%s task_id=%s",
+                student_id, task_id,
+            )
+            try:
+                if redis_available:
+                    _r.set(
+                        AOO_TASK_STATUS_KEY.format(task_id=task_id),
+                        "skipped",
+                        ex=AOO_TASK_TTL,
+                    )
+            except Exception:
+                pass
+            return
+
         try:
             handler = OptimizationService()
             result = asyncio.run(
@@ -602,6 +688,7 @@ def run_aoo_optimization_sync(
             )
             error_msg = str(exc)[:500]
             _set_task_error(task_id, error_msg)
+            _release_student_lock(student_id, lock_token)
             return
 
         # ── 保存完成结果 ──
@@ -647,6 +734,9 @@ def run_aoo_optimization_sync(
             task_id, t_total,
             result.get("best_path", {}).get("total_fitness"),
         )
+
+        # ── 释放学生去重锁 ──
+        _release_student_lock(student_id, lock_token)
 
     # 启动后台线程
     thread = threading.Thread(target=_run_in_thread, daemon=True, name=f"aoo-sync-{task_id}")

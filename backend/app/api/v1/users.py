@@ -1,9 +1,10 @@
 """用户管理接口"""
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_superuser, get_current_user
@@ -20,19 +21,29 @@ router = APIRouter()
 async def list_users(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    search: Optional[str] = Query(None, description="按用户名/昵称模糊搜索"),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_superuser),
 ):
-    """获取分页用户列表 (仅超级管理员)"""
+    """获取分页用户列表 (仅超级管理员，支持关键字搜索)"""
+    # 搜索过滤条件
+    filters = None
+    if search:
+        like = f"%{search.strip()}%"
+        filters = or_(User.username.ilike(like), User.nickname.ilike(like))
+
     # 总数
-    count_result = await db.execute(select(func.count(User.id)))
-    total = count_result.scalar() or 0
+    count_stmt = select(func.count(User.id))
+    if filters is not None:
+        count_stmt = count_stmt.where(filters)
+    total = (await db.execute(count_stmt)).scalar() or 0
 
     # 分页查询
     offset = (page - 1) * page_size
-    result = await db.execute(
-        select(User).order_by(User.created_at.desc()).offset(offset).limit(page_size)
-    )
+    query = select(User).order_by(User.created_at.desc())
+    if filters is not None:
+        query = query.where(filters)
+    result = await db.execute(query.offset(offset).limit(page_size))
     users = result.scalars().all()
 
     pages = (total + page_size - 1) // page_size if total > 0 else 0

@@ -637,11 +637,15 @@ class FitnessCalculator:
             return []
 
         total_kps = len(order)
-        # 动态计算总天数: 基于总学习时长和每日最大时长
+        # 动态计算总天数: 基于总学习时长和每日最大时长。
+        # 分组上限统一采用学生真实 max_daily_hours (而非独立的
+        # daily_load_threshold_hours 软阈值), 避免阈值 < 上限导致的
+        # "每天都超负荷" 退化解 (AOOConfig 两参数语义统一)。
+        daily_cap = max(self.student.max_daily_hours, 0.01)
         total_hours = sum(kp.estimated_hours for kp in self.kps)
         suggested_days = max(
             1,
-            int(np.ceil(total_hours / self.config.daily_load_threshold_hours)),
+            int(np.ceil(total_hours / daily_cap)),
             int(np.ceil(total_kps / 5)),  # 每天最多 5 个知识点
         )
         # 限制最小天数 (至少 3 天) 和最大天数
