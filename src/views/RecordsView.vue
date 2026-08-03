@@ -4,6 +4,7 @@
  * 数据来自真实持久化存储，统计侧边栏点击数字可带 query.tab 进入对应分页。
  */
 import { ref, onMounted } from 'vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { diagnosisApi } from '@/api/modules/diagnosis'
@@ -12,6 +13,9 @@ import { useDiagnosisStore } from '@/stores/diagnosis'
 import { usePathStore } from '@/stores/path'
 import eventBus from '@/utils/eventBus'
 import type { DiagnosisBrief, DiagnosisResult, LearningPath } from '@/types'
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 const route = useRoute()
 const router = useRouter()
@@ -157,6 +161,7 @@ onMounted(() => {
       <a-tab-pane key="diagnosis" tab="诊断记录">
         <a-table
           :dataSource="diagList"
+          :scroll="{ x: 'max-content' }"
           :loading="diagLoading"
           :pagination="{
             current: diagPage,
@@ -204,6 +209,7 @@ onMounted(() => {
       <a-tab-pane key="path" tab="学习路径">
         <a-table
           :dataSource="pathList"
+          :scroll="{ x: 'max-content' }"
           :loading="pathLoading"
           :pagination="false"
           :rowKey="(r: LearningPath) => r.id"
@@ -243,7 +249,7 @@ onMounted(() => {
     <a-modal
       v-model:open="diagDetailVisible"
       title="诊断详情"
-      :width="720"
+      :width="isMobile ? '90%' : 720"
       :footer="null"
     >
       <a-spin :spinning="diagDetailLoading">
@@ -279,7 +285,7 @@ onMounted(() => {
     <a-modal
       v-model:open="pathDetailVisible"
       title="学习路径详情"
-      :width="640"
+      :width="isMobile ? '90%' : 640"
       :footer="null"
     >
       <template v-if="pathDetail">

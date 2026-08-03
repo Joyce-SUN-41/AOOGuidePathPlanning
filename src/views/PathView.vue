@@ -10,6 +10,7 @@
  *   5. 操作按钮行（重新规划 / 导出 / 分享）
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useRouter, useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { usePathStore } from '@/stores/path'
@@ -58,6 +59,9 @@ const router = useRouter()
 const route = useRoute()
 const pathStore = usePathStore()
 const diagnosisStore = useDiagnosisStore()
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 // ============================================================
 //   基础 State
@@ -1170,7 +1174,7 @@ onUnmounted(() => {
       v-model:visible="replanModalVisible"
       title="重新规划学习路径"
       :footer="null"
-      width="640px"
+      :width="isMobile ? '90%' : 640"
       class="replan-modal"
     >
       <p class="replan-tip">
@@ -1230,7 +1234,7 @@ onUnmounted(() => {
       v-model:visible="diffVisible"
       title="路径变更详情"
       :footer="null"
-      width="680px"
+      :width="isMobile ? '90%' : 680"
       class="path-diff-modal"
     >
       <template v-if="pendingPath?.diff">

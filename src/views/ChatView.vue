@@ -6,6 +6,7 @@
  * 视觉：动态粒子连线背景 + 噪点纹理 + 燕麦金/极光蓝 深色科技风。
  */
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { ragApi, ragQueryStream, autoOptimize } from '@/api/modules/rag'
@@ -30,6 +31,9 @@ import {
 // ── Store ──
 const chatStore = useChatStore()
 const userStore = useUserStore()
+
+// ── 移动端断点 ──
+const { isMobile } = useIsMobile()
 
 // ── 本地状态 ──
 const inputText = ref('')
@@ -589,17 +593,17 @@ onBeforeUnmount(() => {
           </a-select>
         </div>
         <div class="toolbar-right">
-          <a-button type="text" size="small" @click="openChatProfile()" title="查看由对话梳理出的掌握特点">
+          <a-button class="tb-btn" type="text" size="small" @click="openChatProfile()" title="查看由对话梳理出的掌握特点">
             <template #icon><ProfileOutlined /></template>
-            对话画像
+            <span class="tb-text">对话画像</span>
           </a-button>
-          <a-button type="text" size="small" :disabled="!hasMessages" @click="chatStore.clearChat()" title="清空对话">
+          <a-button class="tb-btn" type="text" size="small" :disabled="!hasMessages" @click="chatStore.clearChat()" title="清空对话">
             <template #icon><ClearOutlined /></template>
-            清空
+            <span class="tb-text">清空</span>
           </a-button>
-          <a-button type="text" size="small" :disabled="!hasMessages" @click="chatStore.downloadChat()" title="导出对话">
+          <a-button class="tb-btn" type="text" size="small" :disabled="!hasMessages" @click="chatStore.downloadChat()" title="导出对话">
             <template #icon><DownloadOutlined /></template>
-            导出
+            <span class="tb-text">导出</span>
           </a-button>
         </div>
       </div>
@@ -609,7 +613,7 @@ onBeforeUnmount(() => {
         v-model:open="chatProfileVisible"
         title="对话画像 · 智能问答梳理的掌握特点"
         placement="right"
-        :width="420"
+        :width="isMobile ? '100%' : 420"
         :mask-closable="true"
       >
         <template #extra>
@@ -985,6 +989,64 @@ onBeforeUnmount(() => {
 
     &:hover { color: #F8FAFC; }
     &:disabled { color: rgba(100, 116, 139, 0.3); }
+  }
+}
+
+/* ============================================================
+   移动端适配（≤768px）
+   ============================================================ */
+@media (max-width: 768px) {
+  .chat-shell {
+    /* 手机端顶部导航已占 56px，消息区铺满剩余高度，减少空旷感 */
+    height: calc(100vh - 56px);
+    padding: 0 12px 12px;
+  }
+
+  .chat-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .toolbar-left {
+    flex: 1;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .subject-select {
+    /* 窄屏学科选择占满剩余宽度，避免 180px 固定值挤压 */
+    width: 100% !important;
+    max-width: 180px;
+  }
+
+  .toolbar-right {
+    /* 按钮仅保留图标，文字隐藏，避免 toolbar 横向溢出 */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+
+    .tb-text {
+      display: none;
+    }
+
+    :deep(.ant-btn-text) {
+      padding: 0 8px;
+    }
+  }
+
+  .welcome-area {
+    padding: 40px 16px 32px;
+  }
+
+  .welcome-title {
+    font-size: 20px;
+    letter-spacing: 0.5px;
+  }
+
+  .welcome-desc {
+    font-size: 13px;
+    max-width: 100%;
+    margin-bottom: 24px;
   }
 }
 

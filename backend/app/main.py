@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select, text as sa_text
 
 from app.api.v1.router import router as v1_router
@@ -166,6 +167,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Total-Count", "Content-Disposition"],
 )
+
+# ---- GZip 响应压缩 ----
+# 压缩 JSON / 文本类响应（RAG 长回复、列表接口），外部高延迟/弱网下显著省带宽。
+# minimum_size=512 避免小响应压缩开销；compresslevel=6 兼顾压缩率与 CPU。
+app.add_middleware(GZipMiddleware, minimum_size=512, compresslevel=6)
 
 # ---- 速率限制中间件 ----
 app.add_middleware(

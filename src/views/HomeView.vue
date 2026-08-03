@@ -2068,4 +2068,50 @@ onUnmounted(() => {
     display: none;
   }
 }
+
+/* 超小屏手机（≤480px）：进一步收窄字号与间距，避免横向溢出 */
+@media (max-width: 480px) {
+  .hero {
+    padding: 40px 16px 36px;
+    border-radius: 12px;
+  }
+
+  .hero-logo {
+    width: 48px;
+    height: 48px;
+  }
+
+  .hero-name {
+    font-size: 30px;
+  }
+
+  .hero-tagline {
+    font-size: 15px;
+  }
+
+  .hero-subtitle {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .hero-actions {
+    gap: 12px;
+  }
+
+  .section-title {
+    font-size: 22px;
+  }
+
+  .section-desc {
+    font-size: 13px;
+  }
+
+  .bento-card {
+    padding: 24px 18px;
+  }
+
+  .stat-number {
+    font-size: 30px;
+  }
+}
 </style>

@@ -43,12 +43,16 @@ import {
   ClearOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 // ============================================================
 //   Store & Router
 // ============================================================
 const router = useRouter()
 const userStore = useUserStore()
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 // 角色守卫：非教师重定向首页（作为路由守卫的补充）
 if (!userStore.isTeacher) {
@@ -1446,7 +1450,7 @@ onUnmounted(() => {
       :open="detailDrawerVisible"
       :title="null"
       placement="right"
-      :width="560"
+      :width="isMobile ? '100%' : 560"
       @close="closeDetail"
       :destroyOnClose="true"
       :bodyStyle="{ padding: '0' }"

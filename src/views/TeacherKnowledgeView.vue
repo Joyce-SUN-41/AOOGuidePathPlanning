@@ -3,6 +3,10 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { KnowledgePoint, KnowledgePointForm, KnowledgeGraphEdge } from '@/types'
 import { knowledgeApi } from '@/api/modules/knowledge'
+import { useIsMobile } from '@/composables/useIsMobile'
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 // ========== 数据状态 ==========
 const loading = ref(false)
@@ -218,7 +222,7 @@ onMounted(() => {
     <a-spin :spinning="loading">
       <!-- ========== 列表视图 ========== -->
       <div v-if="viewMode === 'list'" class="kp-list">
-        <a-table :data-source="filteredPoints" :pagination="false" row-key="id" size="middle">
+        <a-table :data-source="filteredPoints" :scroll="{ x: 'max-content' }" :pagination="false" row-key="id" size="middle">
           <a-table-column title="名称" data-index="name" :width="200">
             <template #default="{ record }">
               <span class="kp-name">{{ record.name }}</span>
@@ -336,7 +340,7 @@ onMounted(() => {
     <a-modal
       v-model:open="modalVisible"
       :title="modalTitle"
-      :width="640"
+      :width="isMobile ? '90%' : 640"
       @ok="handleSubmit"
       ok-text="保存"
       cancel-text="取消"

@@ -11,6 +11,7 @@
  *   6. 学习日历热力图 (ECharts Calendar)
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { useDiagnosisStore } from '@/stores/diagnosis'
@@ -51,6 +52,9 @@ import {
 const router = useRouter()
 const diagnosisStore = useDiagnosisStore()
 const pathStore = usePathStore()
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 // ============================================================
 //   State
@@ -1665,7 +1669,7 @@ watch(
       v-model:open="weakPointDetailVisible"
       title="薄弱点详情"
       placement="right"
-      :width="420"
+      :width="isMobile ? '100%' : 420"
     >
       <template v-if="activeWeakPoint">
         <a-descriptions :column="1" bordered size="small">

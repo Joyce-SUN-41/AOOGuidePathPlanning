@@ -6,13 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="燕麦智导 — AI 智能学习路径规划平台" />
 
-    <!-- Inter 字体预加载 -->
+    <!--
+      字体采用非阻塞加载：外部/弱网环境下 Google Fonts 同步 <link> 会阻塞首屏 CSSOM，
+      导致白屏数秒甚至超时。改为 media="print" onload 异步切换，配合 noscript 兜底，
+      加载失败也不阻塞渲染（globals.less 已配置 system-ui / PingFang / 微软雅黑 系统兜底）。
+      同时通过 preconnect 提前建链，加速可用时的字体获取。
+    -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      />
+    </noscript>
 
     <title>燕麦智导 — AI 智能学习路径规划</title>
   </head>

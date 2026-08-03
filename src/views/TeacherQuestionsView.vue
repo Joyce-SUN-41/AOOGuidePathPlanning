@@ -3,6 +3,10 @@ import { ref, reactive, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { QuestionItem, QuestionForm, KnowledgePoint } from '@/types'
 import { questionApi, knowledgeApi } from '@/api/modules/knowledge'
+import { useIsMobile } from '@/composables/useIsMobile'
+
+// 移动端断点
+const { isMobile } = useIsMobile()
 
 // ========== 数据状态 ==========
 const loading = ref(false)
@@ -240,6 +244,7 @@ onMounted(() => {
       <div class="qb-list">
         <a-table
           :data-source="questions"
+          :scroll="{ x: 'max-content' }"
           :pagination="{
             current: currentPage,
             pageSize,
@@ -321,7 +326,7 @@ onMounted(() => {
     <a-modal
       v-model:open="modalVisible"
       :title="modalTitle"
-      :width="720"
+      :width="isMobile ? '90%' : 720"
       @ok="handleSubmit"
       ok-text="保存"
       cancel-text="取消"

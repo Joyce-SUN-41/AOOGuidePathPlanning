@@ -50,5 +50,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 
 # 使用 entrypoint 脚本启动（自动运行数据库迁移）
 ENTRYPOINT ["/app/entrypoint.sh"]
-# 端口从 APP_PORT 环境变量读取（默认 8000），与配置保持一致、可被覆盖
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000}"]
+# 端口从 APP_PORT 环境变量读取（默认 8000），与配置保持一致、可被覆盖。
+# UVICORN_WORKERS 控制进程数（默认 2，匹配 1G 内存限制；高配机器可上调）。
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000} --workers ${UVICORN_WORKERS:-2}"]
