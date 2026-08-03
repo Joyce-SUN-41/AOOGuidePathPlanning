@@ -1,0 +1,5 @@
+-- 数据库初始化脚本（占位）
+-- 所有业务表结构由 Alembic 迁移管理（backend/alembic/versions/*.py），
+-- 由 backend/entrypoint.sh 在容器启动时执行 `alembic upgrade head` 创建。
+-- 此处保留空文件仅用于满足 docker-compose 的 initdb 挂载约定，
+-- 切勿在此手工建表，以免与 Alembic 版本控制冲突。

@@ -71,5 +71,13 @@ backend/data/
 backend/logs/
 backend/chroma_db/
 
+# Backend pip / chroma cache (本地产物, 非源码)
+backend/.cache/
+
+# 空占位/临时探针文件 (0 字节, 无版本管理价值)
+backend/diag_routes.txt
+homeview_orig.vue
+scripts/fix_diagnose.py
+
 # CodeBuddy
 .codebuddy/
