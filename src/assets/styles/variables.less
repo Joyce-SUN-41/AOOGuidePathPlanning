@@ -181,41 +181,44 @@
 .glass-card-hover() {
   &:hover {
     background: @glass-bg-hover;
-    border-color: @glass-border-hover;
-    box-shadow: @shadow-glass-hover;
-    transform: translateY(-2px);
+    border-color: rgba(212, 163, 115, 0.35);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(212, 163, 115, 0.18);
+    transform: translateY(-1px);
   }
 }
 
-// 微上浮动效
-.lift-on-hover(@distance: 2px) {
-  transition: transform @transition-base, box-shadow @transition-base;
+// 微上浮动效（克制硬激活，去柔光抬升）
+.lift-on-hover(@distance: 1px) {
+  transition: transform @transition-base, box-shadow @transition-base, border-color @transition-base;
   &:hover {
     transform: translateY(-@distance);
-    box-shadow: @shadow-lg;
+    border-color: rgba(212, 163, 115, 0.3);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
   }
 }
 
-// 涟漪效果 · 深色版
+// 硬激活脉冲（冷酷边角高光，替代柔光涟漪）
 .ripple-effect() {
   position: relative;
   overflow: hidden;
   &::after {
     content: '';
     position: absolute;
-    inset: 0;
-    background: radial-gradient(circle, rgba(212,163,115,0.30) 10%, transparent 10%);
-    background-position: center;
-    background-repeat: no-repeat;
+    top: 0;
+    left: 0;
+    width: 14px;
+    height: 14px;
+    border-top: 2px solid rgba(212, 163, 115, 0.7);
+    border-left: 2px solid rgba(212, 163, 115, 0.7);
     opacity: 0;
-    transition: opacity 0.3s, background-size 0.3s;
-    background-size: 0% 0%;
+    transition: opacity 0.25s ease;
     pointer-events: none;
   }
   &:active::after {
-    background-size: 400% 400%;
     opacity: 1;
-    transition: background-size 0s;
+    transition: opacity 0s;
   }
 }
 
@@ -242,7 +245,7 @@
   }
 }
 
-// 数字弹簧动画（全局），可用于统计数字的动态更新
+// 数字动态过渡（全局）：克制缓出，替代稚嫩回弹
 .spring-number() {
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }

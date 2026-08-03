@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.cache import cache_get, cache_set
 from app.core.database import get_db
 from app.models.diagnosis import DiagnosisRecord
 from app.models.learning_path import LearningPath
@@ -17,6 +18,9 @@ from app.models.user import User
 from app.schemas.common import ResponseBase
 
 router = APIRouter()
+
+# 教师聚合看板缓存 TTL（秒）
+_TEACHER_DASHBOARD_TTL = 30
 
 # ═══════════════════════════════════════════════════════
 #  辅助函数
@@ -490,6 +494,15 @@ async def get_dashboard_data(
     """一次性返回所有仪表盘所需数据（聚合 overview / students / weakKps / masteryTrend / alerts）"""
     _ensure_teacher(current_user)
 
+    # 按教师隔离的短 TTL 缓存；命中失败静默降级为直查。
+    cache_key = f"cache:teacher-dashboard:{current_user.id}"
+    try:
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            return ResponseBase(data=cached)
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── 1. 学生基础查询 ──
     student_result = await db.execute(
         select(User).where(User.role == "student")
@@ -635,10 +648,17 @@ async def get_dashboard_data(
                 "severity": "danger" if reason == "both" else "warning",
             })
 
-    return ResponseBase(data={
+    dashboard_data = {
         "overview": overview,
         "students": student_items,
         "weakKps": weak_kps,
         "masteryTrend": mastery_trend,
         "alerts": alerts,
-    })
+    }
+
+    try:
+        await cache_set(cache_key, dashboard_data, ttl=_TEACHER_DASHBOARD_TTL)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return ResponseBase(data=dashboard_data)

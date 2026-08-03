@@ -20,6 +20,7 @@ import {
 } from '@ant-design/icons-vue'
 import { dashboardApi } from '@/api/modules/dashboard'
 import OatSwayBackground from '@/components/OatSwayBackground.vue'
+import OatDispersalBackground from '@/components/OatDispersalBackground.vue'
 
 // ============================================================
 //   Store & Router
@@ -162,9 +163,12 @@ onUnmounted(() => {
          1. Hero 区域
          ========================================================= -->
     <section class="hero">
-      <!-- 背景装饰：流沙麦浪 + 光斑 -->
+      <!-- 背景装饰：流沙麦浪 + 燕麦粒子收束场 + 光斑 -->
       <div class="hero-bg">
         <OatSwayBackground :density="96" :opacity="0.9" />
+        <div class="hero-seed-layer">
+          <OatDispersalBackground :particle-count="80" :glow-intensity="0.35" :speed="0.25" />
+        </div>
         <div class="hero-orb hero-orb--1" />
         <div class="hero-orb hero-orb--2" />
         <div class="hero-orb hero-orb--3" />
@@ -881,34 +885,40 @@ onUnmounted(() => {
       :class="{ 'is-revealed': revealed['stats'] }"
     >
       <div class="stats-inner">
-        <div class="stat-item">
+        <!-- 主卡：平台用户（强调，odometer） -->
+        <div class="bento-card bento-card--hero">
+          <div class="bento-card-label">
+            <TeamOutlined class="bento-card-icon" />
+            <span>平台用户</span>
+          </div>
+          <div class="stat-value">
+            <span class="stat-number stat-number--xl">{{ displayCounts.users.toLocaleString() }}</span>
+          </div>
+          <div class="bento-card-foot">ACTIVE LEARNERS · 真实累计注册</div>
+        </div>
+
+        <!-- 小卡：学习路径 -->
+        <div class="bento-card">
+          <div class="bento-card-label">
+            <NodeIndexOutlined class="bento-card-icon" />
+            <span>已生成学习路径</span>
+          </div>
           <div class="stat-value">
             <span class="stat-number">{{ displayCounts.paths.toLocaleString() }}</span>
           </div>
-          <div class="stat-label">已生成学习路径</div>
-          <div class="stat-icon-bg">
-            <NodeIndexOutlined />
-          </div>
+          <div class="bento-card-foot">PATHS GENERATED</div>
         </div>
-        <div class="stat-divider" />
-        <div class="stat-item">
+
+        <!-- 小卡：知识点 -->
+        <div class="bento-card">
+          <div class="bento-card-label">
+            <BulbOutlined class="bento-card-icon" />
+            <span>覆盖知识点</span>
+          </div>
           <div class="stat-value">
             <span class="stat-number">{{ displayCounts.knowledgePoints.toLocaleString() }}</span>
           </div>
-          <div class="stat-label">覆盖知识点</div>
-          <div class="stat-icon-bg">
-            <BulbOutlined />
-          </div>
-        </div>
-        <div class="stat-divider" />
-        <div class="stat-item">
-          <div class="stat-value">
-            <span class="stat-number">{{ displayCounts.users.toLocaleString() }}</span>
-          </div>
-          <div class="stat-label">平台用户</div>
-          <div class="stat-icon-bg">
-            <TeamOutlined />
-          </div>
+          <div class="bento-card-foot">KNOWLEDGE POINTS</div>
         </div>
       </div>
     </section>
@@ -1134,6 +1144,26 @@ onUnmounted(() => {
   animation: orb-float-3 16s ease-in-out infinite;
 }
 
+/* 燕麦种子收束层（SeedTrajectory，首屏飘落收敛隐喻） */
+.hero-seed-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: hero-seed-in 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+  z-index: 1;
+}
+
+@keyframes hero-seed-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
+
 @keyframes orb-float-1 {
   0%,
   100% {
@@ -1330,17 +1360,41 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 24px;
+  perspective: 1200px; /* 方案 C — 空间透视 */
 }
 
 /* 交错淡入 */
 .features-section.is-revealed .feature-card:nth-child(1) {
-  transition-delay: 0.1s;
+  animation-delay: 0.1s;
 }
 .features-section.is-revealed .feature-card:nth-child(2) {
-  transition-delay: 0.2s;
+  animation-delay: 0.2s;
 }
 .features-section.is-revealed .feature-card:nth-child(3) {
-  transition-delay: 0.3s;
+  animation-delay: 0.3s;
+}
+
+/* 卡片内子元素逐级揭示（stagger，升级4 — 滚动驱动叙事） */
+.features-section.is-revealed .feature-card > * {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: card-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.features-section.is-revealed .feature-card > *:nth-child(1) {
+  animation-delay: 0.35s;
+}
+.features-section.is-revealed .feature-card > *:nth-child(2) {
+  animation-delay: 0.45s;
+}
+.features-section.is-revealed .feature-card > *:nth-child(3) {
+  animation-delay: 0.55s;
+}
+.features-section.is-revealed .feature-card > *:nth-child(4) {
+  animation-delay: 0.65s;
+}
+.features-section.is-revealed .feature-card > *:nth-child(5) {
+  animation-delay: 0.75s;
 }
 
 .feature-card {
@@ -1354,20 +1408,40 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   opacity: 0;
-  transform: translateY(30px);
+  transform: translateY(30px) rotateX(8deg);
+  transform-style: preserve-3d;
+}
+
+/* 硬激活角标（L 形，hover 显现，冷酷终端语境） */
+.feature-card::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 18px;
+  height: 18px;
+  border-top: 2px solid #d4a373;
+  border-left: 2px solid #d4a373;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
 }
 
 .features-section.is-revealed .feature-card {
+  animation: card-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   opacity: 1;
-  transform: translateY(0);
 }
 
 .feature-card:hover {
-  transform: translateY(-6px);
+  transform: translateY(-6px) rotateX(0deg);
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.35),
     0 0 0 1px rgba(212, 163, 115, 0.12);
   border-color: rgba(212, 163, 115, 0.2);
+}
+
+.feature-card:hover::after {
+  opacity: 1;
 }
 
 /* 核心卡片：微光边框效果 */
@@ -1644,31 +1718,71 @@ onUnmounted(() => {
    5. 数据统计
    ============================================================ */
 .stats-section {
-  background: linear-gradient(135deg, rgba(212, 163, 115, 0.08), rgba(20, 27, 43, 0.95));
-  border: 1px solid rgba(212, 163, 115, 0.1);
+  background: rgba(10, 13, 20, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
   border-radius: var(--radius-card);
   padding: 0;
   overflow: hidden;
 }
 
+/* Bento Grid 不规则重排（主卡 + 2 小卡，冷酷硬描边） */
 .stats-inner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 56px 48px;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 1px;
+  background: rgba(148, 163, 184, 0.1);
+  padding: 1px;
 }
 
-.stat-item {
-  flex: 1;
-  text-align: center;
+.bento-card {
+  background: rgba(10, 13, 20, 0.92);
+  padding: 40px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   position: relative;
+  overflow: hidden;
+  transition: background 0.3s ease;
+}
+
+.bento-card:hover {
+  background: rgba(20, 27, 43, 0.92);
+}
+
+.bento-card--hero {
+  background: linear-gradient(135deg, rgba(212, 163, 115, 0.1), rgba(10, 13, 20, 0.92));
+  justify-content: center;
+  gap: 18px;
+}
+
+.bento-card-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.bento-card-icon {
+  color: #d4a373;
+  font-size: 16px;
+}
+
+.bento-card-foot {
+  font-size: 11px;
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .stat-value {
   display: flex;
   align-items: baseline;
-  justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .stat-number {
@@ -1680,38 +1794,23 @@ onUnmounted(() => {
   font-family: 'JetBrains Mono', monospace;
 }
 
+.stat-number--xl {
+  font-size: 72px;
+  color: #f8fafc;
+  text-shadow: 0 0 24px rgba(212, 163, 115, 0.25);
+}
+
+/* 统计数字进场弹动（指挥中心大屏） */
+.stats-section.is-revealed .stat-number {
+  animation: stat-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 .stat-plus,
 .stat-unit {
   font-size: 24px;
   font-weight: 700;
   color: rgba(212, 163, 115, 0.6);
   margin-left: 2px;
-}
-
-.stat-label {
-  font-size: 15px;
-  color: #94a3b8;
-  font-weight: 500;
-  position: relative;
-  z-index: 1;
-}
-
-.stat-icon-bg {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 80px;
-  color: rgba(212, 163, 115, 0.04);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.stat-divider {
-  width: 1px;
-  height: 60px;
-  background: rgba(255, 255, 255, 0.08);
-  flex-shrink: 0;
 }
 
 /* ============================================================
@@ -1886,7 +1985,7 @@ onUnmounted(() => {
   }
 
   .hero-name {
-    font-size: 32px;
+    font-size: 38px;
   }
 
   .hero-tagline {
@@ -1941,14 +2040,13 @@ onUnmounted(() => {
   }
 
   .stats-inner {
-    flex-direction: column;
-    gap: 32px;
-    padding: 40px 24px;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    padding: 1px;
   }
 
-  .stat-divider {
-    width: 80px;
-    height: 1px;
+  .bento-card {
+    padding: 32px 24px;
   }
 
   .stat-number {

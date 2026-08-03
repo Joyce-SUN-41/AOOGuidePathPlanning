@@ -9,59 +9,22 @@ const { isLoading } = storeToRefs(appStore)
 <template>
   <div v-if="isLoading" class="global-loading">
     <div class="loading-container">
-      <!-- AOO 流动光条加载动画 — 代替传统 Spin -->
-      <div class="aoo-loader">
-        <div class="loader-ring">
-          <svg viewBox="0 0 120 120" class="loader-svg">
-            <defs>
-              <linearGradient id="loader-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#D4A373" />
-                <stop offset="50%" stop-color="#FAEDCD" />
-                <stop offset="100%" stop-color="#D4A373" />
-              </linearGradient>
-              <filter id="loader-glow">
-                <feGaussianBlur stdDeviation="2" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            <!-- 背景轨道 -->
-            <circle
-              cx="60"
-              cy="60"
-              r="42"
-              fill="none"
-              stroke="rgba(255,255,255,0.06)"
-              stroke-width="2"
-            />
-            <!-- 流动光弧 -->
-            <circle
-              cx="60"
-              cy="60"
-              r="42"
-              fill="none"
-              stroke="url(#loader-grad)"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-dasharray="60 200"
-              filter="url(#loader-glow)"
-              class="loader-arc"
-            />
-            <!-- 中心种子图标 -->
-            <g class="loader-seed" transform="translate(60, 60)">
-              <circle r="3" fill="rgba(212,163,115,0.5)" />
-              <circle r="1.5" fill="#D4A373" />
-            </g>
-          </svg>
-        </div>
-        <div class="loader-label">AOO 算法优化中</div>
-        <div class="loader-dots">
-          <span class="dot" :style="{ animationDelay: '0s' }" />
-          <span class="dot" :style="{ animationDelay: '0.2s' }" />
-          <span class="dot" :style="{ animationDelay: '0.4s' }" />
-        </div>
+      <!-- 确定性扫描进度（替代旋转 spinner，仿 Vercel/Linear 加载态） -->
+      <div class="loading-mark">
+        <svg viewBox="0 0 48 48" class="mark-svg" aria-hidden="true">
+          <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(212,163,115,0.12)" stroke-width="1.5" />
+          <circle cx="24" cy="24" r="9" fill="none" stroke="rgba(212,163,115,0.25)" stroke-width="1" />
+          <circle cx="24" cy="24" r="2.5" fill="#d4a373" />
+        </svg>
+      </div>
+      <div class="loading-bar">
+        <div class="loading-bar-fill" />
+      </div>
+      <div class="loading-meta">
+        <span class="loading-id">SYS//OAT-OPS</span>
+        <span class="loading-sep">—</span>
+        <span class="loading-text">INITIALIZING</span>
+        <span class="loading-cursor">_</span>
       </div>
     </div>
   </div>
@@ -74,9 +37,9 @@ const { isLoading } = storeToRefs(appStore)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(10, 13, 20, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(6, 8, 13, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 9999;
 }
 
@@ -84,90 +47,83 @@ const { isLoading } = storeToRefs(appStore)
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
+  width: 240px;
 }
 
-.aoo-loader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
+/* 精密几何品牌符号（静态，不跳动） */
+.loading-mark {
+  width: 48px;
+  height: 48px;
 }
 
-.loader-ring {
-  width: 120px;
-  height: 120px;
-}
-
-.loader-svg {
+.mark-svg {
   width: 100%;
   height: 100%;
 }
 
-/* 流动光弧旋转动画 */
-.loader-arc {
-  animation: arc-rotate 1.5s linear infinite;
-  transform-origin: 60px 60px;
+/* 确定性扫描进度条 */
+.loading-bar {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: rgba(148, 163, 184, 0.12);
+  overflow: hidden;
 }
 
-@keyframes arc-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.loading-bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #d4a373);
+  animation: load-sweep 1.4s var(--ease-in-out-quart, cubic-bezier(0.76, 0, 0.24, 1)) infinite;
 }
 
-/* 中心种子脉冲 */
-.loader-seed {
-  animation: seed-pulse 2s ease-in-out infinite alternate;
-}
-
-@keyframes seed-pulse {
+@keyframes load-sweep {
   0% {
-    transform: translate(30px, 30px) scale(1);
-    opacity: 0.6;
-  }
-  50% {
-    transform: translate(30px, 30px) scale(2.5);
-    opacity: 1;
+    transform: translateX(-100%);
   }
   100% {
-    transform: translate(30px, 30px) scale(1);
-    opacity: 0.6;
+    transform: translateX(350%);
   }
 }
 
-.loader-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #94a3b8;
-  letter-spacing: 2px;
-}
-
-.loader-dots {
-  display: flex;
+/* 等宽状态行（冷酷终端） */
+.loading-meta {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: #94a3b8;
+  text-transform: uppercase;
 }
 
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #d4a373;
-  animation: dot-sequence 1.2s ease-in-out infinite;
+.loading-id {
+  color: #d4a373;
+  font-weight: 600;
 }
 
-@keyframes dot-sequence {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: scale(0.8);
-  }
-  50% {
+.loading-sep {
+  color: #475569;
+}
+
+.loading-text {
+  color: #cbd5e1;
+}
+
+.loading-cursor {
+  color: #d4a373;
+  animation: cursor-blink 1s steps(1) infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 50% {
     opacity: 1;
-    transform: scale(1);
+  }
+  50.01%, 100% {
+    opacity: 0;
   }
 }
 </style>

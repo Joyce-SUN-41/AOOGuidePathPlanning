@@ -1834,16 +1834,48 @@ watch(
 // ============================================================
 .dashboard-section {
   opacity: 0;
-  transform: translateY(30px);
+  transform: translateY(20px);
   transition:
-    opacity 0.6s ease,
-    transform 0.6s ease;
+    opacity var(--dur-slow, 0.5s) var(--ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform var(--dur-slow, 0.5s) var(--ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1));
   margin-bottom: @section-gap;
 
   &.visible {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+// 区块内子卡片层级 stagger 揭示（替代整体裸淡入，提升纵深叙事感）
+.dashboard-section.visible .stat-card,
+.dashboard-section.visible .section-card,
+.dashboard-section.visible .progress-cards > * {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: reveal-rise 0.55s var(--ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)) forwards;
+}
+
+.dashboard-section.visible .stat-card:nth-child(1),
+.dashboard-section.visible .progress-cards > *:nth-child(1) {
+  animation-delay: 0.08s;
+}
+.dashboard-section.visible .stat-card:nth-child(2),
+.dashboard-section.visible .progress-cards > *:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.dashboard-section.visible .stat-card:nth-child(3),
+.dashboard-section.visible .progress-cards > *:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.dashboard-section.visible .stat-card:nth-child(4),
+.dashboard-section.visible .progress-cards > *:nth-child(4) {
+  animation-delay: 0.32s;
+}
+.dashboard-section.visible .section-card:nth-child(1) {
+  animation-delay: 0.12s;
+}
+.dashboard-section.visible .section-card:nth-child(2) {
+  animation-delay: 0.2s;
 }
 
 // ============================================================

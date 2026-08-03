@@ -62,8 +62,8 @@ const COLORS = {
   avgLine: '#4F7CFF', // 平均适应度曲线
   medianLine: '#B8A99A', // 中位数适应度曲线
   diversityLine: '#FA8C16', // 多样性曲线
-  historyPoint: 'rgba(180, 180, 180, 0.35)', // 历史种群点
-  progressTrack: '#E8E0D8'
+  historyPoint: 'rgba(203, 213, 225, 0.3)', // 历史种群点（深色背景）
+  progressTrack: 'rgba(255, 255, 255, 0.12)'
 }
 
 /** 角色 → 颜色映射 */
@@ -262,8 +262,8 @@ function buildChartOption(): EChartsOption {
   if (currentIter > 0) {
     markLineData.push({
       xAxis: currentIter,
-      label: { show: true, formatter: `第 ${currentIter} 代`, fontSize: 11 },
-      lineStyle: { color: '#9B8A7A', type: 'dashed', width: 1.5, opacity: 0.7 }
+      label: { show: true, formatter: `第 ${currentIter} 代`, fontSize: 11, color: '#CBD5E1' },
+      lineStyle: { color: 'rgba(212, 163, 115, 0.7)', type: 'dashed', width: 1.5, opacity: 0.8 }
     })
   }
 
@@ -274,10 +274,10 @@ function buildChartOption(): EChartsOption {
 
     tooltip: {
       trigger: 'item' as const,
-      backgroundColor: 'rgba(255, 255, 255, 0.92)',
-      borderColor: '#E8E0D8',
+      backgroundColor: 'rgba(20, 27, 43, 0.95)',
+      borderColor: 'rgba(212, 163, 115, 0.35)',
       borderWidth: 1,
-      textStyle: { color: '#3D3B39', fontSize: 12 },
+      textStyle: { color: '#F8FAFC', fontSize: 12 },
       formatter: (params: any) => {
         if (!params.value || params.value.length < 2) return ''
         const [iter, fitness] = params.value
@@ -294,7 +294,7 @@ function buildChartOption(): EChartsOption {
     legend: {
       bottom: 8,
       left: 'center',
-      textStyle: { color: '#5C5A57', fontSize: 12 },
+      textStyle: { color: '#94A3B8', fontSize: 12 },
       itemWidth: 14,
       itemHeight: 8,
       itemGap: 20,
@@ -328,13 +328,13 @@ function buildChartOption(): EChartsOption {
       name: '迭代次数',
       nameLocation: 'middle',
       nameGap: 30,
-      nameTextStyle: { color: '#82807C', fontSize: 12, fontWeight: 500 },
+      nameTextStyle: { color: '#CBD5E1', fontSize: 12, fontWeight: 500 },
       min: 1,
       max: maxIter,
-      axisLine: { lineStyle: { color: '#D6D4D0' } },
+      axisLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.35)' } },
       axisTick: { show: false },
-      axisLabel: { color: '#A8A6A2', fontSize: 11 },
-      splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } }
+      axisLabel: { color: '#94A3B8', fontSize: 11 },
+      splitLine: { show: true, lineStyle: { color: 'rgba(148, 163, 184, 0.08)' } }
     },
 
     yAxis: [
@@ -343,30 +343,30 @@ function buildChartOption(): EChartsOption {
         name: '适应度',
         nameLocation: 'middle',
         nameGap: 48,
-        nameTextStyle: { color: '#82807C', fontSize: 12, fontWeight: 500 },
+        nameTextStyle: { color: '#CBD5E1', fontSize: 12, fontWeight: 500 },
         min: (value: { min: number }) => Math.max(0, Math.floor(value.min * 10) / 10 - 0.05),
         max: (value: { max: number }) => Math.min(1, Math.ceil(value.max * 10) / 10 + 0.05),
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          color: '#A8A6A2',
+          color: '#94A3B8',
           fontSize: 11,
           formatter: (val: number) => val.toFixed(2)
         },
-        splitLine: { show: true, lineStyle: { color: '#F5F4F2', type: 'dashed' } }
+        splitLine: { show: true, lineStyle: { color: 'rgba(148, 163, 184, 0.08)' } }
       },
       {
         type: 'value' as const,
         name: '多样性',
         nameLocation: 'middle',
         nameGap: 48,
-        nameTextStyle: { color: '#82807C', fontSize: 12, fontWeight: 500 },
+        nameTextStyle: { color: '#CBD5E1', fontSize: 12, fontWeight: 500 },
         min: 0,
         max: 1,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          color: '#A8A6A2',
+          color: '#94A3B8',
           fontSize: 11,
           formatter: (val: number) => `${(val * 100).toFixed(0)}%`
         },
@@ -402,7 +402,7 @@ function buildChartOption(): EChartsOption {
         smooth: true,
         symbol: 'none',
         lineStyle: { opacity: 0 },
-        areaStyle: { color: 'rgba(79, 124, 255, 0.14)' },
+        areaStyle: { color: 'rgba(0, 212, 255, 0.1)' },
         silent: true,
         tooltip: { show: false },
         zlevel: 0,
@@ -864,16 +864,22 @@ defineExpose({
 /* ═══════════ 容器 ═══════════ */
 .aoo-animation {
   width: 100%;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(10, 13, 20, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.03);
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(74, 108, 247, 0.05);
   overflow: hidden;
   transition: box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.aoo-animation:hover {
+  box-shadow:
+    0 16px 56px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(212, 163, 115, 0.2);
 }
 
 /* ═══════════ 统计面板 ═══════════ */
@@ -895,7 +901,7 @@ defineExpose({
 
 .stat-label {
   font-size: 11px;
-  color: #a8a6a2;
+  color: #94a3b8;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
@@ -904,44 +910,45 @@ defineExpose({
 .stat-value {
   font-size: 14px;
   font-weight: 600;
-  color: #3d3b39;
+  color: #f8fafc;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 
 .stat-value--large {
   font-size: 22px;
   font-weight: 700;
+  color: #faedcd;
 }
 
 .stat-suffix {
   font-size: 13px;
   font-weight: 400;
-  color: #a8a6a2;
+  color: #94a3b8;
 }
 
 .stat-value--best {
-  color: #ff4d4f;
+  color: #ff7a7c;
 }
 
 .stat-value--avg {
-  color: #4f7cff;
+  color: #8faeff;
 }
 
 .stat-value--quartile {
-  color: #7aa2ff;
+  color: #b8a99a;
   font-size: 13px;
   letter-spacing: -0.2px;
 }
 
 .stat-value--diversity {
-  color: #fa8c16;
+  color: #ffb84d;
 }
 
 /* 多样性迷你进度条 */
 .diversity-bar {
   width: 60px;
   height: 3px;
-  background: #f5f4f2;
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
   margin-top: 4px;
   overflow: hidden;
@@ -967,7 +974,7 @@ defineExpose({
   justify-content: space-between;
   gap: 16px;
   padding: 12px 24px 16px;
-  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .controls-left,
@@ -985,10 +992,10 @@ defineExpose({
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid #e8e0d8;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
-  color: #5c5a57;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
   cursor: pointer;
   font-size: 14px;
   transition:
@@ -999,9 +1006,9 @@ defineExpose({
 }
 
 .control-btn:hover:not(:disabled) {
-  background: rgba(79, 124, 255, 0.08);
-  border-color: #b8cbff;
-  color: #4f7cff;
+  background: rgba(74, 108, 247, 0.16);
+  border-color: rgba(74, 108, 247, 0.5);
+  color: #8faeff;
 }
 
 .control-btn:active:not(:disabled) {
@@ -1017,13 +1024,13 @@ defineExpose({
   width: 38px;
   height: 38px;
   font-size: 18px;
-  border-color: #4f7cff;
-  color: #4f7cff;
-  background: rgba(79, 124, 255, 0.06);
+  border-color: rgba(212, 163, 115, 0.5);
+  color: #d4a373;
+  background: rgba(212, 163, 115, 0.1);
 }
 
 .control-btn--play:hover:not(:disabled) {
-  background: rgba(79, 124, 255, 0.14);
+  background: rgba(212, 163, 115, 0.18);
 }
 
 /* 进度条 */
@@ -1037,7 +1044,7 @@ defineExpose({
 
 .progress-label {
   font-size: 11px;
-  color: #a8a6a2;
+  color: #94a3b8;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   min-width: 28px;
   text-align: center;
@@ -1070,7 +1077,7 @@ defineExpose({
   top: 0;
   left: 0;
   height: 100%;
-  background: linear-gradient(90deg, #4f7cff, #8faeff);
+  background: linear-gradient(90deg, #4a6cf7, #00d4ff);
   border-radius: 2px;
   pointer-events: none;
   z-index: 1;
@@ -1081,13 +1088,13 @@ defineExpose({
   content: '';
   position: absolute;
   inset: 0;
-  background: #e8e0d8;
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 2px;
 }
 
 /* 速度选择 */
 .speed-label {
-  color: #a8a6a2;
+  color: #94a3b8;
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -1096,7 +1103,7 @@ defineExpose({
 .speed-group {
   display: flex;
   gap: 2px;
-  background: #f5f4f2;
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   padding: 2px;
 }
@@ -1106,7 +1113,7 @@ defineExpose({
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #82807c;
+  color: #94a3b8;
   font-size: 12px;
   font-weight: 500;
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
@@ -1117,14 +1124,14 @@ defineExpose({
 }
 
 .speed-btn:hover {
-  color: #3d3b39;
-  background: rgba(255, 255, 255, 0.5);
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .speed-btn--active {
-  background: #fff;
-  color: #4f7cff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: rgba(74, 108, 247, 0.2);
+  color: #8faeff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 /* ═══════════ 图例提示 ─══════════ */
@@ -1158,7 +1165,7 @@ defineExpose({
 
 .legend-text {
   font-size: 11px;
-  color: #a8a6a2;
+  color: #94a3b8;
 }
 
 /* ═══════════ 空状态 ═══════════ */
@@ -1167,7 +1174,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   min-height: 200px;
-  color: #a8a6a2;
+  color: #94a3b8;
   font-size: 14px;
 }
 

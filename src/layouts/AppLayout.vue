@@ -25,6 +25,7 @@ import {
   FileTextOutlined,
   HistoryOutlined
 } from '@ant-design/icons-vue'
+import CognitiveAuraBackground from '@/components/CognitiveAuraBackground.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -207,6 +208,54 @@ function goToRecords(tab: 'diagnosis' | 'path') {
   router.push({ path: '/records', query: { tab } })
 }
 
+// ========== 路由切换顶部进度条（功能性微交互：告知系统在处理） ==========
+const routeProgress = ref(0)
+const routeProgressActive = ref(false)
+let routeProgressTimer: number | null = null
+
+function startRouteProgress() {
+  routeProgress.value = 0
+  routeProgressActive.value = true
+  // 缓动逼近 90%，等待真实导航完成
+  const tick = () => {
+    if (routeProgress.value < 90) {
+      routeProgress.value += (90 - routeProgress.value) * 0.08 + 1
+      routeProgressTimer = window.setTimeout(tick, 120)
+    }
+  }
+  tick()
+}
+
+function finishRouteProgress() {
+  if (routeProgressTimer) {
+    clearTimeout(routeProgressTimer)
+    routeProgressTimer = null
+  }
+  routeProgress.value = 100
+  window.setTimeout(() => {
+    routeProgressActive.value = false
+    routeProgress.value = 0
+  }, 300)
+}
+
+// 监听路由开始切换 → 启动进度条
+watch(
+  () => route.path,
+  (newPath, oldPath) => {
+    if (newPath === oldPath) return
+    startRouteProgress()
+  }
+)
+
+// 导航完成后（组件挂载）收尾
+router.afterEach(() => {
+  finishRouteProgress()
+})
+
+onUnmounted(() => {
+  if (routeProgressTimer) clearTimeout(routeProgressTimer)
+})
+
 // ========== 用户下拉 ==========
 
 function handleUserMenuClick({ key }: { key: string }) {
@@ -240,6 +289,17 @@ function handleLogout() {
 
 <template>
   <a-layout class="app-layout">
+    <!-- 路由切换顶部进度条（仿 Linear/Vercel 加载态，功能性微交互） -->
+    <div
+      v-show="routeProgressActive"
+      class="route-progress"
+      :style="{ width: routeProgress + '%' }"
+    />
+    <!-- 全局常驻低密度粒子星图（方案 A — 指挥中心氛围，不拦截交互） -->
+    <div class="app-aurora" aria-hidden="true">
+      <CognitiveAuraBackground :point-count="46" :line-distance="160" :speed="0.25" :interactive="false" />
+    </div>
+
     <!-- ========== 顶部导航栏 ========== -->
     <a-layout-header class="top-header">
       <!-- Logo -->
@@ -258,6 +318,12 @@ function handleLogout() {
         :items="menuItems"
         @click="handleMenuClick"
       />
+
+      <!-- HUD 状态条（方案 A） -->
+      <div class="hud-status">
+        <span class="hud-dot" />
+        <span class="hud-status-text">系统在线</span>
+      </div>
 
       <!-- 右侧：用户信息 -->
       <div class="header-user">
@@ -366,7 +432,7 @@ function handleLogout() {
         <a-layout-content class="main-content">
           <div class="content-wrapper">
             <router-view v-slot="{ Component }">
-              <transition name="page-fade" mode="out-in">
+              <transition name="page-wipe" mode="out-in">
                 <keep-alive :max="8">
                   <component :is="Component" />
                 </keep-alive>
@@ -392,6 +458,59 @@ function handleLogout() {
    ============================================================ */
 .app-layout {
   min-height: 100vh;
+}
+
+/* 路由切换顶部进度条（燕麦金硬光，仿 Linear/Vercel 加载态） */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  z-index: 2000;
+  background: linear-gradient(90deg, rgba(212, 163, 115, 0.4) 0%, #d4a373 100%);
+  box-shadow: 0 0 8px rgba(212, 163, 115, 0.6);
+  transition: width 0.12s ease-out, opacity 0.3s ease-out;
+  pointer-events: none;
+}
+
+/* 全局常驻粒子星图（方案 A）— 铺满视口，置于内容之下，不拦截交互 */
+.app-aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* HUD 状态条（冷酷终端风）— 硬边、等宽、方点 */
+.hud-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: 20px;
+  padding: 4px 12px;
+  border-radius: 2px;
+  background: rgba(212, 163, 115, 0.06);
+  border: 1px solid rgba(212, 163, 115, 0.22);
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.hud-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
+  background: #d4a373;
+  animation: hud-pulse 2.4s ease-in-out infinite;
+}
+
+.hud-status-text {
+  color: #d4a373;
+  font-weight: 500;
 }
 
 /* ============================================================
@@ -507,8 +626,9 @@ function handleLogout() {
   gap: 8px;
   cursor: pointer;
   padding: 4px 12px;
-  border-radius: 20px;
-  transition: background 0.25s;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.25s, border-color 0.25s;
 }
 
 .user-trigger:hover {
@@ -533,8 +653,9 @@ function handleLogout() {
 .user-role-badge {
   font-size: 11px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: 2px;
   font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .user-role-badge.teacher {
@@ -629,11 +750,13 @@ function handleLogout() {
 .sider-icon-item:hover {
   background: rgba(255, 255, 255, 0.06);
   color: #00d4ff;
+  border-left: 2px solid rgba(0, 212, 255, 0.4);
 }
 
 .sider-icon-item.active {
   background: rgba(212, 163, 115, 0.12);
   color: #d4a373;
+  border-left: 2px solid #d4a373;
 }
 
 /* 展开状态 */
@@ -672,12 +795,14 @@ function handleLogout() {
 .quick-link-item:hover {
   background: rgba(255, 255, 255, 0.05);
   color: #f8fafc;
+  border-left: 2px solid rgba(148, 163, 184, 0.4);
 }
 
 .quick-link-item.active {
   background: rgba(212, 163, 115, 0.12);
   color: #d4a373;
   font-weight: 600;
+  border-left: 2px solid #d4a373;
 }
 
 .link-icon {

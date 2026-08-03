@@ -8,6 +8,7 @@ from sqlalchemy import desc, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.cache import cache_get, cache_set
 from app.core.database import get_db
 from app.models.diagnosis import DiagnosisRecord
 from app.models.knowledge_point import KnowledgePoint
@@ -16,6 +17,10 @@ from app.models.user import User
 from app.schemas.common import ResponseBase
 
 router = APIRouter()
+
+# 聚合统计缓存 TTL（秒）
+_PLATFORM_STATS_TTL = 60
+_OVERVIEW_TTL = 30
 
 
 # ═══════════ GET /dashboard/platform-stats （公开） ════════
@@ -37,6 +42,15 @@ async def get_platform_stats(db: AsyncSession = Depends(get_db)):
     该接口不返回任何用户隐私信息，仅为聚合计数，故不做鉴权。
     任一统计项查询失败时降级为 0，保证首页始终可渲染。
     """
+    # 公开计数变化缓慢，加短 TTL 缓存降低数据库压力；命中失败则直查降级。
+    cache_key = "cache:platform-stats"
+    try:
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            return ResponseBase(data=cached)
+    except Exception:  # noqa: BLE001
+        pass
+
     async def _count(model) -> int:
         try:
             result = await db.execute(select(func.count()).select_from(model))
@@ -44,14 +58,19 @@ async def get_platform_stats(db: AsyncSession = Depends(get_db)):
         except Exception:  # noqa: BLE001 — 统计失败不应阻塞首页
             return 0
 
-    return ResponseBase(
-        data={
-            "studentCount": await _count(User),
-            "pathCount": await _count(LearningPath),
-            "knowledgePointCount": await _count(KnowledgePoint),
-            "diagnosisCount": await _count(DiagnosisRecord),
-        }
-    )
+    data = {
+        "studentCount": await _count(User),
+        "pathCount": await _count(LearningPath),
+        "knowledgePointCount": await _count(KnowledgePoint),
+        "diagnosisCount": await _count(DiagnosisRecord),
+    }
+
+    try:
+        await cache_set(cache_key, data, ttl=_PLATFORM_STATS_TTL)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return ResponseBase(data=data)
 
 
 # ═══════════ GET /dashboard/cognitive-load-trend ══════════
@@ -255,6 +274,14 @@ async def get_overview(
     current_user: User = Depends(get_current_user),
 ):
     """获取学情看板概览指标"""
+    # 按用户隔离的短 TTL 缓存；命中失败静默降级为直查。
+    try:
+        cached = await cache_get(f"cache:overview:{current_user.id}")
+        if cached is not None:
+            return ResponseBase(data=cached)
+    except Exception:  # noqa: BLE001
+        pass
+
     # 最新诊断
     diag_result = await db.execute(
         select(DiagnosisRecord)
@@ -350,5 +377,15 @@ async def get_overview(
         "totalPaths": total_paths,
         "lastStudyDate": diag.created_at.strftime("%Y-%m-%d") if diag and diag.created_at else "",
     }
+
+    # 按用户隔离的短 TTL 缓存，命中失败静默降级为直查。
+    try:
+        await cache_set(
+            f"cache:overview:{current_user.id}",
+            overview_data,
+            ttl=_OVERVIEW_TTL,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     return ResponseBase(data=overview_data)

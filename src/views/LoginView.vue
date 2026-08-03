@@ -1,23 +1,47 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+/**
+ * LoginView —— OAT-OPS // AUTH TERMINAL (v3)
+ *
+ * 本次重构针对三条明确反馈：
+ *   1. 「背景动效还不如之前，和内页太像」
+ *      → 旧版透视栅格与全站 globals.less 的 .grid-bg（同为 64px 同色）撞脸。
+ *        彻底换成 AooFlowField：把 AOO 算法本身画成活体流场，
+ *        丝绸状流线 + 三收敛核 + 等值线脊，全站独一份。
+ *   2. 「字体大小不合适，右侧那个有点小」
+ *      → 刊头升到 clamp(64px, 8.4vw, 132px) 的杂志级尺度；
+ *        表单卡宽度 由 0.95fr → 固定 480px，内距、输入高度、字号全面放大。
+ *   3. 「有点干巴、细节不够酷」
+ *      → 加入：卡片四角刻度、编号索引栏、右侧竖排铭牌、
+ *        实时时钟与会话 ID、字段序号、按钮箭头位移、
+ *        大号 pillar 卡片化、hover 时的硬边推进反馈。
+ *
+ * 安全性：鉴权链路一行未动，仍为 userStore.login()。
+ * 认证日志每行严格绑定真实步骤成败，不伪造数据。
+ */
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import type { LoginParams } from '@/types'
 import type { FormInstance, Rule } from 'ant-design-vue/es/form'
-import {
-  UserOutlined,
-  LockOutlined,
-  TeamOutlined,
-  ArrowRightOutlined
-} from '@ant-design/icons-vue'
-import OatDispersalBackground from '@/components/OatDispersalBackground.vue'
+import { UserOutlined, LockOutlined, TeamOutlined, ArrowRightOutlined } from '@ant-design/icons-vue'
+import AooFlowField from '@/components/login/AooFlowField.vue'
+import GlyphScramble from '@/components/login/GlyphScramble.vue'
+import { useAuthSequence } from '@/composables/useAuthSequence'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const formRef = ref<FormInstance>()
-const loading = ref(false)
+
+/**
+ * 函数式模板 ref。
+ * 避免字符串路径 ref —— 它会经由 exposeProxy 写入，
+ * 测试对 formRef 打桩时会触发 "'set' on proxy: trap returned falsish" 并卸载组件。
+ */
+function setFormRef(el: unknown): void {
+  formRef.value = (el as FormInstance | null) ?? undefined
+}
 
 const formState = reactive<LoginParams>({
   username: '',
@@ -36,165 +60,411 @@ const rules: Record<string, Rule[]> = {
   ]
 }
 
-async function handleLogin() {
+// ─────────────────────────────────────────────
+//  环境能力检测与降级
+// ─────────────────────────────────────────────
+const reducedMotion = ref(false)
+const isCompact = ref(false)
+const playIntro = ref(true)
+
+const BOOT_FLAG = 'oat:login:booted'
+
+let mqMotion: MediaQueryList | null = null
+let mqCompact: MediaQueryList | null = null
+
+function syncMotion(): void {
+  reducedMotion.value = mqMotion?.matches ?? false
+}
+function syncCompact(): void {
+  isCompact.value = mqCompact?.matches ?? false
+}
+
+/** 是否启用「重动效」（视差 / 流场动画） */
+const richMotion = computed(() => !reducedMotion.value && !isCompact.value)
+
+// ─────────────────────────────────────────────
+//  L1 启动序列
+// ─────────────────────────────────────────────
+const bootStage = ref(0)
+const bootTimers: ReturnType<typeof setTimeout>[] = []
+
+const BOOT_TIMELINE = [0, 140, 280, 520, 660, 800, 900, 1120, 1360]
+
+function startBoot(): void {
+  if (!playIntro.value || reducedMotion.value) {
+    bootStage.value = BOOT_TIMELINE.length
+    return
+  }
+  BOOT_TIMELINE.forEach((at, idx) => {
+    const t = setTimeout(() => {
+      bootStage.value = Math.max(bootStage.value, idx + 1)
+    }, at)
+    bootTimers.push(t)
+  })
+}
+
+function stageOn(n: number): boolean {
+  return bootStage.value >= n
+}
+
+// ─────────────────────────────────────────────
+//  L3 指针视差
+// ─────────────────────────────────────────────
+const pointer = { tx: 0, ty: 0, cx: 0, cy: 0 }
+const parallax = ref({ x: 0, y: 0 })
+let parallaxRaf: number | null = null
+
+function onPointerMove(e: PointerEvent): void {
+  if (!richMotion.value) return
+  const w = window.innerWidth || 1
+  const h = window.innerHeight || 1
+  pointer.tx = (e.clientX / w) * 2 - 1
+  pointer.ty = (e.clientY / h) * 2 - 1
+  if (parallaxRaf === null) parallaxRaf = requestAnimationFrame(parallaxTick)
+}
+
+function parallaxTick(): void {
+  pointer.cx += (pointer.tx - pointer.cx) * 0.075
+  pointer.cy += (pointer.ty - pointer.cy) * 0.075
+  parallax.value = { x: pointer.cx, y: pointer.cy }
+
+  const settled =
+    Math.abs(pointer.tx - pointer.cx) < 0.001 && Math.abs(pointer.ty - pointer.cy) < 0.001
+  if (settled) {
+    parallaxRaf = null
+    return
+  }
+  parallaxRaf = requestAnimationFrame(parallaxTick)
+}
+
+const layerBrandStyle = computed(() => ({
+  transform: `translate3d(${parallax.value.x * -7}px, ${parallax.value.y * -7}px, 0)`
+}))
+const layerCardStyle = computed(() => ({
+  transform: `translate3d(${parallax.value.x * 5}px, ${parallax.value.y * 5}px, 0)`
+}))
+
+// ─────────────────────────────────────────────
+//  细节：实时时钟 + 会话标识
+// ─────────────────────────────────────────────
+const clock = ref('--:--:--')
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+function tickClock(): void {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  clock.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/**
+ * 会话标识：仅用于界面上的终端质感展示，不参与任何鉴权。
+ * 使用 crypto 随机源，不可用时降级为时间戳派生。
+ */
+const sessionId = ref('')
+function makeSessionId(): string {
+  try {
+    const buf = new Uint8Array(3)
+    crypto.getRandomValues(buf)
+    return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase()
+  } catch {
+    return Date.now().toString(16).slice(-6).toUpperCase()
+  }
+}
+
+// ─────────────────────────────────────────────
+//  L3 字段联动
+// ─────────────────────────────────────────────
+type FieldKey = 'username' | 'password' | null
+const activeField = ref<FieldKey>(null)
+
+const cursorOffset = computed(() => {
+  if (activeField.value === 'username') return 0
+  if (activeField.value === 'password') return 1
+  return -1
+})
+
+const fieldReadout = computed(() => {
+  if (activeField.value === 'username') return 'FIELD://USERNAME'
+  if (activeField.value === 'password') return 'FIELD://PASSCODE'
+  return 'FIELD://IDLE'
+})
+
+/** 熵条：仅反映真实字符数，不做强度评估（避免伪数据） */
+const ENTROPY_MAX = 20
+const ENTROPY_CELLS = 10
+const entropyFilled = computed(() => {
+  const len = formState.password.length
+  return Math.min(ENTROPY_CELLS, Math.round((len / ENTROPY_MAX) * ENTROPY_CELLS))
+})
+const entropyLabel = computed(
+  () => `${String(formState.password.length).padStart(2, '0')}/${ENTROPY_MAX}`
+)
+
+// ─────────────────────────────────────────────
+//  L4 认证仪式
+// ─────────────────────────────────────────────
+const auth = useAuthSequence()
+const shake = ref(false)
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 粒子收敛倍率：认证到达收敛阶段时放大，制造塌缩 */
+const convergence = computed(() => (auth.converging.value ? 26 : 1))
+
+const submitting = computed(() => auth.running.value)
+
+function triggerShake(): void {
+  shake.value = false
+  if (shakeTimer) clearTimeout(shakeTimer)
+  requestAnimationFrame(() => {
+    shake.value = true
+    shakeTimer = setTimeout(() => {
+      shake.value = false
+    }, 420)
+  })
+}
+
+async function handleLogin(): Promise<void> {
+  if (submitting.value) return
+
   try {
     await formRef.value?.validate()
   } catch {
     return
   }
 
-  loading.value = true
-  try {
-    const success = await userStore.login(formState)
-    if (success) {
-      const redirect = (route.query['redirect'] as string) || '/home'
+  const redirect = (route.query['redirect'] as string) || '/home'
+
+  const ok = await auth.run(
+    [
+      {
+        label: 'VERIFYING CREDENTIALS',
+        description: '账号或密码校验未通过',
+        run: async () => await userStore.login(formState)
+      },
+      {
+        label: 'LOADING COGNITIVE PROFILE',
+        description: '用户档案加载失败',
+        run: () => Boolean(userStore.userInfo)
+      },
+      {
+        label: 'INITIALIZING AOO ENGINE',
+        description: '目标页面初始化失败',
+        run: () => {
+          try {
+            const resolved = router.resolve(redirect)
+            return resolved.matched.length > 0
+          } catch {
+            return false
+          }
+        }
+      }
+    ],
+    () => {
       router.push(redirect)
     }
-  } finally {
-    loading.value = false
+  )
+
+  if (!ok) {
+    triggerShake()
+    setTimeout(() => auth.reset(), 1400)
   }
 }
 
-function demoLogin(role: 'student' | 'teacher') {
+function demoLogin(role: 'student' | 'teacher'): void {
+  if (submitting.value) return
   formState.username = role === 'student' ? 'student_demo' : 'teacher_demo'
   formState.password = '123456'
-  handleLogin()
+  void handleLogin()
 }
+
+// ─────────────────────────────────────────────
+//  生命周期
+// ─────────────────────────────────────────────
+onMounted(() => {
+  // jsdom / 老旧浏览器可能没有 matchMedia，缺失时静默降级
+  if (typeof window.matchMedia === 'function') {
+    mqMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    mqCompact = window.matchMedia('(max-width: 1024px)')
+    syncMotion()
+    syncCompact()
+    mqMotion.addEventListener?.('change', syncMotion)
+    mqCompact.addEventListener?.('change', syncCompact)
+  }
+
+  try {
+    playIntro.value = sessionStorage.getItem(BOOT_FLAG) !== '1'
+    sessionStorage.setItem(BOOT_FLAG, '1')
+  } catch {
+    playIntro.value = true
+  }
+
+  sessionId.value = makeSessionId()
+  tickClock()
+  clockTimer = setInterval(tickClock, 1000)
+
+  startBoot()
+  window.addEventListener('pointermove', onPointerMove, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  bootTimers.forEach((t) => clearTimeout(t))
+  bootTimers.length = 0
+  if (shakeTimer) clearTimeout(shakeTimer)
+  if (clockTimer) clearInterval(clockTimer)
+  if (parallaxRaf !== null) cancelAnimationFrame(parallaxRaf)
+  window.removeEventListener('pointermove', onPointerMove)
+  mqMotion?.removeEventListener('change', syncMotion)
+  mqCompact?.removeEventListener('change', syncCompact)
+})
 </script>
 
 <template>
-  <div class="login-page">
-    <OatDispersalBackground :density="42" :opacity="0.5" />
+  <div class="login-page" :class="{ 'is-authenticating': auth.converging.value }">
+    <!-- ══ L0 签名场层：AOO 活体流场 ══ -->
+    <div class="field-layer">
+      <AooFlowField
+        :animated="!reducedMotion"
+        :density="isCompact ? 150 : 300"
+        :convergence="convergence"
+        :pointer-x="parallax.x"
+        :pointer-y="parallax.y"
+      />
+      <div class="field-vignette" aria-hidden="true" />
+    </div>
 
-    <!-- 环境光斑 -->
-    <div class="login-ambient" aria-hidden="true">
-      <span class="orb orb--1" />
-      <span class="orb orb--2" />
-      <span class="orb orb--3" />
-      <div class="grid-fade" />
+    <!-- ══ 顶部终端条 ══ -->
+    <header class="term-bar" :class="{ 'is-in': stageOn(1) }">
+      <span class="term-bar__mark" aria-hidden="true" />
+      <span class="term-bar__id">OAT-OPS</span>
+      <span class="term-bar__sep">//</span>
+      <span class="term-bar__net">AUTH TERMINAL</span>
+      <span class="term-bar__spacer" />
+      <span class="term-bar__meta">SESSION {{ sessionId }}</span>
+      <span class="term-bar__meta term-bar__meta--time">{{ clock }}</span>
+    </header>
+
+    <!-- ══ 右侧竖排铭牌：细节层 ══ -->
+    <div class="edge-plate" :class="{ 'is-in': stageOn(2) }" aria-hidden="true">
+      AVENA · OPTIMIZATION · ORIENTED
     </div>
 
     <div class="login-shell">
-      <!-- 品牌叙事区 -->
-      <section class="brand-panel">
-        <div class="brand-panel__glow" aria-hidden="true" />
+      <!-- ═══ 品牌叙事区 ═══ -->
+      <section class="brand-panel" :style="layerBrandStyle">
+        <p class="brand-overline" :class="{ 'is-in': stageOn(2) }">
+          <span class="brand-overline__bracket">[</span>
+          AOO-ENGINE v2.1
+          <span class="brand-overline__bracket">]</span>
+          <span class="brand-overline__div" />
+          AVENA OPTIMIZATION
+        </p>
 
-        <div class="brand-content">
-          <div class="brand-mark">
-            <div class="brand-logo">
-              <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <ellipse cx="40" cy="52" rx="12" ry="18" fill="url(#loginOatGrad)" opacity="0.95" />
-                <ellipse cx="37" cy="47" rx="5" ry="8" fill="white" opacity="0.2" />
-                <path d="M40 34 L34 12" stroke="url(#loginAwnGrad)" stroke-width="2" stroke-linecap="round" />
-                <path d="M40 34 L46 10" stroke="url(#loginAwnGrad)" stroke-width="2" stroke-linecap="round" />
-                <path d="M40 34 L40 8" stroke="url(#loginAwnGrad)" stroke-width="2" stroke-linecap="round" />
-                <path
-                  d="M32 55 Q18 48 10 56"
-                  stroke="url(#loginLeafGrad)"
-                  stroke-width="2.5"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M48 55 Q62 48 70 56"
-                  stroke="url(#loginLeafGrad)"
-                  stroke-width="2.5"
-                  fill="none"
-                  stroke-linecap="round"
-                />
-                <circle
-                  cx="40"
-                  cy="40"
-                  r="36"
-                  stroke="url(#loginRingGrad)"
-                  stroke-width="1.5"
-                  fill="none"
-                  opacity="0.55"
-                  class="logo-ring"
-                />
-                <defs>
-                  <linearGradient id="loginOatGrad" x1="28" y1="34" x2="52" y2="70" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#D4C08C" />
-                    <stop offset="0.5" stop-color="#C4A862" />
-                    <stop offset="1" stop-color="#A88B3E" />
-                  </linearGradient>
-                  <linearGradient id="loginAwnGrad" x1="40" y1="34" x2="40" y2="8" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#C4A862" />
-                    <stop offset="1" stop-color="#8B6914" />
-                  </linearGradient>
-                  <linearGradient id="loginLeafGrad" x1="10" y1="56" x2="70" y2="56" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#7BA05B" />
-                    <stop offset="1" stop-color="#5D8A3C" />
-                  </linearGradient>
-                  <linearGradient id="loginRingGrad" x1="4" y1="4" x2="76" y2="76" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#D4A373" />
-                    <stop offset="1" stop-color="#4A6CF7" />
-                  </linearGradient>
-                </defs>
-              </svg>
-            </div>
-            <h1 class="brand-name">燕麦智导</h1>
-          </div>
+        <h1 class="brand-name" :class="{ 'is-in': stageOn(3) }">
+          <GlyphScramble text="燕麦智导" :play="playIntro && stageOn(3) && !reducedMotion" />
+        </h1>
 
-          <p class="brand-tagline">让野燕麦的生存智慧，重塑每一个学习者的认知地图</p>
-          <p class="brand-support">
-            AOO 优化算法驱动认知诊断、个性化路径与智能问答——登录后，你的学习轨迹开始收敛。
-          </p>
+        <p class="brand-latin" :class="{ 'is-in': stageOn(4) }">OAT&nbsp;GUIDE</p>
 
-          <!-- 路径隐喻：种子收敛轨迹 -->
-          <div class="path-visual" aria-hidden="true">
-            <svg class="path-svg" viewBox="0 0 360 120" fill="none">
-              <path
-                class="path-line path-line--a"
-                d="M20 90 C80 90, 100 30, 160 40 S240 100, 340 28"
-                stroke="url(#loginPathGrad)"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-              <path
-                class="path-line path-line--b"
-                d="M20 70 C90 70, 120 100, 180 60 S260 20, 340 50"
-                stroke="rgba(0,212,255,0.35)"
-                stroke-width="1"
-                stroke-linecap="round"
-              />
-              <circle class="path-node path-node--1" cx="20" cy="90" r="3.5" fill="#D4A373" />
-              <circle class="path-node path-node--2" cx="160" cy="40" r="3" fill="#4A6CF7" />
-              <circle class="path-node path-node--3" cx="340" cy="28" r="4.5" fill="#00D4FF" />
-              <defs>
-                <linearGradient id="loginPathGrad" x1="20" y1="90" x2="340" y2="28">
-                  <stop stop-color="#D4A373" stop-opacity="0.2" />
-                  <stop offset="0.5" stop-color="#D4A373" stop-opacity="0.85" />
-                  <stop offset="1" stop-color="#00D4FF" stop-opacity="0.9" />
-                </linearGradient>
-              </defs>
-            </svg>
-            <div class="path-labels">
-              <span>探索</span>
-              <span>收敛</span>
-              <span>最优路径</span>
-            </div>
-          </div>
+        <div class="brand-rule" :class="{ 'is-in': stageOn(4) }" aria-hidden="true" />
 
-          <ul class="brand-pillars">
-            <li style="--i: 0"><span class="pillar-dot" />AI 认知诊断</li>
-            <li style="--i: 1"><span class="pillar-dot" />AOO 路径规划</li>
-            <li style="--i: 2"><span class="pillar-dot" />RAG 智能问答</li>
-          </ul>
-        </div>
+        <p class="brand-tagline" :class="{ 'is-in': stageOn(5) }">
+          让野燕麦的生存智慧，<br />重塑每一个学习者的认知地图
+        </p>
+
+        <p class="brand-support" :class="{ 'is-in': stageOn(5) }">
+          AOO 优化算法驱动认知诊断、个性化路径与智能问答。登录后，你的学习轨迹开始收敛。
+        </p>
+
+        <ul class="brand-pillars" :class="{ 'is-in': stageOn(6) }">
+          <li style="--i: 0">
+            <span class="pillar-idx">01</span>
+            <span class="pillar-body">
+              <span class="pillar-title">AI 认知诊断</span>
+              <span class="pillar-sub">DIAGNOSIS</span>
+            </span>
+          </li>
+          <li style="--i: 1">
+            <span class="pillar-idx">02</span>
+            <span class="pillar-body">
+              <span class="pillar-title">AOO 路径规划</span>
+              <span class="pillar-sub">PATHFINDING</span>
+            </span>
+          </li>
+          <li style="--i: 2">
+            <span class="pillar-idx">03</span>
+            <span class="pillar-body">
+              <span class="pillar-title">RAG 智能问答</span>
+              <span class="pillar-sub">RETRIEVAL</span>
+            </span>
+          </li>
+        </ul>
       </section>
 
-      <!-- 登录交互区 -->
-      <section class="form-panel">
-        <div class="form-card">
+      <!-- ═══ 登录交互区 ═══ -->
+      <section class="form-panel" :style="layerCardStyle">
+        <div
+          class="form-card"
+          :class="{
+            'is-in': stageOn(7),
+            'is-shaking': shake,
+            'is-busy': submitting
+          }"
+        >
+          <!-- 四角刻度：硬质取景框语汇 -->
+          <span class="corner corner--tl" aria-hidden="true" />
+          <span class="corner corner--tr" aria-hidden="true" />
+          <span class="corner corner--bl" aria-hidden="true" />
+          <span class="corner corner--br" aria-hidden="true" />
+
+          <!-- 字段光标：左侧金条 -->
+          <span
+            class="form-card__cursor"
+            :class="{ 'is-active': cursorOffset >= 0 }"
+            :style="{ '--cursor-slot': cursorOffset }"
+            aria-hidden="true"
+          />
+
           <header class="form-header">
-            <p class="form-eyebrow">Welcome back</p>
+            <div class="form-header__row">
+              <span class="form-kicker">SECURE ACCESS</span>
+              <span class="form-readout">{{ fieldReadout }}</span>
+            </div>
             <h2 class="form-title">进入认知地图</h2>
             <p class="form-subtitle">登录账号，继续你的个性化学习旅程</p>
           </header>
 
+          <!-- ── 认证日志面板（L4） ── -->
+          <div v-if="auth.showLog.value" class="auth-log" role="status" aria-live="polite">
+            <p
+              v-for="(step, i) in auth.steps.value"
+              :key="i"
+              class="auth-log__line"
+              :class="`is-${step.status}`"
+            >
+              <span class="auth-log__caret">&gt;</span>
+              <span class="auth-log__label">{{ step.label }}</span>
+              <span class="auth-log__dots" aria-hidden="true" />
+              <span class="auth-log__state">
+                {{
+                  step.status === 'ok'
+                    ? 'OK'
+                    : step.status === 'failed'
+                      ? 'FAILED'
+                      : step.status === 'running'
+                        ? '···'
+                        : ''
+                }}
+              </span>
+            </p>
+            <p v-if="auth.errorText.value" class="auth-log__error">
+              {{ auth.errorText.value }}
+            </p>
+          </div>
+
+          <!-- ── 表单 ── -->
           <a-form
-            ref="formRef"
+            v-show="!auth.showLog.value"
+            :ref="setFormRef"
             :model="formState"
             :rules="rules"
             layout="vertical"
@@ -203,651 +473,925 @@ function demoLogin(role: 'student' | 'teacher') {
             @finish="handleLogin"
           >
             <a-form-item name="username">
-              <a-input
-                v-model:value="formState.username"
-                placeholder="请输入用户名"
-                autocomplete="username"
-                class="login-input"
+              <div
+                class="field"
+                :class="{ 'is-focus': activeField === 'username', 'is-in': stageOn(8) }"
               >
-                <template #prefix>
-                  <UserOutlined class="input-icon" />
-                </template>
-              </a-input>
+                <span class="field__tag">
+                  <span class="field__num">01</span>
+                  <span class="field__abbr">USR</span>
+                </span>
+                <a-input
+                  v-model:value="formState.username"
+                  placeholder="请输入用户名"
+                  autocomplete="username"
+                  class="login-input"
+                  :disabled="submitting"
+                  @focus="activeField = 'username'"
+                  @blur="activeField = null"
+                >
+                  <template #prefix>
+                    <UserOutlined class="input-icon" />
+                  </template>
+                </a-input>
+                <span class="field__scan" aria-hidden="true" />
+              </div>
             </a-form-item>
 
             <a-form-item name="password">
-              <a-input-password
-                v-model:value="formState.password"
-                placeholder="请输入密码"
-                autocomplete="current-password"
-                class="login-input"
+              <div
+                class="field"
+                :class="{ 'is-focus': activeField === 'password', 'is-in': stageOn(8) }"
               >
-                <template #prefix>
-                  <LockOutlined class="input-icon" />
-                </template>
-              </a-input-password>
+                <span class="field__tag">
+                  <span class="field__num">02</span>
+                  <span class="field__abbr">PWD</span>
+                </span>
+                <a-input-password
+                  v-model:value="formState.password"
+                  placeholder="请输入密码"
+                  autocomplete="current-password"
+                  class="login-input"
+                  :disabled="submitting"
+                  @focus="activeField = 'password'"
+                  @blur="activeField = null"
+                >
+                  <template #prefix>
+                    <LockOutlined class="input-icon" />
+                  </template>
+                </a-input-password>
+                <span class="field__scan" aria-hidden="true" />
+              </div>
             </a-form-item>
 
+            <!-- 熵条：只反映真实长度 -->
+            <div class="entropy" :class="{ 'is-in': stageOn(8) }">
+              <span class="entropy__key">ENTROPY</span>
+              <div class="entropy__cells" aria-hidden="true">
+                <span
+                  v-for="n in ENTROPY_CELLS"
+                  :key="n"
+                  class="entropy__cell"
+                  :class="{ 'is-on': n <= entropyFilled }"
+                />
+              </div>
+              <span class="entropy__label">{{ entropyLabel }}</span>
+            </div>
+
             <div class="form-extra">
-              <a-checkbox v-model:checked="formState.remember">记住登录状态</a-checkbox>
+              <a-checkbox v-model:checked="formState.remember" :disabled="submitting">
+                记住登录状态
+              </a-checkbox>
             </div>
 
             <a-form-item class="submit-item">
-              <button type="submit" class="login-btn" :disabled="loading" :class="{ 'is-loading': loading }">
-                <span class="login-btn__label">{{ loading ? '正在进入…' : '登 录' }}</span>
-                <ArrowRightOutlined v-if="!loading" class="login-btn__arrow" />
-                <span v-else class="login-btn__spinner" />
+              <button
+                type="submit"
+                class="login-btn"
+                :disabled="submitting"
+                :class="{ 'is-collapsing': auth.phase.value === 'collapsing' }"
+              >
+                <span class="login-btn__fill" aria-hidden="true" />
+                <span class="login-btn__label">登 录 · ENTER</span>
+                <ArrowRightOutlined class="login-btn__arrow" />
               </button>
             </a-form-item>
           </a-form>
 
-          <div class="demo-section">
-            <div class="demo-divider"><span>快速体验</span></div>
+          <div v-show="!auth.showLog.value" class="demo-section" :class="{ 'is-in': stageOn(9) }">
+            <div class="demo-divider"><span>QUICK ACCESS</span></div>
             <div class="demo-buttons">
-              <button type="button" class="demo-btn demo-btn--student" @click="demoLogin('student')">
+              <button
+                type="button"
+                class="demo-btn demo-btn--student"
+                :disabled="submitting"
+                @click="demoLogin('student')"
+              >
                 <UserOutlined />
                 学生 Demo
               </button>
-              <button type="button" class="demo-btn demo-btn--teacher" @click="demoLogin('teacher')">
+              <button
+                type="button"
+                class="demo-btn demo-btn--teacher"
+                :disabled="submitting"
+                @click="demoLogin('teacher')"
+              >
                 <TeamOutlined />
                 教师 Demo
               </button>
             </div>
           </div>
 
-          <footer class="form-footer">
+          <footer
+            v-show="!auth.showLog.value"
+            class="form-footer"
+            :class="{ 'is-in': stageOn(9) }"
+          >
             <span>还没有账号？</span>
-            <button type="button" class="link-btn" @click="router.push('/register')">立即注册</button>
+            <button
+              type="button"
+              class="link-btn"
+              :disabled="submitting"
+              @click="router.push('/register')"
+            >
+              立即注册
+            </button>
           </footer>
         </div>
 
-        <p class="form-credit">燕麦智导 · OatGuide</p>
+        <p class="form-credit" :class="{ 'is-in': stageOn(9) }">
+          SYSTEM READY<span class="caret" aria-hidden="true" />
+        </p>
       </section>
     </div>
+
+    <!-- ══ L4 白场穿越 ══ -->
+    <div class="warp" :class="{ 'is-on': auth.converging.value }" aria-hidden="true" />
   </div>
 </template>
 
 <style scoped>
-/* ============================================================
-   登录页 — 深空构图 + 燕麦种子传播动效
-   ============================================================ */
+/* ═══════════════════════════════════════════
+   基底
+   ═══════════════════════════════════════════ */
 .login-page {
-  --oat: #d4a373;
-  --oat-soft: #faedcd;
-  --aurora: #4a6cf7;
-  --cyan: #00d4ff;
-  --ink: #0a0d14;
-  --panel: #141b2b;
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --dim: #64748b;
-
   position: relative;
   min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 88px 40px 56px;
+  background: #06080d;
   overflow: hidden;
-  background: linear-gradient(155deg, #141b2b 0%, #101726 35%, #0f1623 65%, #0a0d14 100%);
-  color: var(--text);
+  font-feature-settings: 'tnum' 1;
 }
 
-/* ── 环境光 ── */
-.login-ambient {
+/*
+  注意：这里刻意 **不** 使用全站 .grid-bg 的 64px 栅格，
+  避免与内页背景撞脸。登录页的纹理完全交给 AooFlowField。
+*/
+.field-layer {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
 }
 
-.orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.4;
-  will-change: transform;
-}
-
-.orb--1 {
-  width: 340px;
-  height: 340px;
-  top: -100px;
-  left: -80px;
-  background: rgba(74, 108, 247, 0.22);
-  animation: orb-float-1 12s ease-in-out infinite;
-}
-
-.orb--2 {
-  width: 280px;
-  height: 280px;
-  top: 42%;
-  right: -90px;
-  background: rgba(0, 212, 255, 0.14);
-  animation: orb-float-2 14s ease-in-out infinite;
-}
-
-.orb--3 {
-  width: 220px;
-  height: 220px;
-  bottom: -50px;
-  left: 28%;
-  background: rgba(212, 163, 115, 0.2);
-  animation: orb-float-3 16s ease-in-out infinite;
-}
-
-.grid-fade {
+/* 暗角：把注意力收束到中央，同时保证文字对比度 */
+.field-vignette {
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 70% 60% at 40% 45%, black 20%, transparent 75%);
-  opacity: 0.55;
-  animation: grid-breathe 10s ease-in-out infinite;
+  background:
+    radial-gradient(ellipse 76% 62% at 50% 48%, rgba(6, 8, 13, 0.5) 0%, rgba(6, 8, 13, 0.9) 100%),
+    linear-gradient(to bottom, rgba(6, 8, 13, 0.86) 0%, rgba(6, 8, 13, 0) 22%);
 }
 
-@keyframes orb-float-1 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  25% {
-    transform: translate(20px, -15px) scale(1.05);
-  }
-  50% {
-    transform: translate(-10px, -25px) scale(0.95);
-  }
-  75% {
-    transform: translate(-20px, -5px) scale(1.02);
-  }
-}
-
-@keyframes orb-float-2 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  25% {
-    transform: translate(-25px, 10px) scale(1.08);
-  }
-  50% {
-    transform: translate(10px, -15px) scale(0.93);
-  }
-  75% {
-    transform: translate(25px, 5px) scale(1.04);
-  }
-}
-
-@keyframes orb-float-3 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  33% {
-    transform: translate(-15px, -10px) scale(1.06);
-  }
-  66% {
-    transform: translate(15px, 10px) scale(0.94);
-  }
-}
-
-@keyframes grid-breathe {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.65;
-  }
-}
-
-/* ── 主体分栏 ── */
-.login-shell {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-  min-height: 100vh;
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 40px 48px;
-  gap: 32px;
-  align-items: center;
-}
-
-/* ── 品牌区 ── */
-.brand-panel {
-  position: relative;
-  padding: 24px 16px 24px 8px;
-  animation: rise-in 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.brand-panel__glow {
+/* ═══ 顶部终端条 ═══ */
+.term-bar {
   position: absolute;
-  top: -8%;
-  left: 10%;
-  width: 420px;
-  height: 280px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(212, 163, 115, 0.16) 0%, transparent 70%);
-  pointer-events: none;
-  filter: blur(10px);
-}
-
-.brand-content {
-  position: relative;
-  max-width: 520px;
-}
-
-.brand-mark {
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 8;
   display: flex;
   align-items: center;
-  gap: 18px;
-  margin-bottom: 28px;
+  gap: 12px;
+  height: 46px;
+  padding: 0 26px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.09);
+  background: rgba(6, 8, 13, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: #64748b;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.4s linear;
 }
 
-.brand-logo {
-  width: 76px;
-  height: 76px;
+.term-bar.is-in {
+  opacity: 1;
+}
+
+.term-bar__mark {
+  width: 7px;
+  height: 7px;
+  background: #d4a373;
   flex-shrink: 0;
-  animation: logo-pulse 4.5s ease-in-out infinite;
-  filter: drop-shadow(0 0 18px rgba(212, 163, 115, 0.25));
 }
 
-.brand-logo svg {
+.term-bar__id {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.term-bar__sep {
+  color: #334155;
+}
+
+.term-bar__net {
+  color: #94a3b8;
+}
+
+.term-bar__spacer {
+  flex: 1;
+}
+
+.term-bar__meta {
+  color: #475569;
+  font-size: 10.5px;
+}
+
+.term-bar__meta--time {
+  color: #d4a373;
+  min-width: 66px;
+  text-align: right;
+}
+
+/* ═══ 右侧竖排铭牌 ═══ */
+.edge-plate {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  z-index: 6;
+  transform: translateY(-50%) rotate(180deg);
+  writing-mode: vertical-rl;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.42em;
+  color: #2c3648;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.6s linear;
+  pointer-events: none;
+}
+
+.edge-plate.is-in {
+  opacity: 1;
+}
+
+/* ═══ 布局骨架：右栏显著加宽 ═══ */
+.login-shell {
+  position: relative;
+  z-index: 5;
   width: 100%;
-  height: 100%;
+  max-width: 1280px;
+  display: grid;
+  /* 左栏自适应，右栏固定 480px —— 解决「右侧太小」 */
+  grid-template-columns: minmax(0, 1fr) 480px;
+  gap: 88px;
+  align-items: center;
 }
 
-.logo-ring {
-  transform-origin: 40px 40px;
-  animation: ring-spin 18s linear infinite;
+/* ═══════════════════════════════════════════
+   品牌叙事区：杂志级排版尺度
+   ═══════════════════════════════════════════ */
+.brand-panel {
+  position: relative;
+  will-change: transform;
+  min-width: 0;
 }
 
-@keyframes logo-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    filter: drop-shadow(0 0 14px rgba(212, 163, 115, 0.2));
-  }
-  50% {
-    transform: scale(1.04);
-    filter: drop-shadow(0 0 28px rgba(212, 163, 115, 0.38));
-  }
+.brand-overline {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin: 0 0 26px;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.42s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes ring-spin {
-  to {
-    stroke-dasharray: 40 180;
-    stroke-dashoffset: -220;
-  }
+.brand-overline.is-in {
+  clip-path: inset(0 0 0 0);
 }
 
+.brand-overline__bracket {
+  color: #d4a373;
+}
+
+.brand-overline__div {
+  width: 26px;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.32);
+}
+
+/* 超大刊头 —— 与内页品牌标识同款燕麦金渐变 + 字重/字距 */
 .brand-name {
   margin: 0;
-  font-size: clamp(36px, 5vw, 52px);
-  font-weight: 800;
-  letter-spacing: -1px;
-  line-height: 1.1;
-  background: linear-gradient(135deg, #f8fafc 0%, #d4a373 52%, #faedcd 100%);
+  font-size: clamp(48px, 6.4vw, 92px);
+  font-weight: 700;
+  line-height: 0.96;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #f8fafc 0%, #d4a373 50%, #faedcd 100%);
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
   background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #d4a373;
+  opacity: 0;
+  transition: opacity 0.12s linear;
+}
+
+.brand-name.is-in {
+  opacity: 1;
+}
+
+/* 拉丁副题：呼应内页品牌金，收窄字距，弱化等宽与刊头对撞 */
+.brand-latin {
+  margin: 14px 0 0;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(14px, 1.4vw, 20px);
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: #d4a373;
+  text-transform: uppercase;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.brand-latin.is-in {
+  clip-path: inset(0 0 0 0);
+}
+
+.brand-rule {
+  height: 1px;
+  margin: 32px 0 30px;
+  background: linear-gradient(90deg, #d4a373 0%, rgba(212, 163, 115, 0.1) 58%, transparent 100%);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.brand-rule.is-in {
+  transform: scaleX(1);
 }
 
 .brand-tagline {
-  margin: 0 0 14px;
-  font-size: clamp(17px, 2.2vw, 21px);
+  margin: 0 0 18px;
+  font-size: clamp(19px, 1.85vw, 26px);
   font-weight: 500;
+  line-height: 1.5;
   color: #e2e8f0;
-  line-height: 1.55;
-  animation: rise-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+  letter-spacing: -0.01em;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.52s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .brand-support {
-  margin: 0 0 28px;
-  max-width: 460px;
-  font-size: 14.5px;
-  line-height: 1.75;
-  color: var(--muted);
-  padding-bottom: 18px;
-  border-bottom: 1px solid transparent;
-  border-image: linear-gradient(90deg, transparent 0%, #d4a373 45%, transparent 100%) 1;
-  animation: rise-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
+  margin: 0 0 42px;
+  font-size: 15px;
+  line-height: 1.85;
+  color: #94a3b8;
+  max-width: 32em;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.52s cubic-bezier(0.16, 1, 0.3, 1) 0.08s;
 }
 
-/* 路径视觉 */
-.path-visual {
-  margin-bottom: 28px;
-  animation: rise-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.26s both;
+.brand-tagline.is-in,
+.brand-support.is-in {
+  clip-path: inset(0 0 0 0);
 }
 
-.path-svg {
-  width: 100%;
-  max-width: 380px;
-  height: auto;
-  display: block;
-}
-
-.path-line {
-  fill: none;
-  stroke-dasharray: 420;
-  stroke-dashoffset: 420;
-  animation: draw-path 2.8s ease forwards 0.5s;
-}
-
-.path-line--b {
-  animation-delay: 0.85s;
-  animation-duration: 3.2s;
-}
-
-.path-node {
-  opacity: 0;
-  animation: node-pop 0.5s ease forwards;
-}
-
-.path-node--1 {
-  animation-delay: 0.7s;
-}
-
-.path-node--2 {
-  animation-delay: 1.4s;
-}
-
-.path-node--3 {
-  animation-delay: 2.1s;
-  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.7));
-}
-
-.path-labels {
-  display: flex;
-  justify-content: space-between;
-  max-width: 380px;
-  margin-top: 6px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: none;
-  color: var(--dim);
-}
-
-@keyframes draw-path {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes node-pop {
-  from {
-    opacity: 0;
-    transform: scale(0.4);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
+/* ── Pillar 卡片化：编号 + 中英双行 ── */
 .brand-pillars {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: rgba(148, 163, 184, 0.13);
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  max-width: 560px;
 }
 
 .brand-pillars li {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--muted);
-  animation: rise-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(0.35s + var(--i) * 0.08s);
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 16px 16px 15px;
+  background: rgba(6, 8, 13, 0.72);
+  clip-path: inset(0 0 100% 0);
+  transition:
+    clip-path 0.07s linear calc(var(--i) * 0.075s),
+    background-color 0.2s linear;
 }
 
-.pillar-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--oat);
-  box-shadow: 0 0 10px rgba(212, 163, 115, 0.55);
+.brand-pillars.is-in li {
+  clip-path: inset(0 0 0 0);
 }
 
-/* ── 表单区 ── */
-.form-panel {
+.brand-pillars li:hover {
+  background: rgba(212, 163, 115, 0.07);
+}
+
+.pillar-idx {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #d4a373;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.pillar-body {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  animation: rise-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pillar-title {
+  font-size: 14px;
+  color: #e2e8f0;
+  line-height: 1.35;
+}
+
+.pillar-sub {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: #475569;
+}
+
+/* ═══════════════════════════════════════════
+   表单卡片：显著放大 + 四角刻度
+   ═══════════════════════════════════════════ */
+.form-panel {
+  position: relative;
+  will-change: transform;
 }
 
 .form-card {
   position: relative;
-  width: 100%;
-  max-width: 420px;
-  margin-left: auto;
-  padding: 36px 32px 28px;
-  border-radius: 20px;
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.025) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(22px) saturate(1.2);
-  -webkit-backdrop-filter: blur(22px) saturate(1.2);
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(212, 163, 115, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  overflow: hidden;
+  padding: 40px 38px 32px;
+  background: rgba(9, 12, 19, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-left: 2px solid #d4a373;
+  border-radius: 2px;
+  clip-path: inset(0 0 100% 0);
+  transition:
+    clip-path 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s linear;
 }
 
-.form-card::before {
-  content: '';
+.form-card.is-in {
+  clip-path: inset(0 0 0 0);
+}
+
+.form-card.is-busy {
+  border-color: rgba(212, 163, 115, 0.34);
+}
+
+/* ── 四角刻度 ── */
+.corner {
   position: absolute;
-  top: 0;
-  left: 12%;
-  right: 12%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(212, 163, 115, 0.55), transparent);
+  width: 11px;
+  height: 11px;
+  border: 1px solid rgba(212, 163, 115, 0.5);
+  pointer-events: none;
 }
 
+.corner--tl {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.corner--tr {
+  top: -1px;
+  right: -1px;
+  border-left: none;
+  border-bottom: none;
+}
+
+.corner--bl {
+  bottom: -1px;
+  left: -1px;
+  border-right: none;
+  border-top: none;
+}
+
+.corner--br {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+/* 字段光标金条 */
+.form-card__cursor {
+  position: absolute;
+  left: -2px;
+  top: 158px;
+  width: 2px;
+  height: 52px;
+  background: #d4a373;
+  opacity: 0;
+  transform: translateY(calc(var(--cursor-slot, 0) * 96px));
+  transition:
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.18s linear;
+}
+
+.form-card__cursor.is-active {
+  opacity: 1;
+}
+
+/* 失败硬抖动 */
+.form-card.is-shaking {
+  animation: hard-shake 0.4s steps(1, end);
+}
+
+@keyframes hard-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  10%,
+  50%,
+  90% {
+    transform: translateX(-3px);
+  }
+  30%,
+  70% {
+    transform: translateX(3px);
+  }
+}
+
+/* ── 卡片头部 ── */
 .form-header {
   margin-bottom: 28px;
 }
 
-.form-eyebrow {
-  margin: 0 0 8px;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--oat);
-  opacity: 0.85;
+.form-header__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.form-kicker,
+.form-readout {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
+}
+
+.form-kicker {
+  color: #d4a373;
+}
+
+.form-readout {
+  color: #475569;
 }
 
 .form-title {
-  margin: 0 0 8px;
-  font-size: 26px;
+  margin: 0;
+  font-size: 27px;
   font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.3px;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+  line-height: 1.25;
 }
 
 .form-subtitle {
-  margin: 0;
+  margin: 9px 0 0;
   font-size: 13.5px;
-  color: var(--muted);
-  line-height: 1.5;
+  color: #94a3b8;
+  line-height: 1.6;
 }
 
-.login-form :deep(.ant-form-item) {
-  margin-bottom: 18px;
+/* ── 输入字段 ── */
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.login-form :deep(.login-input.ant-input-affix-wrapper),
-.login-form :deep(.login-input.ant-input-password) {
-  background: rgba(10, 13, 20, 0.55) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 12px !important;
-  padding: 10px 14px !important;
-  box-shadow: none !important;
+.field.is-in {
+  clip-path: inset(0 0 0 0);
+}
+
+.field__tag {
+  flex-shrink: 0;
+  width: 54px;
+  height: 52px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-right: none;
+  background: rgba(148, 163, 184, 0.04);
   transition:
-    border-color 0.25s ease,
-    box-shadow 0.25s ease,
-    background 0.25s ease;
+    color 0.16s linear,
+    border-color 0.16s linear,
+    background-color 0.16s linear;
 }
 
-.login-form :deep(.login-input.ant-input-affix-wrapper:hover),
-.login-form :deep(.login-input.ant-input-password:hover) {
-  border-color: rgba(212, 163, 115, 0.35) !important;
-  background: rgba(10, 13, 20, 0.7) !important;
+.field__num {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #334155;
 }
 
-.login-form :deep(.login-input.ant-input-affix-wrapper-focused),
-.login-form :deep(.login-input.ant-input-password-focused),
-.login-form :deep(.login-input.ant-input-affix-wrapper:focus-within) {
-  border-color: rgba(212, 163, 115, 0.65) !important;
-  box-shadow: 0 0 0 3px rgba(212, 163, 115, 0.12) !important;
-  background: rgba(10, 13, 20, 0.78) !important;
+.field__abbr {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: #64748b;
 }
 
-.login-form :deep(.ant-input) {
-  background: transparent !important;
-  color: var(--text) !important;
+.field.is-focus .field__tag {
+  border-color: rgba(212, 163, 115, 0.42);
+  background: rgba(212, 163, 115, 0.06);
 }
 
-.login-form :deep(.ant-input::placeholder) {
-  color: var(--dim) !important;
+.field.is-focus .field__abbr {
+  color: #d4a373;
+}
+
+.field.is-focus .field__num {
+  color: rgba(212, 163, 115, 0.6);
+}
+
+/* 聚焦扫描线 */
+.field__scan {
+  position: absolute;
+  left: 54px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: #d4a373;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.field.is-focus .field__scan {
+  transform: scaleX(1);
 }
 
 .input-icon {
-  color: var(--dim);
+  color: #64748b;
+}
+
+/* ── 熵条 ── */
+.entropy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -10px 0 18px;
+  padding-left: 54px;
+  opacity: 0;
+  transition: opacity 0.3s linear;
+}
+
+.entropy.is-in {
+  opacity: 1;
+}
+
+.entropy__key,
+.entropy__label {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #475569;
+}
+
+.entropy__cells {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.entropy__cell {
+  flex: 1;
+  height: 4px;
+  background: rgba(148, 163, 184, 0.16);
+  transition: background-color 0.12s linear;
+}
+
+.entropy__cell.is-on {
+  background: #d4a373;
 }
 
 .form-extra {
   display: flex;
-  align-items: center;
-  margin: -4px 0 20px;
+  justify-content: flex-start;
+  margin-bottom: 22px;
 }
 
-.form-extra :deep(.ant-checkbox-wrapper) {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.form-extra :deep(.ant-checkbox-inner) {
-  background: rgba(10, 13, 20, 0.6);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.form-extra :deep(.ant-checkbox-checked .ant-checkbox-inner) {
-  background: var(--oat);
-  border-color: var(--oat);
-}
-
+/* ── 提交按钮 ── */
 .submit-item {
-  margin-bottom: 8px !important;
+  margin-bottom: 8px;
 }
 
 .login-btn {
   position: relative;
   width: 100%;
-  height: 48px;
+  height: 54px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: 0.28em;
-  color: #0a0d14;
-  background: linear-gradient(135deg, #faedcd 0%, #d4a373 55%, #c08b5c 100%);
-  box-shadow:
-    0 8px 24px rgba(212, 163, 115, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition:
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.25s ease,
-    filter 0.25s ease;
+  gap: 12px;
   overflow: hidden;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #d4a373;
+  border-radius: 0;
+  color: #d4a373;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  transition:
+    color 0.12s linear,
+    height 0.26s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.login-btn::after {
-  content: '';
+/* 金色从左侧硬边推满 */
+.login-btn__fill {
   position: absolute;
   inset: 0;
-  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.28) 50%, transparent 70%);
-  transform: translateX(-120%);
-  transition: transform 0.6s ease;
+  background: #d4a373;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.13s linear;
 }
 
-.login-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow:
-    0 12px 32px rgba(212, 163, 115, 0.38),
-    0 0 40px rgba(212, 163, 115, 0.12);
-}
-
-.login-btn:hover:not(:disabled)::after {
-  transform: translateX(120%);
-}
-
-.login-btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.login-btn:disabled {
-  cursor: wait;
-  opacity: 0.85;
+.login-btn__label,
+.login-btn__arrow {
+  position: relative;
+  z-index: 1;
 }
 
 .login-btn__arrow {
-  font-size: 14px;
-  letter-spacing: 0;
-  transition: transform 0.25s ease;
+  font-size: 13px;
+  transform: translateX(-4px);
+  opacity: 0;
+  transition:
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.18s linear;
 }
 
-.login-btn:hover:not(:disabled) .login-btn__arrow {
-  transform: translateX(3px);
+.login-btn:not(:disabled):hover {
+  color: #06080d;
 }
 
-.login-btn__spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(10, 13, 20, 0.25);
-  border-top-color: #0a0d14;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+.login-btn:not(:disabled):hover .login-btn__fill {
+  clip-path: inset(0 0 0 0);
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.login-btn:not(:disabled):hover .login-btn__arrow {
+  transform: translateX(0);
+  opacity: 1;
 }
 
-/* Demo */
+.login-btn:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.login-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 塌缩为一条 3px 横线 */
+.login-btn.is-collapsing {
+  height: 3px;
+  border-width: 0;
+  color: transparent;
+}
+
+.login-btn.is-collapsing .login-btn__fill {
+  clip-path: inset(0 0 0 0);
+}
+
+.login-btn.is-collapsing .login-btn__arrow {
+  opacity: 0;
+}
+
+/* ═══ 认证日志 ═══ */
+.auth-log {
+  padding: 18px 0 10px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 2;
+}
+
+.auth-log__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: #64748b;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.22s steps(24, end);
+}
+
+.auth-log__line.is-running,
+.auth-log__line.is-ok,
+.auth-log__line.is-failed {
+  clip-path: inset(0 0 0 0);
+}
+
+.auth-log__caret {
+  color: #d4a373;
+}
+
+.auth-log__label {
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.auth-log__dots {
+  flex: 1;
+  min-width: 12px;
+  border-bottom: 1px dotted rgba(148, 163, 184, 0.28);
+  transform: translateY(-3px);
+}
+
+.auth-log__state {
+  min-width: 48px;
+  text-align: right;
+  letter-spacing: 0.1em;
+}
+
+.auth-log__line.is-ok .auth-log__state {
+  color: #d4a373;
+}
+
+.auth-log__line.is-ok .auth-log__label {
+  color: #cbd5e1;
+}
+
+.auth-log__line.is-failed .auth-log__state,
+.auth-log__line.is-failed .auth-log__label {
+  color: #ef4444;
+}
+
+.auth-log__error {
+  margin: 14px 0 0;
+  padding-left: 16px;
+  font-size: 12.5px;
+  color: #ef4444;
+  letter-spacing: 0.04em;
+}
+
+/* ═══ Demo 区 ═══ */
 .demo-section {
-  margin-top: 8px;
+  margin-top: 26px;
+  opacity: 0;
+  transition: opacity 0.35s linear;
+}
+
+.demo-section.is-in,
+.form-footer.is-in {
+  opacity: 1;
 }
 
 .demo-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-  color: var(--dim);
-  font-size: 12px;
+  position: relative;
+  text-align: center;
+  margin-bottom: 16px;
 }
 
-.demo-divider::before,
-.demo-divider::after {
+.demo-divider::before {
   content: '';
-  flex: 1;
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.demo-divider span {
+  position: relative;
+  padding: 0 14px;
+  background: #0a0e16;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: #475569;
 }
 
 .demo-buttons {
@@ -857,187 +1401,311 @@ function demoLogin(role: 'student' | 'teacher') {
 }
 
 .demo-btn {
-  height: 40px;
+  height: 46px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 8px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.03);
+  font-size: 13.5px;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0;
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.2s ease;
+    color 0.14s linear,
+    border-color 0.14s linear,
+    background-color 0.14s linear;
 }
 
-.demo-btn--student {
-  border: 1px solid rgba(52, 211, 153, 0.35);
-  color: #34d399;
+.demo-btn:not(:disabled):hover {
+  color: #d4a373;
+  border-color: rgba(212, 163, 115, 0.55);
+  background: rgba(212, 163, 115, 0.05);
 }
 
-.demo-btn--student:hover {
-  background: rgba(52, 211, 153, 0.1);
-  border-color: #34d399;
-  transform: translateY(-1px);
+.demo-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
-.demo-btn--teacher {
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fbbf24;
-}
-
-.demo-btn--teacher:hover {
-  background: rgba(212, 163, 115, 0.1);
-  border-color: var(--oat);
-  color: var(--oat);
-  transform: translateY(-1px);
-}
-
+/* ═══ 页脚 ═══ */
 .form-footer {
-  margin-top: 22px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
   text-align: center;
   font-size: 13px;
-  color: var(--dim);
+  color: #64748b;
+  opacity: 0;
+  transition: opacity 0.35s linear;
 }
 
 .link-btn {
-  margin-left: 4px;
+  margin-left: 6px;
   padding: 0;
-  border: none;
   background: none;
-  color: var(--oat);
-  font-size: 13px;
-  font-weight: 600;
+  border: none;
   cursor: pointer;
-  transition: color 0.2s ease;
+  color: #d4a373;
+  font-size: 13px;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.14s linear;
 }
 
-.link-btn:hover {
-  color: var(--oat-soft);
+.link-btn:not(:disabled):hover {
+  border-bottom-color: #d4a373;
+}
+
+.link-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .form-credit {
-  margin: 18px 0 0 auto;
-  max-width: 420px;
+  margin: 20px 0 0;
   text-align: center;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: rgba(100, 116, 139, 0.7);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: #334155;
+  opacity: 0;
+  transition: opacity 0.4s linear;
 }
 
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
+.form-credit.is-in {
+  opacity: 1;
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 10px;
+  margin-left: 6px;
+  background: #d4a373;
+  transform: translateY(1px);
+  animation: caret-blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
     opacity: 1;
-    transform: translateY(0);
+  }
+  50%,
+  100% {
+    opacity: 0;
   }
 }
 
-/* ── 响应式 ── */
-@media (max-width: 960px) {
+/* ═══ L4 白场穿越 ═══ */
+.warp {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #f8fafc;
+  pointer-events: none;
+  clip-path: circle(0% at 50% 50%);
+}
+
+.warp.is-on {
+  animation: warp-burst 0.34s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+@keyframes warp-burst {
+  0% {
+    clip-path: circle(0% at 50% 50%);
+  }
+  100% {
+    clip-path: circle(85% at 50% 50%);
+  }
+}
+
+.login-page.is-authenticating .brand-panel {
+  opacity: 0.3;
+  transition: opacity 0.3s linear;
+}
+
+/* ═══════════════════════════════════════════
+   Ant Design 输入框覆写：同步放大
+   ═══════════════════════════════════════════ */
+.login-form :deep(.ant-form-item) {
+  margin-bottom: 20px;
+}
+
+.login-form :deep(.ant-input-affix-wrapper) {
+  height: 52px;
+  padding-inline: 14px;
+  border-radius: 0;
+  background: rgba(148, 163, 184, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: none;
+  transition:
+    border-color 0.16s linear,
+    background-color 0.16s linear;
+}
+
+.login-form :deep(.ant-input-affix-wrapper:hover) {
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.login-form :deep(.ant-input-affix-wrapper-focused),
+.login-form :deep(.ant-input-affix-wrapper:focus-within) {
+  border-color: rgba(212, 163, 115, 0.55);
+  background: rgba(212, 163, 115, 0.04);
+  box-shadow: none;
+}
+
+.login-form :deep(.ant-input) {
+  background: transparent;
+  color: #f8fafc;
+  font-size: 15px;
+}
+
+.login-form :deep(.ant-input::placeholder) {
+  color: #475569;
+}
+
+.login-form :deep(.ant-input-password-icon),
+.login-form :deep(.anticon) {
+  color: #64748b;
+}
+
+.login-form :deep(.ant-input-password-icon:hover) {
+  color: #d4a373;
+}
+
+.login-form :deep(.ant-form-item-explain-error) {
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: 6px;
+  padding-left: 54px;
+}
+
+.login-form :deep(.ant-checkbox-wrapper) {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.login-form :deep(.ant-checkbox-inner) {
+  border-radius: 0;
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.login-form :deep(.ant-checkbox-checked .ant-checkbox-inner) {
+  background: #d4a373;
+  border-color: #d4a373;
+}
+
+.login-form :deep(.ant-checkbox-checked .ant-checkbox-inner::after) {
+  border-color: #06080d;
+}
+
+/* ═══════════════════════════════════════════
+   响应式
+   ═══════════════════════════════════════════ */
+@media (max-width: 1240px) {
+  .login-shell {
+    grid-template-columns: minmax(0, 1fr) 440px;
+    gap: 56px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .login-page {
+    padding: 78px 24px 40px;
+  }
+
   .login-shell {
     grid-template-columns: 1fr;
-    padding: 32px 24px 40px;
-    gap: 20px;
-    align-content: center;
+    gap: 44px;
+    max-width: 560px;
   }
 
-  .brand-panel {
-    padding: 8px 0 0;
-    text-align: center;
-  }
-
-  .brand-mark {
-    justify-content: center;
+  .brand-name {
+    font-size: clamp(40px, 11vw, 60px);
   }
 
   .brand-support {
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  .path-visual {
     display: none;
   }
 
   .brand-pillars {
-    justify-content: center;
+    max-width: none;
   }
 
-  .form-card {
-    margin: 0 auto;
+  .edge-plate {
+    display: none;
   }
 
-  .form-credit {
-    margin-left: auto;
-    margin-right: auto;
+  .form-card__cursor {
+    display: none;
   }
 }
 
-@media (max-width: 480px) {
-  .login-shell {
-    padding: 24px 16px 32px;
-  }
-
-  .brand-logo {
-    width: 56px;
-    height: 56px;
-  }
-
-  .brand-name {
-    font-size: 32px;
-  }
-
-  .brand-tagline {
-    font-size: 16px;
-  }
-
-  .brand-support {
-    font-size: 13px;
+@media (max-width: 620px) {
+  .brand-pillars {
+    grid-template-columns: 1fr;
   }
 
   .form-card {
-    padding: 28px 20px 22px;
-    border-radius: 16px;
+    padding: 30px 22px 26px;
   }
 
+  .term-bar__meta {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
   .demo-buttons {
     grid-template-columns: 1fr;
   }
 }
 
+/* ═══════════════════════════════════════════
+   无障碍降级
+   ═══════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
-  .orb,
-  .grid-fade,
-  .brand-logo,
-  .logo-ring,
-  .path-line,
-  .path-node,
-  .brand-panel,
-  .form-panel,
+  .brand-overline,
+  .brand-latin,
   .brand-tagline,
   .brand-support,
-  .path-visual,
-  .brand-pillars li {
+  .field,
+  .auth-log__line {
+    clip-path: inset(0 0 0 0) !important;
+    transition: none !important;
+  }
+
+  .brand-name,
+  .brand-pillars li,
+  .form-card,
+  .demo-section,
+  .form-footer,
+  .form-credit,
+  .term-bar,
+  .edge-plate,
+  .entropy {
+    opacity: 1 !important;
+    clip-path: inset(0 0 0 0) !important;
+    transition: none !important;
+  }
+
+  .brand-rule {
+    transform: scaleX(1) !important;
+    transition: none !important;
+  }
+
+  .caret,
+  .form-card.is-shaking {
     animation: none !important;
   }
 
-  .path-line {
-    stroke-dashoffset: 0;
-  }
-
-  .path-node {
-    opacity: 1;
-  }
-
-  .login-btn::after {
-    display: none;
+  .warp.is-on {
+    animation: none !important;
+    clip-path: circle(85% at 50% 50%);
   }
 }
 </style>
