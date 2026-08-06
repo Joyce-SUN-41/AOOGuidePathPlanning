@@ -63,7 +63,7 @@ const props = withDefaults(
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
-/** 调色：严格单高光色（燕麦金）+ 冷灰，禁止彩色光斑 */
+/** 调色：严格单高光色（动麦金）+ 冷灰，禁止彩色光斑 */
 const COLOR = {
   gold: [212, 163, 115] as const,
   cyan: [0, 212, 255] as const,

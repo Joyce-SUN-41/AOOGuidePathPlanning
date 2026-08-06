@@ -1,15 +1,15 @@
 <script setup lang="ts">
 /**
- * OptionChip — 诊断选项芯片组件
+ * OptionChip — 测绘选项芯片组件
  *
  * 可点击的选项按钮，支持选中、正确、错误等状态。
  */
 import { computed } from 'vue'
 import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons-vue'
-import type { DiagnosisOption } from '@/types'
+import type { CehuiOption } from '@/types'
 
 const props = defineProps<{
-  option: DiagnosisOption
+  option: CehuiOption
   disabled?: boolean
   selected?: boolean
   /** 选项状态 */

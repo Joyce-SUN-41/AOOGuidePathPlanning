@@ -4,7 +4,7 @@ Revision ID: 001
 Revises: None
 Create Date: 2026-07-27
 
-燕麦智导学习路径推荐系统 — 全部9张核心表
+动麦智导学习路径推荐系统 — 全部9张核心表
 """
 
 from typing import Sequence, Union

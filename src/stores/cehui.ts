@@ -1,32 +1,32 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
-  DiagnosisResult,
-  DiagnosisBrief,
+  CehuiResult,
+  CehuiBrief,
   MasteryItem,
   WeakPoint,
   CognitiveLoadProfile
 } from '@/types'
-import { diagnosisApi } from '@/api/modules/diagnosis'
+import { cehuiApi } from '@/api/modules/cehui'
 
 /**
- * 认知诊断状态管理
+ * 学情测绘状态管理
  *
  * 职责：
- * - 管理当前诊断结果
+ * - 管理当前测绘结果
  * - 提供掌握度、认知负荷、薄弱点等派生数据
- * - 支持历史诊断查询
+ * - 支持历史测绘查询
  */
-export const useDiagnosisStore = defineStore(
-  'diagnosis',
+export const useCehuiStore = defineStore(
+  'cehui',
   () => {
     // ═══════════ State ═══════════
 
-    /** 当前最新诊断结果 */
-    const currentDiagnosis = ref<DiagnosisResult | null>(null)
+    /** 当前最新测绘结果 */
+    const currentCehui = ref<CehuiResult | null>(null)
 
-    /** 诊断历史列表 */
-    const historyList = ref<DiagnosisBrief[]>([])
+    /** 测绘历史列表 */
+    const historyList = ref<CehuiBrief[]>([])
 
     /** 加载状态 */
     const isLoading = ref(false)
@@ -36,22 +36,22 @@ export const useDiagnosisStore = defineStore(
 
     // ═══════════ Getters ═══════════
 
-    /** 是否有诊断数据 */
-    const hasDiagnosis = computed(() => currentDiagnosis.value !== null)
+    /** 是否有测绘数据 */
+    const hasCehui = computed(() => currentCehui.value !== null)
 
     /** 综合评分 */
-    const overallScore = computed(() => currentDiagnosis.value?.overallScore ?? 0)
+    const overallScore = computed(() => currentCehui.value?.overallScore ?? 0)
 
     /** 知识点掌握度列表 */
     const masteryLevels = computed<MasteryItem[]>(() => {
-      if (!currentDiagnosis.value?.masteryLevels) return []
-      return currentDiagnosis.value.masteryLevels
+      if (!currentCehui.value?.masteryLevels) return []
+      return currentCehui.value.masteryLevels
     })
 
     /** 认知负荷 */
     const cognitiveLoad = computed<CognitiveLoadProfile>(() => {
       return (
-        currentDiagnosis.value?.cognitiveLoad ?? {
+        currentCehui.value?.cognitiveLoad ?? {
           memoryLoad: 0,
           attentionLoad: 0,
           processingLoad: 0,
@@ -62,7 +62,7 @@ export const useDiagnosisStore = defineStore(
 
     /** 薄弱点列表 */
     const weakPoints = computed<WeakPoint[]>(() => {
-      return currentDiagnosis.value?.weakPoints ?? []
+      return currentCehui.value?.weakPoints ?? []
     })
 
     /** 按严重度排序的薄弱点 */
@@ -94,63 +94,63 @@ export const useDiagnosisStore = defineStore(
 
     // ═══════════ Actions ═══════════
 
-    /** 获取最新诊断结果 */
-    async function fetchLatestDiagnosis(): Promise<void> {
+    /** 获取最新测绘结果 */
+    async function fetchLatestCehui(): Promise<void> {
       isLoading.value = true
       error.value = null
       try {
-        const result = await diagnosisApi.getLatest()
-        // 必须无条件赋值：接口返回 null 表示用户已无诊断记录（例如刚被删除），
+        const result = await cehuiApi.getLatest()
+        // 必须无条件赋值：接口返回 null 表示用户已无测绘记录（例如刚被删除），
         // 此时若保留旧值，持久化的陈旧快照会让「学情看板」继续渲染已删除的数据。
-        currentDiagnosis.value = result ?? null
+        currentCehui.value = result ?? null
       } catch (e) {
-        console.warn('[DiagnosisStore] 获取最新诊断失败:', e)
-        error.value = '获取诊断数据失败'
+        console.warn('[CehuiStore] 获取最新测绘失败:', e)
+        error.value = '获取测绘数据失败'
       } finally {
         isLoading.value = false
       }
     }
 
-    /** 根据 ID 获取诊断详情 */
+    /** 根据 ID 获取测绘详情 */
     async function fetchById(id: string): Promise<void> {
       isLoading.value = true
       error.value = null
       try {
-        const result = await diagnosisApi.getById(id)
-        currentDiagnosis.value = result
+        const result = await cehuiApi.getById(id)
+        currentCehui.value = result
       } catch (e) {
-        console.error('[DiagnosisStore] 获取诊断详情失败:', e)
-        error.value = '获取诊断详情失败'
+        console.error('[CehuiStore] 获取测绘详情失败:', e)
+        error.value = '获取测绘详情失败'
       } finally {
         isLoading.value = false
       }
     }
 
-    /** 获取诊断历史 */
+    /** 获取测绘历史 */
     async function fetchHistory(page = 1, pageSize = 10): Promise<void> {
       try {
-        const result = await diagnosisApi.getHistory({ page, pageSize })
+        const result = await cehuiApi.getHistory({ page, pageSize })
         historyList.value = result.list
       } catch (e) {
-        console.error('[DiagnosisStore] 获取诊断历史失败:', e)
+        console.error('[CehuiStore] 获取测绘历史失败:', e)
       }
     }
 
-    /** 清除诊断数据 */
+    /** 清除测绘数据 */
     function clear(): void {
-      currentDiagnosis.value = null
+      currentCehui.value = null
       historyList.value = []
       error.value = null
     }
 
     return {
       // State
-      currentDiagnosis,
+      currentCehui,
       historyList,
       isLoading,
       error,
       // Getters
-      hasDiagnosis,
+      hasCehui,
       overallScore,
       masteryLevels,
       cognitiveLoad,
@@ -159,7 +159,7 @@ export const useDiagnosisStore = defineStore(
       masteryStats,
       masteryRadarData,
       // Actions
-      fetchLatestDiagnosis,
+      fetchLatestCehui,
       fetchById,
       fetchHistory,
       clear
@@ -167,9 +167,9 @@ export const useDiagnosisStore = defineStore(
   },
   {
     persist: {
-      key: 'oat_diagnosis_store',
+      key: 'oat_cehui_store',
       storage: localStorage,
-      paths: ['currentDiagnosis']
+      paths: ['currentCehui']
     }
   }
 )

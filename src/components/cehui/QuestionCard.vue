@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * QuestionCard — 诊断题目卡片组件
+ * QuestionCard — 测绘题目卡片组件
  *
- * 展示单个诊断题目，支持选项选择、反馈展示。
- * 从 DiagnoseView 中独立抽取。
+ * 展示单个测绘题目，支持选项选择、反馈展示。
+ * 从 CehuiView 中独立抽取。
  */
 import { computed } from 'vue'
 import {
@@ -12,11 +12,11 @@ import {
   ClockCircleOutlined
 } from '@ant-design/icons-vue'
 import OptionChip from './OptionChip.vue'
-import type { DiagnosisQuestion, DiagnosisOption } from '@/types'
+import type { CehuiQuestion, CehuiOption } from '@/types'
 
 const props = defineProps<{
   /** 当前题目 */
-  question: DiagnosisQuestion
+  question: CehuiQuestion
   /** 题目序号 (1-based) */
   index: number
   /** 总题数 */
@@ -45,7 +45,7 @@ const difficultyLabel = computed(() => {
   return map[props.question.difficulty] ?? '未知'
 })
 
-function getOptionStyle(option: DiagnosisOption): 'default' | 'correct' | 'wrong' | 'selected' {
+function getOptionStyle(option: CehuiOption): 'default' | 'correct' | 'wrong' | 'selected' {
   if (!props.showFeedback) return 'default'
   if (option.weight === 1) return 'correct'
   if (option.id === props.selectedOptionId && option.weight !== 1) return 'wrong'

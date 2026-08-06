@@ -81,10 +81,10 @@ async function handleRegister() {
           <div class="logo-icon">
             <BulbOutlined />
           </div>
-          <span class="logo-text">燕麦智导</span>
+          <span class="logo-text">动麦智导</span>
         </div>
         <h2 class="register-title">创建账号</h2>
-        <p class="register-subtitle">加入燕麦智导，开启智能学习之旅</p>
+        <p class="register-subtitle">加入动麦智导，开启智能学习之旅</p>
       </div>
 
       <!-- 表单 -->

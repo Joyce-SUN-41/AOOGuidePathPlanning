@@ -78,6 +78,9 @@ backend/.cache/
 backend/diag_routes.txt
 homeview_orig.vue
 scripts/fix_diagnose.py
+build_log.txt
+build_log2.txt
+tscheck.done
 
 # CodeBuddy
 .codebuddy/

@@ -1,11 +1,11 @@
-"""智能问答对话画像表
+"""导学终端对话画像表
 
 Revision ID: 009_chat_mastery_profile
 Revises: 008_learning_path_version
 Create Date: 2026-08-02
 
 P5 新增（2026-08-02 决策）:
-  chat_mastery_profiles 表 — 仅沉淀「智能问答」通过对话梳理出的该生知识点掌握特点。
+  chat_mastery_profiles 表 — 仅沉淀「导学终端」通过对话梳理出的该生知识点掌握特点。
   与 student_knowledge（客观答题）和 student_cognitive_profiles（相对增量）三者分离，
   只用于「对话画像」展示与「诊断 + 对话」重规划融合，绝不回写客观数据。
 """

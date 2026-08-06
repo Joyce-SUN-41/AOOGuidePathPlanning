@@ -69,16 +69,20 @@ class RAGPromptBuilder:
     """构建 RAG 增强提示词"""
 
     SYSTEM_PROMPT = (
-        "你是一个专业的学科知识助手，名为“燕麦智导”。\n"
-        "你的任务是：\n"
-        "1. 根据提供的参考文档内容回答用户问题\n"
-        "2. 如果文档中有相关信息，优先基于文档回答\n"
-        "3. 如果文档中没有相关信息，如实告知用户，并给出一般性回答\n"
-        "4. 回答要准确、专业、清晰，适合学习者理解\n"
-        "5. 在回答末尾注明信息来源"
+        "你是一个采用苏格拉底式（启发式）教学法的学科辅导助手，名为“动麦智导”。\n"
+        "你的核心目标不是直接把答案告诉学习者，而是通过层层追问，引导学习者自己思考、\n"
+        "回忆已有知识、发现知识之间的联系，最终由学习者自己得出结论。\n\n"
+        "你的行为准则：\n"
+        "1. 优先基于下方参考文档中的内容作为你引导的依据，但不要整段复述文档。\n"
+        "2. 先用一个简短的澄清或回应为学习者搭建台阶，然后用 1-3 个递进式问题引导其思考，\n"
+        "   问题要从学习者已知处出发，逐步逼近核心概念。\n"
+        "3. 当学习者已经给出正确思路时，给予肯定并引导其归纳总结；只有当学习者明显卡住、\n"
+        "   或反复尝试仍无法推进时，才给出关键提示，提示仍要尽量以问题或线索形式呈现。\n"
+        "4. 不要一次性给出完整的最终答案；把「得出结论的成就感」留给学习者。\n"
+        "5. 语言准确、专业、温暖，适合学习者理解；可在回答末尾用一两句话点明可参考的来源编号。"
     )
 
-    USER_PROMPT_TEMPLATE = """请根据以下参考文档回答用户问题。
+    USER_PROMPT_TEMPLATE = """请以下方参考文档为依据，用苏格拉底式（启发式）方法引导学习者思考，而不是直接给出答案。
 
 ## 参考文档
 {context}
@@ -86,11 +90,26 @@ class RAGPromptBuilder:
 ## 用户问题
 {question}
 
-## 回答要求
-- 基于上述文档内容回答，引用相关信息时标注来源
-- 如果文档不能完全回答问题，请补充你的知识（需明确区分"文档记载"和"知识补充"）
-- 使用清晰的结构，必要时使用分点或步骤说明
-- 最后列出参考来源的编号"""
+## 引导要求
+- 基于文档内容设计引导，引用依据时标注来源编号
+- 先共情/确认学习者的起点，再用 1-3 个递进问题引导其推理
+- 不直接输出完整结论；把归纳总结的机会留给学习者
+- 若学习者已接近正确思路，给予肯定并引导其自己收口
+- 保持鼓励、清晰的语气，最后可提示"可参考来源编号"以方便延伸阅读"""
+
+    # 直接对话（无 RAG 命中 / 非测绘）分支的系统提示：同样采用苏格拉底式，
+    # 保证「导学终端」全局一致地引导而非直接给答案；品牌同步为「动麦智导」。
+    DIRECT_CHAT_SOCRATIC_PROMPT = (
+        "你是一个采用苏格拉底式（启发式）教学法的学科辅导助手，名为「动麦智导」。\n"
+        "你的目标不是直接把答案告诉学习者，而是通过层层追问引导其自己思考、\n"
+        "回忆已有知识、发现知识之间的联系，最终由学习者自己得出结论。\n"
+        "1. 先用简短澄清或回应为学习者搭建台阶；\n"
+        "2. 再用 1-3 个递进式问题引导其推理，问题从已知处出发逐步逼近核心；\n"
+        "3. 学习者给出正确思路时给予肯定并引导其归纳总结；只有当其明显卡住时，\n"
+        "   才给出关键提示，且提示仍以问题或线索形式呈现；\n"
+        "4. 不要一次性给出完整最终答案；把「得出结论的成就感」留给学习者；\n"
+        "5. 若问题超出知识范围，请如实说明，并可引导其思考可查证的途径。"
+    )
 
     @classmethod
     def build(
@@ -457,16 +476,31 @@ class KnowledgeBase:
 
     # 快速模式系统提示词（精简短小，尽量一次返回）
     DIRECT_CHAT_FAST_PROMPT: str = (
-        "你是「燕麦智导」的智能学习助手。请简洁直接地回答用户问题，"
+        "你是「动麦智导」的智能学习助手。请简洁直接地回答用户问题，"
         "控制在 200 字以内，不需要铺垫。专注学习路径规划、知识薄弱点分析、"
         "学习策略推荐。若问题超出范围，直接说明无法回答。"
     )
 
-    # 诊断模式系统提示词（快速回答 + 隐式评估 + JSON 输出）
+    # 测绘模式系统提示词（苏格拉底式引导 + 隐式评估 + JSON 输出）
+    # 说明：导学终端默认走此分支（前端固定 cehui_mode=true）。
+    # 早期版本此处是「直接给答案 + JSON」，导致苏格拉底式引导形同虚设（用户反馈“和原来一样”）。
+    # 现改为：以苏格拉底式（启发式）层层追问进行引导，不直接抛出完整答案；
+    # 同时在末尾追加学情测绘 JSON 供后端解析，从而「引导式教学」与「对话画像/路径自动优化」并存。
     DIRECT_CHAT_DIAGNOSE_PROMPT: str = (
-        "你是「燕麦智导」的智能诊断助手。请用简洁中文回答用户问题（200 字内），"
-        "同时在回答末尾附加一份学习诊断 JSON。\n\n"
-        "诊断 JSON 必须用 [*DIAG_START*] 和 [*DIAG_END*] 包裹：\n"
+        "你是采用苏格拉底式（启发式）教学法的学科辅导助手「动麦智导」。\n"
+        "你的目标不是把答案直接告诉学习者，而是通过层层追问，引导其自己思考、回忆已有知识、\n"
+        "发现知识之间的联系，最终由学习者自己得出结论；同时你要在回答中完成一次隐式学情评估。\n\n"
+        "引导准则：\n"
+        "1. 先用简短澄清或回应为学习者搭建台阶，再用 1-3 个递进式问题引导其推理，\n"
+        "   问题从学习者已知处出发，逐步逼近核心概念；\n"
+        "2. 当学习者给出正确思路时给予肯定并引导其归纳总结；只有当其明显卡住、反复尝试仍无法推进时，\n"
+        "   才给出关键提示，且提示仍以问题或线索形式呈现，不要一次性给出完整最终答案；\n"
+        "3. 语言准确、专业、温暖，适合学习者理解；可在引导末尾用一两句话点明可参考的方向。\n"
+        "4. 当你给出的引导包含可直接照做的分步提纲、关键公式或要点列表等可复用素材时，"
+        "在该段开头标注「[可复用素材]」，并在末尾用 1-3 个递进问题引导其反思，"
+        "不直接把完整推导或最终答案写全，把归纳总结的机会留给学习者。\n\n"
+        "学情评估（不可见，仅供后端解析）：在回答之后，必须附加一份学情测绘 JSON，\n"
+        "用 [*DIAG_START*] 和 [*DIAG_END*] 包裹，用户不会看到这段 JSON：\n"
         "[*DIAG_START*]\n"
         '{"mastery_estimates":[{"kp_name":"知识点名","level":0.0-1.0}],'
         '"cognitive_load":0.0-1.0,'
@@ -478,12 +512,12 @@ class KnowledgeBase:
         "- cognitive_load: 用户表现出的认知负荷（越高=越吃力/困惑）\n"
         "- learning_intent: skill_improve(技能提升)/basic_review(基础回顾)/deep_dive(深入钻研)/quick_fix(快速答疑)\n"
         "- needs_optimization: 当检测到 2+ 薄弱知识点或用户明确要求优化路径时设为 true\n\n"
-        "重要：用户不应看到诊断 JSON，它仅供后端解析使用。"
+        "重要：引导正文面向学习者；测绘 JSON 紧随其后且被标记包裹，用户不应看到它，它仅供后端解析使用。"
     )
 
     @staticmethod
-    def _extract_diagnosis_json(content: str) -> Tuple[str, Optional[Dict[str, Any]]]:
-        """从 LLM 回复中提取诊断 JSON 块，返回 (干净回答, 诊断数据或 None)"""
+    def _extract_cehui_json(content: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """从 LLM 回复中提取测绘 JSON 块，返回 (干净回答, 测绘数据或 None)"""
         import re
 
         diag_match = re.search(
@@ -494,14 +528,14 @@ class KnowledgeBase:
         if not diag_match:
             return content, None
 
-        # 移除诊断块，仅保留干净回答
+        # 移除测绘块，仅保留干净回答
         clean_answer = content[: diag_match.start()].strip() + content[diag_match.end() :].strip()
         clean_answer = clean_answer.strip()
 
         try:
             diag_data = json.loads(diag_match.group(1).strip())
         except json.JSONDecodeError:
-            logger.warning("[direct_chat] 诊断 JSON 解析失败，丢弃")
+            logger.warning("[direct_chat] 测绘 JSON 解析失败，丢弃")
             return clean_answer, None
 
         return clean_answer, diag_data
@@ -512,7 +546,7 @@ class KnowledgeBase:
         temperature: float = 0.5,
         max_tokens: int = 1024,
         fast: bool = False,
-        diagnose: bool = False,
+        cehui: bool = False,
     ) -> RAGQueryResult:
         """直接调用大模型回答，不经过检索增强"""
         if not self._llm_client:
@@ -521,9 +555,9 @@ class KnowledgeBase:
         query_id = str(uuid.uuid4())[:8]
 
         # 选择系统提示词与参数
-        if diagnose:
+        if cehui:
             system_prompt = self.DIRECT_CHAT_DIAGNOSE_PROMPT
-            _temperature = min(temperature, 0.35)  # 诊断即快速
+            _temperature = min(temperature, 0.35)  # 测绘即快速
             _max_tokens = min(max_tokens, fast and 512 or 640)
             _timeout = min(LLM_CALL_TIMEOUT, fast and 30.0 or 45.0)
         elif fast:
@@ -532,12 +566,7 @@ class KnowledgeBase:
             _max_tokens = min(max_tokens, 384)
             _timeout = min(LLM_CALL_TIMEOUT, 30.0)
         else:
-            system_prompt = (
-                "你是一个专业的 AI 助手，名为「燕麦智导」。"
-                "请用中文简洁、准确地回答用户的问题。"
-                "如果问题超出你的知识范围，请如实说明。"
-                "回答应结构清晰，适当使用要点列表。"
-            )
+            system_prompt = self.DIRECT_CHAT_SOCRATIC_PROMPT
             _temperature = temperature
             _max_tokens = max_tokens
             _timeout = LLM_CALL_TIMEOUT
@@ -548,7 +577,7 @@ class KnowledgeBase:
         ]
         messages = RAGPromptBuilder.normalize_roles(messages)
 
-        mode_tag = "fast" if fast else ("diagnose" if diagnose else "normal")
+        mode_tag = "fast" if fast else ("cehui" if cehui else "normal")
         logger.info(
             "[direct_chat] 直连 LLM | mode=%s | id=%s | q=%s",
             mode_tag, query_id, question[:60],
@@ -612,11 +641,11 @@ class KnowledgeBase:
                 "total_tokens": response.usage.total_tokens,
             }
 
-        # 诊断模式：提取诊断 JSON
+        # 测绘模式：提取测绘 JSON
         answer_text = response.content
-        diagnosis = None
-        if diagnose:
-            answer_text, diagnosis = self._extract_diagnosis_json(answer_text)
+        cehui = None
+        if cehui:
+            answer_text, cehui = self._extract_cehui_json(answer_text)
 
         result = RAGQueryResult(
             answer=answer_text,
@@ -628,9 +657,9 @@ class KnowledgeBase:
             query_id=query_id,
         )
 
-        # 附加诊断数据到 result（通过私有属性）
-        if diagnosis is not None:
-            result._diagnosis = diagnosis  # type: ignore[attr-defined]
+        # 附加测绘数据到 result（通过私有属性）
+        if cehui is not None:
+            result._cehui = cehui  # type: ignore[attr-defined]
 
         return result
 
@@ -640,7 +669,7 @@ class KnowledgeBase:
         temperature: float = 0.5,
         max_tokens: int = 1024,
         fast: bool = False,
-        diagnose: bool = False,
+        cehui: bool = False,
     ) -> AsyncGenerator[str, None]:
         """直连大模型的流式问答（不经过检索增强）
 
@@ -664,7 +693,7 @@ class KnowledgeBase:
             return
 
         # 选择系统提示词与参数
-        if diagnose:
+        if cehui:
             system_prompt = self.DIRECT_CHAT_DIAGNOSE_PROMPT
             _temperature = min(temperature, 0.35)
             _max_tokens = min(max_tokens, fast and 512 or 640)
@@ -673,12 +702,7 @@ class KnowledgeBase:
             _temperature = min(temperature, 0.35)
             _max_tokens = min(max_tokens, 384)
         else:
-            system_prompt = (
-                "你是一个专业的 AI 助手，名为「燕麦智导」。"
-                "请用中文简洁、准确地回答用户的问题。"
-                "如果问题超出你的知识范围，请如实说明。"
-                "回答应结构清晰，适当使用要点列表。"
-            )
+            system_prompt = self.DIRECT_CHAT_SOCRATIC_PROMPT
             _temperature = temperature
             _max_tokens = max_tokens
 
@@ -690,10 +714,10 @@ class KnowledgeBase:
         )
 
         full_content = ""
-        # 诊断模式：用状态机过滤诊断 JSON 块，避免暴露给用户
+        # 测绘模式：用状态机过滤测绘 JSON 块，避免暴露给用户
         _diag_buf = ""          # 滑窗缓冲区，用于跨 chunk 检测标记
         _in_diag_block = False  # 是否已进入 [*DIAG_START*] 区间
-        _diag_json = ""         # 累积的诊断 JSON 内容
+        _diag_json = ""         # 累积的测绘 JSON 内容
         _DIAG_START = "[*DIAG_START*]"
         _DIAG_END = "[*DIAG_END*]"
         try:
@@ -706,15 +730,15 @@ class KnowledgeBase:
                     continue
                 full_content += chunk.content
 
-                if not diagnose:
+                if not cehui:
                     yield chunk.content
                     continue
 
-                # ── 诊断模式：过滤 [*DIAG_START*]...[*DIAG_END*] 块 ──
+                # ── 测绘模式：过滤 [*DIAG_START*]...[*DIAG_END*] 块 ──
                 _diag_buf += chunk.content
 
                 if not _in_diag_block:
-                    # 未进入诊断块：查找 [*DIAG_START*]
+                    # 未进入测绘块：查找 [*DIAG_START*]
                     idx = _diag_buf.find(_DIAG_START)
                     if idx >= 0:
                         # 找到开始标记：先产出标记之前的正常内容
@@ -732,16 +756,16 @@ class KnowledgeBase:
                             yield safe
                             _diag_buf = _diag_buf[-tail_len:]
                 else:
-                    # 已在诊断块内：查找 [*DIAG_END*]
+                    # 已在测绘块内：查找 [*DIAG_END*]
                     idx = _diag_buf.find(_DIAG_END)
                     if idx >= 0:
-                        # 诊断块结束：收集到诊断 JSON
+                        # 测绘块结束：收集到测绘 JSON
                         _diag_json = _diag_buf[:idx]
-                        # 切除诊断块 + 结束标记
+                        # 切除测绘块 + 结束标记
                         _diag_buf = _diag_buf[idx + len(_DIAG_END):]
                         _in_diag_block = False
                     else:
-                        # 仍在诊断块中，保留尾部等待结束标记
+                        # 仍在测绘块中，保留尾部等待结束标记
                         tail_len = len(_DIAG_END) - 1
                         if len(_diag_buf) > tail_len:
                             _diag_json += _diag_buf[:-tail_len]
@@ -752,18 +776,18 @@ class KnowledgeBase:
             yield "\n\n[AI 生成过程中出现错误，请重试]"
             return
 
-        # 诊断块结束后可能还有残留正常内容
+        # 测绘块结束后可能还有残留正常内容
         if _diag_buf and not _in_diag_block:
             yield _diag_buf
-        # 如果仍在诊断块中（异常/未闭合），不产出，直接丢弃
+        # 如果仍在测绘块中（异常/未闭合），不产出，直接丢弃
 
-        # 诊断模式：将解析结果作为结构化 SSE 帧发送
-        if diagnose and _diag_json:
+        # 测绘模式：将解析结果作为结构化 SSE 帧发送
+        if cehui and _diag_json:
             try:
-                diagnosis = json.loads(_diag_json.strip())
-                yield "<<DIAGNOSIS>>" + json.dumps(diagnosis, ensure_ascii=False)
+                cehui = json.loads(_diag_json.strip())
+                yield "<<CEHUI>>" + json.dumps(cehui, ensure_ascii=False)
             except json.JSONDecodeError:
-                logger.warning("[direct_chat_stream] 诊断 JSON 解析失败，丢弃")
+                logger.warning("[direct_chat_stream] 测绘 JSON 解析失败，丢弃")
 
         yield "<<SOURCES>>" + json.dumps([], ensure_ascii=False)
 

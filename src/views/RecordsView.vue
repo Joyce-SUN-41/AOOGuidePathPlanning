@@ -1,50 +1,50 @@
 <script setup lang="ts">
 /**
- * 我的记录 — 诊断历史与学习路径的查看 / 删除
+ * 我的记录 — 测绘历史与学习路径的查看 / 删除
  * 数据来自真实持久化存储，统计侧边栏点击数字可带 query.tab 进入对应分页。
  */
 import { ref, onMounted } from 'vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { diagnosisApi } from '@/api/modules/diagnosis'
+import { cehuiApi } from '@/api/modules/cehui'
 import { pathApi } from '@/api/modules/path'
-import { useDiagnosisStore } from '@/stores/diagnosis'
+import { useCehuiStore } from '@/stores/cehui'
 import { usePathStore } from '@/stores/path'
 import eventBus from '@/utils/eventBus'
-import type { DiagnosisBrief, DiagnosisResult, LearningPath } from '@/types'
+import type { CehuiBrief, CehuiResult, LearningPath } from '@/types'
 
 // 移动端断点
 const { isMobile } = useIsMobile()
 
 const route = useRoute()
 const router = useRouter()
-const diagnosisStore = useDiagnosisStore()
+const cehuiStore = useCehuiStore()
 const pathStore = usePathStore()
 
-// 当前激活的 Tab: 侧边栏可能带 ?tab=diagnosis|path 进入
-const activeTab = ref<'diagnosis' | 'path'>(
-  route.query['tab'] === 'path' ? 'path' : 'diagnosis'
+// 当前激活的 Tab: 侧边栏可能带 ?tab=cehui|path 进入
+const activeTab = ref<'cehui' | 'path'>(
+  route.query['tab'] === 'path' ? 'path' : 'cehui'
 )
 
-// ── 诊断记录 ──
+// ── 测绘记录 ──
 const diagLoading = ref(false)
-const diagList = ref<DiagnosisBrief[]>([])
+const diagList = ref<CehuiBrief[]>([])
 const diagTotal = ref(0)
 const diagPage = ref(1)
 const diagPageSize = ref(10)
 
-async function loadDiagnoses() {
+async function loadCehuis() {
   diagLoading.value = true
   try {
-    const res = await diagnosisApi.getHistory({
+    const res = await cehuiApi.getHistory({
       page: diagPage.value,
       pageSize: diagPageSize.value,
     })
     diagList.value = res.list
     diagTotal.value = res.total
   } catch (e) {
-    message.error('加载诊断记录失败')
+    message.error('加载测绘记录失败')
   } finally {
     diagLoading.value = false
   }
@@ -52,42 +52,42 @@ async function loadDiagnoses() {
 
 function onDiagTableChange(pag: { current?: number }) {
   diagPage.value = pag.current ?? 1
-  loadDiagnoses()
+  loadCehuis()
 }
 
-// 诊断详情弹窗
+// 测绘详情弹窗
 const diagDetailVisible = ref(false)
 const diagDetailLoading = ref(false)
-const diagDetail = ref<DiagnosisResult | null>(null)
+const diagDetail = ref<CehuiResult | null>(null)
 
-async function viewDiagnosis(id: string) {
+async function viewCehui(id: string) {
   diagDetailVisible.value = true
   diagDetailLoading.value = true
   diagDetail.value = null
   try {
-    diagDetail.value = await diagnosisApi.getById(id)
+    diagDetail.value = await cehuiApi.getById(id)
   } catch (e) {
-    message.error('获取诊断详情失败')
+    message.error('获取测绘详情失败')
   } finally {
     diagDetailLoading.value = false
   }
 }
 
-async function deleteDiagnosis(id: string) {
+async function deleteCehui(id: string) {
   try {
-    await diagnosisApi.delete(id)
-    message.success('诊断记录已删除')
+    await cehuiApi.delete(id)
+    message.success('测绘记录已删除')
 
-    // 被删除的若是当前正在展示的诊断，需要清掉持久化的陈旧快照，
+    // 被删除的若是当前正在展示的测绘，需要清掉持久化的陈旧快照，
     // 否则「学情看板」会继续渲染已不存在的数据。
-    if (diagnosisStore.currentDiagnosis?.id === id) {
-      diagnosisStore.clear()
+    if (cehuiStore.currentCehui?.id === id) {
+      cehuiStore.clear()
     }
 
-    await loadDiagnoses()
-    // 同步刷新最新诊断 + 通知侧边栏统计
-    await diagnosisStore.fetchLatestDiagnosis()
-    eventBus.emit('diagnosis:changed')
+    await loadCehuis()
+    // 同步刷新最新测绘 + 通知侧边栏统计
+    await cehuiStore.fetchLatestCehui()
+    eventBus.emit('cehui:changed')
   } catch (e) {
     message.error('删除失败')
   }
@@ -144,7 +144,7 @@ const fmtDate = (d?: string) =>
   d ? new Date(d).toLocaleString('zh-CN', { hour12: false }) : '-'
 
 onMounted(() => {
-  loadDiagnoses()
+  loadCehuis()
   loadPaths()
 })
 </script>
@@ -153,12 +153,12 @@ onMounted(() => {
   <div class="records-page">
     <a-typography-title :level="3">我的记录</a-typography-title>
     <a-typography-paragraph type="secondary">
-      这里汇总你历次「认知诊断」与生成的「学习路径」，可随时查看详情或删除。
+      这里汇总你历次「学情测绘」与生成的「学习路径」，可随时查看详情或删除。
     </a-typography-paragraph>
 
     <a-tabs v-model:activeKey="activeTab">
-      <!-- ── 诊断记录 ── -->
-      <a-tab-pane key="diagnosis" tab="诊断记录">
+      <!-- ── 测绘记录 ── -->
+      <a-tab-pane key="cehui" tab="测绘记录">
         <a-table
           :dataSource="diagList"
           :scroll="{ x: 'max-content' }"
@@ -169,14 +169,14 @@ onMounted(() => {
             total: diagTotal,
             showSizeChanger: false,
           }"
-          :rowKey="(r: DiagnosisBrief) => r.id"
+          :rowKey="(r: CehuiBrief) => r.id"
           size="middle"
           @change="onDiagTableChange"
         >
           <a-table-column key="subject" title="学科" align="center" :width="120">
             <template #default="{ record }">{{ subjectText(record.subject) }}</template>
           </a-table-column>
-          <a-table-column key="createdAt" title="诊断时间" align="center" :width="200">
+          <a-table-column key="createdAt" title="测绘时间" align="center" :width="200">
             <template #default="{ record }">{{ fmtDate(record.createdAt) }}</template>
           </a-table-column>
           <a-table-column key="overallScore" title="综合得分" align="center" :width="120">
@@ -192,15 +192,15 @@ onMounted(() => {
           <a-table-column key="action" title="操作" align="center" :width="180">
             <template #default="{ record }">
               <a-space>
-                <a-button type="link" size="small" @click="viewDiagnosis(record.id)">查看</a-button>
-                <a-popconfirm title="确认删除该诊断记录？" @confirm="deleteDiagnosis(record.id)">
+                <a-button type="link" size="small" @click="viewCehui(record.id)">查看</a-button>
+                <a-popconfirm title="确认删除该测绘记录？" @confirm="deleteCehui(record.id)">
                   <a-button type="link" size="small" danger>删除</a-button>
                 </a-popconfirm>
               </a-space>
             </template>
           </a-table-column>
           <template #emptyText>
-            <span>还没有诊断记录，去「认知诊断」完成一次测验吧</span>
+            <span>还没有测绘记录，去「学情测绘」完成一次测验吧</span>
           </template>
         </a-table>
       </a-tab-pane>
@@ -239,16 +239,16 @@ onMounted(() => {
             </template>
           </a-table-column>
           <template #emptyText>
-            <span>还没有学习路径，完成诊断后将自动生成</span>
+            <span>还没有学习路径，完成测绘后将自动生成</span>
           </template>
         </a-table>
       </a-tab-pane>
     </a-tabs>
 
-    <!-- 诊断详情弹窗 -->
+    <!-- 测绘详情弹窗 -->
     <a-modal
       v-model:open="diagDetailVisible"
-      title="诊断详情"
+      title="测绘详情"
       :width="isMobile ? '90%' : 720"
       :footer="null"
     >
@@ -265,7 +265,7 @@ onMounted(() => {
             <a-descriptions-item label="认知负荷">{{ diagDetail.cognitiveLoad }}</a-descriptions-item>
           </a-descriptions>
 
-          <a-divider orientation="left">AI 诊断摘要</a-divider>
+          <a-divider orientation="left">AI 测绘摘要</a-divider>
           <p>{{ diagDetail.summary }}</p>
 
           <a-divider orientation="left">薄弱知识点 ({{ diagDetail.weakPoints.length }})</a-divider>

@@ -11,7 +11,7 @@
  * 用法:
  *   import { trackEvent, trackPageView, initTracking } from '@/utils/tracking'
  *   initTracking()                       // main.ts 中调用一次
- *   trackEvent('click_start_diagnose')   // 业务点位
+ *   trackEvent('click_start_cehui')   // 业务点位
  */
 
 import { getToken } from '@/api'

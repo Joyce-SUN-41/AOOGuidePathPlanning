@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * CognitiveAuraBackground —— 「智能体认知超算场」诊断页动态背景
+ * CognitiveAuraBackground —— 「智能体认知超算场」测绘页动态背景
  *
  * 视觉叙事：一场正在实时推理的多智能体系统——
  *   L0  透视计算地平线（深度感）
@@ -10,7 +10,7 @@
  *   L4  弯曲突触通道 + 光子脉冲
  *   L5  智能体星群 / 枢纽全息环
  *   L6  中央推理核心（多环全息体）
- *   L7  诊断扫描束 + 偶发神经级联闪电
+ *   L7  测绘扫描束 + 偶发神经级联闪电
  *
  * 技术点：
  *   - 简易 3D 投影视差 + 指针场扰动（window 监听，canvas 仍 pointer-events:none）

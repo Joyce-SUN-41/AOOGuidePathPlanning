@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { SendOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons-vue'
 
 const props = withDefaults(
@@ -79,7 +79,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  send: []
+  send: [text: string]
   clear: []
   export: []
   'quick-fill': [text: string]
@@ -88,9 +88,14 @@ const emit = defineEmits<{
 const localInput = ref(props.modelValue || '')
 const textareaRef = ref()
 
+// 发送瞬间用于阻断「modelValue -> localInput」回灌，避免双向绑定竞态把旧文本写回输入框
+let clearing = false
+
 watch(
   () => props.modelValue,
   (val) => {
+    // 清空期间不回写，防止父级 inputText 残留的旧值被重新灌入输入框
+    if (clearing) return
     localInput.value = val || ''
   }
 )
@@ -118,13 +123,20 @@ function handleEnter(e: KeyboardEvent) {
 
 function handleSend() {
   if (!canSubmit.value) return
-  emit('send')
-  setTimeout(() => {
+  // 携带当前文本上抛，父组件直接消费，不再依赖父级 inputText 的时序
+  const text = localInput.value
+  // 先锁定回灌，再清空本地输入，避免双向绑定竞态把旧文本写回输入框
+  clearing = true
+  localInput.value = ''
+  emit('send', text)
+  nextTick(() => {
+    clearing = false
+    localInput.value = ''
     if (textareaRef.value) {
       const el = textareaRef.value.$el?.querySelector('textarea')
       if (el) el.style.height = ''
     }
-  }, 50)
+  })
 }
 </script>
 

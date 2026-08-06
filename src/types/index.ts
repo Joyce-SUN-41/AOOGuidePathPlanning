@@ -99,27 +99,27 @@ export interface ChartDataItem {
   value: number
 }
 
-// ============= 认知诊断相关 =============
+// ============= 学情测绘相关 =============
 
-/** 诊断题目的选项 */
-export interface DiagnosisOption {
+/** 测绘题目的选项 */
+export interface CehuiOption {
   id: string
   text: string
   weight: number // 0-1 掌握度权重
 }
 
-/** 诊断题目 */
-export interface DiagnosisQuestion {
+/** 测绘题目 */
+export interface CehuiQuestion {
   id: string
   topic: string // 所属知识点
   difficulty: 1 | 2 | 3 | 4 | 5
   title: string
-  options: DiagnosisOption[]
-  type: 'single' | 'multiple'
+  options: CehuiOption[]
+  type: 'single' | 'multiple' | 'judge'
 }
 
 /** 用户提交的答案 */
-export interface DiagnosisAnswer {
+export interface CehuiAnswer {
   questionId: string
   /** 用户选择的选项 ID（单选）。
    *  后端 SubmittedAnswer.selected_option 为单个字符串，
@@ -128,19 +128,48 @@ export interface DiagnosisAnswer {
   timeSpent: number // 答题耗时(秒)
 }
 
-/** 诊断提交请求体 */
-export interface DiagnosisSubmitRequest {
-  answers: DiagnosisAnswer[]
+/** 学习风格自陈单项 */
+export interface StyleItem {
+  key: string
+  value: number // likert 1-5
+}
+
+/** 学习准备度自陈单项 */
+export interface ReadinessItem {
+  key: string
+  value: number // likert 1-5
+}
+
+/** 学习准备度画像（第三维自变量，0-1 归一化） */
+export interface ReadinessProfile {
+  motivation: number
+  metacognition: number
+  selfEfficacy: number
+  rawItems?: ReadinessItem[]
+}
+
+/** 测绘提交请求体（三维度综合） */
+export interface CehuiSubmitRequest {
+  answers: CehuiAnswer[]
   subject?: string // 学科
   grade?: string // 年级
+  /** 第二维: 学习风格自陈题项（key/value 1-5） */
+  styleItems?: StyleItem[]
+  /** 第三维: 学习准备度画像（motivation/metacognition/selfEfficacy 0-1 + 原始题项） */
+  readiness?: ReadinessProfile
 }
 
 /** 知识点掌握度 */
 export interface MasteryItem {
   knowledgePoint: string
-  mastery: number // 0-1
+  kpId?: string
+  mastery: number // 0-1 点估计
   level: 'weak' | 'developing' | 'proficient' | 'excellent'
   confidence: number // 0-1 置信度
+  /** 条目1: 掌握度 95% 经验置信区间 [low, high]（题量不足时区间较宽） */
+  confidenceInterval?: [number, number] | null
+  /** 该知识点本次作答题数，用于判断样本充分性 */
+  nQuestions?: number
 }
 
 /** 认知负荷维度 */
@@ -159,22 +188,53 @@ export interface WeakPoint {
   suggestedRemediation?: string
 }
 
-/** 诊断结果 */
-export interface DiagnosisResult {
+/** 学习风格画像（第四项维度展示用） */
+export interface LearningStyleProfile {
+  /** 主风格标签（进取型/顺序型/踏实型/探索型） */
+  label: string
+  /** 四风格维度归一化得分 0-1 */
+  scores: Record<string, number>
+  /** 条目4/6: 主导风格 key（如 exploratory）；全 0 时为 undefined */
+  primaryDimension?: string | null
+  /** 辅助风格 key（得分次高维度） */
+  secondaryDimension?: string | null
+  /** 风格强度 = 主导分 - 次高分（0-1）；越低越混合/不明显 */
+  intensity?: number | null
+}
+
+/** 学习准备度画像（第三维展示用） */
+export interface ReadinessProfileResult {
+  motivation: number
+  metacognition: number
+  selfEfficacy: number
+  /** 条目9: 学科特异性自我效能 {kp_id: 0-1}（代理估计，需说明） */
+  efficacyByKp?: Record<string, number> | null
+  /** 条目8: 纵向趋势（本次-上次） */
+  trend?: { motivation: number; metacognition: number; selfEfficacy: number } | null
+}
+
+/** 测绘结果 */
+export interface CehuiResult {
   id: string
   userId: string
   createdAt: string
   subject: string
   grade: string
 
-  /** 各知识点掌握度 */
+  /** 各知识点掌握度（维度一：知识层面） */
   masteryLevels: MasteryItem[]
 
   /** 认知负荷分析 */
   cognitiveLoad: CognitiveLoadProfile
 
-  /** 学习风格标签 */
+  /** 学习风格标签（兼容旧字段） */
   learningStyle: string
+
+  /** 学习风格画像（维度二：学习风格层面） */
+  learningStyleProfile?: LearningStyleProfile | null
+
+  /** 学习准备度画像（维度三：学习准备度层面） */
+  readinessProfile?: ReadinessProfileResult | null
 
   /** 薄弱点列表 */
   weakPoints: WeakPoint[]
@@ -182,12 +242,21 @@ export interface DiagnosisResult {
   /** 综合评分 (雷达图用) */
   overallScore: number // 0-100
 
-  /** AI 诊断摘要 */
+  /** AI 测绘摘要（旧字段，兼容） */
   summary: string
+
+  /** 条目10: 维度间交叉洞察（规则生成，无 LLM） */
+  crossInsights?: string[]
+
+  /** 条目11: 量表与计分方式说明 */
+  scaleNote?: string
+
+  /** 条目14: 规则生成的 AI 自然语言摘要 */
+  aiSummary?: string
 }
 
-/** 诊断历史简要 */
-export interface DiagnosisBrief {
+/** 测绘历史简要 */
+export interface CehuiBrief {
   id: string
   createdAt: string
   subject: string
@@ -232,6 +301,11 @@ export interface LearningPath {
   diagnosisId: string
   userId: string
   createdAt: string
+
+  /** 版本号（首轮=1，回流重规划=parent+1） */
+  version?: number
+  /** 规划类型语义标签（建议 11）: baseline=起点规划, update_vN=动态更新第N版; 旧路径为空 */
+  planType?: string | null
 
   /** 路径总览 */
   totalDays: number
@@ -490,7 +564,7 @@ export interface DashboardOverview {
   totalKPs: number
   streakDays: number
   lastStudyDate: string | null
-  totalDiagnoses: number
+  totalCehuis: number
   totalPaths: number
 }
 
@@ -533,7 +607,7 @@ export interface WeakKpStat {
 export interface MasteryTrendPoint {
   date: string
   avgMastery: number
-  diagnosisCount: number
+  cehuiCount: number
 }
 
 /** 预警学生信息 */

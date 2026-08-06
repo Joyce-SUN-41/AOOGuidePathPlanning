@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * OatDispersalBackground —— 燕麦种子传播动态背景
+ * OatDispersalBackground —— 动麦种子传播动态背景
  *
  * 视觉隐喻直接来自 AOO（Avena/Oat Optimization）算法的自然启发原型：
- * 燕麦通过三种方式扩散种子，对应算法的三类探索算子。
+ * 动麦通过三种方式扩散种子，对应算法的三类探索算子。
  *
  *   1. 风传播 (wind)    —— 带冠毛的种子随湍流场大范围漂移 → 全局探索
  *   2. 水传播 (water)   —— 种子沿地表径流下沉、遇涡流打转   → 局部绕行
@@ -62,7 +62,7 @@ const FRAME_MS = 1000 / TARGET_FPS
 
 // ── 配色：与全站设计系统一致 ──
 const COLOR = {
-  oatGold: [212, 163, 115] as const, // #D4A373 燕麦金
+  oatGold: [212, 163, 115] as const, // #D4A373 动麦金
   auroraBlue: [74, 108, 247] as const, // #4A6CF7 极光蓝
   cyan: [0, 212, 255] as const // #00D4FF 青蓝
 }
@@ -379,7 +379,7 @@ function drawSeed(c: CanvasRenderingContext2D, s: Seed): void {
   c.rotate(s.a)
 
   if (s.mode === 'wind') {
-    // 冠毛（pappus）：一圈放射状细丝 —— 燕麦种子的标志性结构
+    // 冠毛（pappus）：一圈放射状细丝 —— 动麦种子的标志性结构
     const spokes = 7
     c.strokeStyle = rgba(col, 0.34 * env)
     c.lineWidth = 0.7
@@ -425,7 +425,7 @@ function drawSeed(c: CanvasRenderingContext2D, s: Seed): void {
   c.restore()
 }
 
-/** 底部麦穗剪影：为整个场景提供「燕麦田」的空间锚点 */
+/** 底部麦穗剪影：为整个场景提供「动麦田」的空间锚点 */
 function drawOatSilhouette(c: CanvasRenderingContext2D): void {
   const baseY = height + 6
   const stalks = Math.max(5, Math.round(width / 260))

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,6 +59,11 @@ class LearningPath(Base):
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False, index=True, comment="是否为当前生效路径"
+    )
+    # 规划类型语义标签: baseline=起点规划(测绘首轮); update_vN=问答回流触发的动态更新第N版
+    # 旧路径该字段为空, 前端按 baseline 向后兼容显示
+    plan_type: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True, comment="规划类型: baseline=起点规划, update_vN=动态更新第N版"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

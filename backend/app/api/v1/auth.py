@@ -1,5 +1,7 @@
 """认证接口 — 登录 / 注册 / Token 刷新"""
 
+import logging
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,8 @@ from app.schemas.token import AuthResponse, LoginRequest, Token, UserInfoRespons
 from app.schemas.user import UserCreate, UserOut, UserUpdate
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _build_user_info(user: User) -> UserInfoResponse:
@@ -163,6 +167,22 @@ async def refresh_token(
 async def get_me(current_user: User = Depends(get_current_user)):
     """返回当前登录用户的详细信息"""
     return ResponseBase(data=_build_user_info(current_user))
+
+
+@router.post("/logout", response_model=ResponseBase, summary="退出登录")
+async def logout(
+    current_user: User = Depends(get_current_user),
+):
+    """退出登录（无状态 JWT 场景下的幂等注销点）。
+
+    当前鉴权为无状态 JWT，服务端不维护会话黑名单，因此本端点不做实质失效处理，
+    仅返回 200 供前端确认注销链路已闭合。令牌的实际失效由前端清除本地存储完成。
+    保留该端点是为了让前端 userApi.logout 的调用不再指向不存在的路由（404），
+    避免静默噪声并维持「前端调用 ↔ 后端端点」的一一对应。
+    """
+    # best-effort 审计：仅记录注销动作，不影响响应
+    logger.info("用户注销: user_id=%s", current_user.id)
+    return ResponseBase(message="已退出登录")
 
 
 @router.put("/me", response_model=ResponseBase[UserInfoResponse], summary="更新当前用户资料")

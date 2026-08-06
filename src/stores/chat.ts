@@ -5,18 +5,18 @@ import type { ChatMessage, ChatExportData, SubjectOption } from '@/types/rag'
 /** 对话最大保留轮次 */
 const MAX_TURNS = 10
 
-/** 预置学科选项 */
+/** 预置学科选项（系统仅面向人工智能相关内容，选项均为 AI 方向细分领域） */
 const SUBJECT_OPTIONS: SubjectOption[] = [
-  { label: '人工智能导论', value: 'ai_intro', description: 'AI 基础理论与应用' },
-  { label: '机器学习', value: 'machine_learning', description: '经典机器学习算法' },
-  { label: '深度学习', value: 'deep_learning', description: '深度神经网络与前向传播' },
-  { label: '数据结构与算法', value: 'ds_algo', description: '基础数据结构与算法分析' },
-  { label: '操作系统', value: 'os', description: '操作系统原理与实现' },
-  { label: '计算机网络', value: 'network', description: 'TCP/IP 与网络协议' },
+  { label: '人工智能导论', value: 'ai_intro', description: 'AI 基础概念、发展与应用全景' },
+  { label: '机器学习', value: 'machine_learning', description: '经典机器学习算法与模型评估' },
+  { label: '深度学习', value: 'deep_learning', description: '深度神经网络与训练优化' },
+  { label: '自然语言处理', value: 'nlp', description: '文本理解、生成与大模型应用' },
+  { label: '计算机视觉', value: 'cv', description: '图像识别、检测与视觉任务' },
+  { label: '知识图谱与推理', value: 'kg_reasoning', description: '知识表示、图谱构建与 RAG 检索' },
 ]
 
-function generateId(): string {
-  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+function generateId(prefix = 'msg'): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -27,6 +27,7 @@ export const useChatStore = defineStore('chat', () => {
   const currentSubject = ref<string>('ai_intro')
   const currentSubjectLabel = ref<string>('人工智能导论')
   const lastQueryId = ref<string>('')
+  const sessionId = ref<string>(generateId('sess'))
   const error = ref<string>('')
   const abortController = ref<AbortController | null>(null)
 
@@ -155,6 +156,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     error.value = ''
     lastQueryId.value = ''
+    sessionId.value = generateId('sess')
     cancelStream()
   }
 
@@ -229,6 +231,7 @@ export const useChatStore = defineStore('chat', () => {
     currentSubject,
     currentSubjectLabel,
     lastQueryId,
+    sessionId,
     error,
     abortController,
     // 计算

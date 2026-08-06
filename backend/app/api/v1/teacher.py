@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.cache import cache_get, cache_set
 from app.core.database import get_db
-from app.models.diagnosis import DiagnosisRecord
+from app.models.cehui import CehuiRecord
 from app.models.learning_path import LearningPath
 from app.models.user import User
 from app.schemas.common import ResponseBase
@@ -38,12 +38,12 @@ def _ensure_teacher(user: User) -> None:
 
 def _student_summary(
     s: User,
-    diagnosis: Optional[DiagnosisRecord] = None,
+    cehui: Optional[CehuiRecord] = None,
     path: Optional[LearningPath] = None,
 ) -> Dict[str, Any]:
     """将 DB 学生数据转为前端 StudentSummary 格式"""
-    overall = diagnosis.overall_score if diagnosis else None
-    cl = diagnosis.cognitive_load or {} if diagnosis else {}
+    overall = cehui.overall_score if cehui else None
+    cl = cehui.cognitive_load or {} if cehui else {}
     overall_load = (
         cl.get("overall", 0)
         if isinstance(cl, dict)
@@ -61,8 +61,8 @@ def _student_summary(
         "lastActiveDate": s.updated_at.isoformat() if s.updated_at else None,
         "completedTasks": path_data.get("completedTasks", 0) if path else 0,
         "totalTasks": path_data.get("totalTasks", 0) if path else 0,
-        "weakPointCount": len(diagnosis.weak_points or []) if diagnosis and diagnosis.weak_points else 0,
-        "subject": diagnosis.subject if diagnosis else "—",
+        "weakPointCount": len(cehui.weak_points or []) if cehui and cehui.weak_points else 0,
+        "subject": cehui.subject if cehui else "—",
         "overallScore": overall or 0,
     }
 
@@ -90,19 +90,19 @@ async def get_class_overview(
     )
     total = count_result.scalar() or 0
 
-    # 统计有诊断的学生
+    # 统计有测绘的学生
     diag_result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id.in_(
+        select(CehuiRecord)
+        .where(CehuiRecord.student_id.in_(
             select(User.id).where(User.role == "student")
         ))
     )
-    diagnoses = diag_result.scalars().all()
+    cehuis = diag_result.scalars().all()
 
     # 聚合指标
-    scores = [d.overall_score for d in diagnoses if d.overall_score is not None]
+    scores = [d.overall_score for d in cehuis if d.overall_score is not None]
     loads: List[float] = []
-    for d in diagnoses:
+    for d in cehuis:
         cl = d.cognitive_load or {}
         if isinstance(cl, dict):
             ov = cl.get("overall", 0)
@@ -153,7 +153,7 @@ async def get_teacher_students(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取学生列表 (分页 + 批量聚合最新诊断/路径，避免 N+1)"""
+    """获取学生列表 (分页 + 批量聚合最新测绘/路径，避免 N+1)"""
     _ensure_teacher(current_user)
 
     # 学生总数
@@ -179,15 +179,15 @@ async def get_teacher_students(
 
     student_ids = [s.id for s in students]
 
-    # 批量获取每个学生的「最新」诊断（按 created_at 取每组最大）
+    # 批量获取每个学生的「最新」测绘（按 created_at 取每组最大）
     diag_rows = (
         await db.execute(
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id.in_(student_ids))
-            .order_by(DiagnosisRecord.student_id, DiagnosisRecord.created_at.desc())
+            select(CehuiRecord)
+            .where(CehuiRecord.student_id.in_(student_ids))
+            .order_by(CehuiRecord.student_id, CehuiRecord.created_at.desc())
         )
     ).scalars().all()
-    latest_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    latest_diag: Dict[uuid.UUID, CehuiRecord] = {}
     for d in diag_rows:
         latest_diag.setdefault(d.student_id, d)
 
@@ -239,17 +239,17 @@ async def get_weak_kps(
     _ensure_teacher(current_user)
 
     diag_result = await db.execute(
-        select(DiagnosisRecord).where(
-            DiagnosisRecord.student_id.in_(
+        select(CehuiRecord).where(
+            CehuiRecord.student_id.in_(
                 select(User.id).where(User.role == "student")
             )
         )
     )
-    diagnoses = diag_result.scalars().all()
+    cehuis = diag_result.scalars().all()
 
     # 聚合薄弱知识点
     kp_agg: Dict[str, Dict[str, Any]] = {}
-    for d in diagnoses:
+    for d in cehuis:
         weak_points = d.weak_points or []
         if isinstance(weak_points, list):
             for wp in weak_points:
@@ -297,21 +297,21 @@ async def get_mastery_trend(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """返回每日平均掌握度与诊断人数"""
+    """返回每日平均掌握度与测绘人数"""
     _ensure_teacher(current_user)
 
     diag_result = await db.execute(
-        select(DiagnosisRecord).where(
-            DiagnosisRecord.student_id.in_(
+        select(CehuiRecord).where(
+            CehuiRecord.student_id.in_(
                 select(User.id).where(User.role == "student")
             )
-        ).order_by(DiagnosisRecord.created_at.asc())
+        ).order_by(CehuiRecord.created_at.asc())
     )
-    diagnoses = diag_result.scalars().all()
+    cehuis = diag_result.scalars().all()
 
     # 按日期聚合
     date_map: Dict[str, List[float]] = {}
-    for d in diagnoses:
+    for d in cehuis:
         if not d.created_at:
             continue
         date_key = d.created_at.strftime("%Y-%m-%d")
@@ -325,7 +325,7 @@ async def get_mastery_trend(
             {
                 "date": date_key,
                 "avgMastery": round(sum(vals) / len(vals) / 100, 2) if vals else 0,
-                "diagnosisCount": len(vals),
+                "cehuiCount": len(vals),
             }
             for date_key, vals in date_map.items()
         ],
@@ -361,15 +361,15 @@ async def get_alerts(
 
     student_ids = [s.id for s in students]
 
-    # 批量拉取每个学生的最新诊断（按 student_id 分组取每组 created_at 最大）
+    # 批量拉取每个学生的最新测绘（按 student_id 分组取每组 created_at 最大）
     diag_rows = (
         await db.execute(
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id.in_(student_ids))
-            .order_by(DiagnosisRecord.student_id, DiagnosisRecord.created_at.desc())
+            select(CehuiRecord)
+            .where(CehuiRecord.student_id.in_(student_ids))
+            .order_by(CehuiRecord.student_id, CehuiRecord.created_at.desc())
         )
     ).scalars().all()
-    latest_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    latest_diag: Dict[uuid.UUID, CehuiRecord] = {}
     for d in diag_rows:
         latest_diag.setdefault(d.student_id, d)
 
@@ -433,9 +433,9 @@ async def get_student_detail(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="学生不存在")
 
     diag_result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id == student.id)
-        .order_by(DiagnosisRecord.created_at.desc())
+        select(CehuiRecord)
+        .where(CehuiRecord.student_id == student.id)
+        .order_by(CehuiRecord.created_at.desc())
         .limit(1)
     )
     diag = diag_result.scalar_one_or_none()
@@ -557,11 +557,11 @@ async def get_dashboard_data(
             "students": [], "weakKps": [], "masteryTrend": [], "alerts": [],
         })
 
-    # ── 2. 批量获取诊断和路径 ──
+    # ── 2. 批量获取测绘和路径 ──
     all_diag_result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id.in_(student_ids))
-        .order_by(DiagnosisRecord.created_at.desc())
+        select(CehuiRecord)
+        .where(CehuiRecord.student_id.in_(student_ids))
+        .order_by(CehuiRecord.created_at.desc())
     )
     all_diags = all_diag_result.scalars().all()
 
@@ -572,8 +572,8 @@ async def get_dashboard_data(
     )
     all_paths = all_path_result.scalars().all()
 
-    # 每个学生取最新一条诊断和路径
-    student_diag: Dict[uuid.UUID, DiagnosisRecord] = {}
+    # 每个学生取最新一条测绘和路径
+    student_diag: Dict[uuid.UUID, CehuiRecord] = {}
     for d in all_diags:
         if d.student_id not in student_diag:
             student_diag[d.student_id] = d
@@ -655,7 +655,7 @@ async def get_dashboard_data(
     mastery_trend = sorted(
         [
             {"date": k, "avgMastery": round(sum(v) / len(v) / 100, 2) if v else 0,
-             "diagnosisCount": len(v)}
+             "cehuiCount": len(v)}
             for k, v in date_map.items()
         ],
         key=lambda x: x["date"],

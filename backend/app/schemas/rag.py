@@ -16,7 +16,8 @@ class RAGQueryRequest(BaseModel):
     subject: Optional[str] = Field(default=None, description="学科过滤（可选）")
     skip_retrieval: bool = Field(default=False, description="跳过知识库检索，直接使用大模型回答")
     fast_mode: bool = Field(default=False, description="快速模式：低温度、短回复、短超时，适合即时对话")
-    diagnose_mode: bool = Field(default=False, description="诊断模式：在回答中附加学习状态诊断 JSON")
+    cehui_mode: bool = Field(default=False, description="测绘模式：在回答中附加学习状态测绘 JSON")
+    session_id: Optional[str] = Field(default=None, description="会话 ID（可选），用于把问答存入会话历史以支撑画像提炼")
     stream: bool = Field(
         default=False,
         description="是否以 SSE (text/event-stream) 流式返回。默认 False 保持整包 JSON 响应",
@@ -52,11 +53,11 @@ class RAGQueryResponse(BaseModel):
     model: str = Field(default="", description="使用的模型")
     token_usage: Optional[RAGTokenUsage] = Field(default=None, description="Token 用量")
     query_id: str = Field(default="", description="查询追踪 ID")
-    diagnosis: Optional[Dict[str, Any]] = Field(default=None, description="诊断模式下的学习评估数据")
+    cehui: Optional[Dict[str, Any]] = Field(default=None, description="测绘模式下的学习评估数据")
 
 
 class AutoOptimizeRequest(BaseModel):
-    """对话诊断 → AOO 自动优化请求"""
+    """对话测绘 → AOO 自动优化请求"""
 
     mastery_estimates: List[Dict[str, Any]] = Field(
         default_factory=list,
@@ -80,7 +81,7 @@ class AutoOptimizeRequest(BaseModel):
 
 
 class AutoOptimizeResponse(BaseModel):
-    """对话诊断 → AOO 自动优化响应"""
+    """对话测绘 → AOO 自动优化响应"""
 
     triggered: bool = Field(..., description="是否触发 AOO 优化")
     message: str = Field(default="", description="提示信息")

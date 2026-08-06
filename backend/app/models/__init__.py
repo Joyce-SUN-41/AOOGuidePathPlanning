@@ -7,7 +7,7 @@ from app.models.path_task import PathTask
 from app.models.cognitive_load_record import CognitiveLoadRecord
 from app.models.chat_history import ChatHistory
 from app.models.aoo_optimization_log import AOOOptimizationLog
-from app.models.diagnosis import DiagnosisRecord
+from app.models.cehui import CehuiRecord
 from app.models.question import Question
 from app.models.cognitive_profile import (
     StudentCognitiveProfile,
@@ -24,7 +24,7 @@ __all__ = [
     "CognitiveLoadRecord",
     "ChatHistory",
     "AOOOptimizationLog",
-    "DiagnosisRecord",
+    "CehuiRecord",
     "Question",
     "StudentCognitiveProfile",
     "CognitiveProfileEvent",

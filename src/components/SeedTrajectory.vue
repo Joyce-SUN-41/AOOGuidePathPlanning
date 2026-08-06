@@ -217,11 +217,11 @@ const previousPhase = ref<SeedPhase | null>(null)
  */
 function getPhaseColor(ratio: number): string {
   if (ratio <= 0.15) {
-    // 0% → 15%: 暖橙 → 燕麦金
+    // 0% → 15%: 暖橙 → 动麦金
     const t = ratio / 0.15
     return hslInterp(22, 34, t, 88, 85, 64, 68)
   } else if (ratio <= 0.3) {
-    // 15% → 30%: 燕麦金 → 明黄
+    // 15% → 30%: 动麦金 → 明黄
     const t = (ratio - 0.15) / 0.15
     return hslInterp(34, 46, t, 85, 88, 68, 70)
   } else if (ratio <= 0.5) {
@@ -570,7 +570,7 @@ function render2DFrame(frame: InterpolatedFrame): void {
     symbol: string
     itemStyle: { color: string; borderWidth: number; opacity: number }
   }[] = []
-  // 适应度 → 颜色映射（从深色底透明到燕麦金）
+  // 适应度 → 颜色映射（从深色底透明到动麦金）
   const fitColor = (n: number) => {
     if (n < 0.2) return `rgba(0,212,255,${(n * 0.2).toFixed(2)})`
     if (n < 0.5) return `rgba(74,108,247,${(0.04 + n * 0.3).toFixed(2)})`

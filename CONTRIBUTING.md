@@ -1,8 +1,8 @@
-# 燕麦智导 (AOO Guide Path Planning) — 开发者指南
+# 动麦智导 (AOO Guide Path Planning) — 开发者指南
 
 ## 项目概述
 
-燕麦智导是一个基于 **AOO（Animated Oat Optimization）算法** 和 **讯飞星火大模型** 的 AI 智能学习路径规划平台。面向人工智能通识课学生，提供认知诊断 → 路径优化 → 智能问答 → 学情分析的闭环学习支持。
+动麦智导是一个基于 **AOO（Animated Oat Optimization）算法** 和 **讯飞星火大模型** 的 AI 智能学习路径规划平台。面向人工智能通识课学生，提供学情测绘 → 路径优化 → 导学终端 → 学情分析的闭环学习支持。
 
 ### 核心技术栈
 
@@ -11,7 +11,7 @@
 | 前端 | Vue 3 + TypeScript + Vite + Ant Design Vue + ECharts |
 | 后端 | FastAPI (Python 3.11) + SQLAlchemy 2.0 + Celery |
 | 数据库 | PostgreSQL 16 + Redis 7 |
-| AI/算法 | AOO 优化引擎 + 讯飞星火大模型 + IRT/DINA 认知诊断 + NumPy 向量存储 RAG |
+| AI/算法 | AOO 优化引擎 + 讯飞星火大模型 + IRT/DINA 学情测绘 + NumPy 向量存储 RAG |
 | 部署 | Docker Compose + Nginx + GitHub Actions |
 
 ---
@@ -92,7 +92,7 @@ AOOGuidePathPlanning/
 │   │   ├── schemas/             # Pydantic 请求/响应模型
 │   │   ├── services/            # 业务逻辑层
 │   │   │   ├── aoo/             # AOO 优化引擎
-│   │   │   ├── diagnosis/       # 认知诊断（IRT 2-PL + DINA）
+│   │   │   ├── cehui/       # 学情测绘（IRT 2-PL + DINA）
 │   │   │   ├── llm/             # LLM 集成（星火 + 星辰）
 │   │   │   ├── rag/             # RAG 检索增强生成
 │   │   │   └── agent/           # Agent 对话编排
@@ -139,7 +139,7 @@ AOOGuidePathPlanning/
 | 上下文 | 规范 | 示例 |
 |--------|------|------|
 | Python 文件/函数/变量 | `snake_case` | `estimate_mastery_irt()` |
-| Python 类 | `PascalCase` | `DiagnosisService` |
+| Python 类 | `PascalCase` | `CehuiService` |
 | Vue 组件文件 | `PascalCase.vue` | `LearningPathView.vue` |
 | TypeScript 类型/接口 | `PascalCase` | `AOOConvergenceData` |
 | TypeScript 变量/函数 | `camelCase` | `fetchCurrentPath()` |

@@ -2,7 +2,7 @@
 
 论文: 《The Animated Oat Optimization Algorithm》
 
-算法灵感来源于燕麦种子的传播策略，模拟燕麦种子通过风、水、动物
+算法灵感来源于动麦种子的传播策略，模拟动麦种子通过风、水、动物
 传播（探索阶段），以及湿敏滚动和遇障碍弹射（开发阶段）的优化过程。
 
 核心公式索引：
@@ -81,7 +81,7 @@ class OptimizationResult:
 
 
 class AOOEngine:
-    """燕麦动画优化算法 (Animated Oat Optimization) 核心引擎
+    """动麦动画优化算法 (Animated Oat Optimization) 核心引擎
 
     实现论文中完整的优化流程：
       1. 随机初始化种群 (公式 1-2)
@@ -401,7 +401,7 @@ class AOOEngine:
           J = e * (X_best - X(i))
           X_new(i) = X_best + J + c * Levy(Dim) ⊗ X_best
 
-        模拟燕麦种子遇到障碍物后储能弹射的抛体运动。
+        模拟动麦种子遇到障碍物后储能弹射的抛体运动。
         """
         N = self.config.population_size
         Dim = self.config.dim

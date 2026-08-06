@@ -1,7 +1,7 @@
-"""对话即诊断适配器 — LLM诊断JSON → AOO输入参数
+"""对话即测绘适配器 — LLM测绘JSON → AOO输入参数
 
 将星火大模型在对话中隐式评估的知识点掌握度、认知负荷、学习意图
-转换为 AOO 引擎所需的标准输入参数，并与历史诊断数据融合。
+转换为 AOO 引擎所需的标准输入参数，并与历史测绘数据融合。
 遵循"大模型只做认知感知与语义翻译、AOO专注数学寻优与约束求解"的松耦合边界。
 
 P0 修复要点 (2026-08-02):
@@ -13,7 +13,7 @@ P0 修复要点 (2026-08-02):
   3. **weak_count 基于真实融合值** — 修复因数值被缩小导致的薄弱点高估、
      can_optimize 恒为真。
   4. **类型标注纠正** — student_id 是 UUID 而非 int。
-  5. **无基线兜底** — 首次使用（无诊断记录）时以 StudentKnowledge 答题记录为主，
+  5. **无基线兜底** — 首次使用（无测绘记录）时以 StudentKnowledge 答题记录为主，
      问答修正仅作微弱先验，不报错、不阻断。
 """
 
@@ -33,10 +33,10 @@ from app.models.cognitive_profile import (
     CognitiveProfileEvent,
     StudentCognitiveProfile,
 )
-from app.models.diagnosis import DiagnosisRecord
+from app.models.cehui import CehuiRecord
 from app.models.knowledge_point import KnowledgePoint
 from app.models.student_knowledge import StudentKnowledge
-from app.services.diagnosis.kp_resolver import KnowledgePointResolver
+from app.services.cehui.kp_resolver import KnowledgePointResolver
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 #    客观基线权重自动取 1 - λ。改 env 即可秒级调整主观信号权重，无需改代码。
 #    无任何客观基线时，信号相对先验的权重取 min(λ, 0.5)（更保守，避免无依据主导）。
 # ⓶ CHAT_PROFILE_MAX_DELTA（P3）:
-#    单知识点相对诊断基线的偏移上限 δ_max，超界截断，防止单次对话噪声把路径带偏。
+#    单知识点相对测绘基线的偏移上限 δ_max，超界截断，防止单次对话噪声把路径带偏。
 # ⓷ CHAT_PROFILE_PRIOR（P3）:
 #    无任何基线时向该先验回归（而非归零），保持数据真实性。
 
@@ -104,13 +104,13 @@ def _is_uuid(value: str) -> bool:
         return False
 
 
-class DiagnosisAdapter:
-    """LLM 对话诊断 → AOO 优化参数 适配器
+class CehuiAdapter:
+    """LLM 对话测绘 → AOO 优化参数 适配器
 
     职责:
-    1. 解析 LLM 在对话中产出的诊断 JSON 块
+    1. 解析 LLM 在对话中产出的测绘 JSON 块
     2. 将 LLM 输出的知识点名称对齐到系统唯一键 kp_id
-    3. 与用户历史答题诊断数据进行置信度加权融合（向先验回归）
+    3. 与用户历史答题测绘数据进行置信度加权融合（向先验回归）
     4. 生成 AOO 引擎所需的标准输入（掌握度向量 + 认知负荷 + 优化偏好）
     5. 当满足优化条件时触发 AOO 异步任务
     """
@@ -152,11 +152,11 @@ class DiagnosisAdapter:
         return flat
 
     async def get_latest_exam_baseline(self) -> Optional[Dict[str, Any]]:
-        """获取用户最近一次答题诊断数据作为客观基线"""
+        """获取用户最近一次答题测绘数据作为客观基线"""
         stmt = (
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id == self.user_id)
-            .order_by(DiagnosisRecord.created_at.desc())
+            select(CehuiRecord)
+            .where(CehuiRecord.student_id == self.user_id)
+            .order_by(CehuiRecord.created_at.desc())
             .limit(1)
         )
         result = await self.db.execute(stmt)
@@ -185,7 +185,7 @@ class DiagnosisAdapter:
         }
 
     async def get_practice_mastery(self) -> Dict[str, float]:
-        """加载答题记录掌握度 {kp_id: level} — 无诊断基线时的兜底来源
+        """加载答题记录掌握度 {kp_id: level} — 无测绘基线时的兜底来源
 
         StudentKnowledge 是客观答题沉淀数据，本适配器**只读不写**，
         严禁用主观问答信号污染（数据真实性底线）。
@@ -205,7 +205,7 @@ class DiagnosisAdapter:
             return {}
 
     async def get_chat_profile(self) -> Dict[str, Any]:
-        """读取该生「仅来自智能问答」梳理出的知识点掌握特点
+        """读取该生「仅来自导学终端」梳理出的知识点掌握特点
 
         Returns:
             {
@@ -342,8 +342,8 @@ class DiagnosisAdapter:
 
         Args:
             chat_mastery: {kp_id: level} — 已对齐的 LLM 评估
-            base_mastery: {kp_id: level} — 诊断 / 答题记录客观基线
-            has_baseline: 是否存在正式诊断基线，影响 LLM 权重
+            base_mastery: {kp_id: level} — 测绘 / 答题记录客观基线
+            has_baseline: 是否存在正式测绘基线，影响 LLM 权重
 
         Returns:
             {kp_id: level} 融合后的掌握度向量
@@ -395,14 +395,14 @@ class DiagnosisAdapter:
     # 主入口
     # ------------------------------------------------------------
 
-    async def build_aoo_params(self, chat_diagnosis: Dict[str, Any]) -> Dict[str, Any]:
-        """从对话诊断 JSON 构建 AOO 标准输入参数
+    async def build_aoo_params(self, chat_cehui: Dict[str, Any]) -> Dict[str, Any]:
+        """从对话测绘 JSON 构建 AOO 标准输入参数
 
         Returns:
             {
-                "has_baseline": bool,          # 是否有正式诊断基线
-                "baseline_source": str,        # diagnosis | practice | none
-                "diagnosis_id": str | None,    # 关联的诊断记录 ID
+                "has_baseline": bool,          # 是否有正式测绘基线
+                "baseline_source": str,        # cehui | practice | none
+                "diagnosis_id": str | None,    # 关联的测绘记录 ID
                 "mastery_levels": dict,        # {kp_id: level} 融合后的掌握度向量
                 "cognitive_load": float,       # 认知负荷
                 "optimization_preference": dict,
@@ -417,10 +417,10 @@ class DiagnosisAdapter:
         baseline = await self.get_latest_exam_baseline()
         has_baseline = baseline is not None
 
-        chat_estimates = chat_diagnosis.get("mastery_estimates", []) or []
-        chat_cognitive_load = chat_diagnosis.get("cognitive_load", 0.5)
-        learning_intent = chat_diagnosis.get("learning_intent", "")
-        needs_optimization = bool(chat_diagnosis.get("needs_optimization", False))
+        chat_estimates = chat_cehui.get("mastery_estimates", []) or []
+        chat_cognitive_load = chat_cehui.get("cognitive_load", 0.5)
+        learning_intent = chat_cehui.get("learning_intent", "")
+        needs_optimization = bool(chat_cehui.get("needs_optimization", False))
 
         try:
             chat_cognitive_load = _clamp01(float(chat_cognitive_load))
@@ -435,11 +435,11 @@ class DiagnosisAdapter:
                 len(unresolved), unresolved, self.user_id,
             )
 
-        # 2) 选取客观基线: 诊断优先 → 答题记录兜底（首次使用场景）
+        # 2) 选取客观基线: 测绘优先 → 答题记录兜底（首次使用场景）
         if has_baseline and baseline:
             base_mastery = baseline.get("mastery_levels", {})
             base_load = float(baseline.get("cognitive_load", 0.5))
-            baseline_source = "diagnosis"
+            baseline_source = "cehui"
         else:
             base_mastery = await self.get_practice_mastery()
             base_load = 0.5
@@ -641,7 +641,7 @@ class DiagnosisAdapter:
                     event_type="baseline_fallback",
                     payload={"chat_mastery": chat_mastery},
                     reasoning=(
-                        "用户尚未完成任何诊断答题，无客观基线。"
+                        "用户尚未完成任何测绘答题，无客观基线。"
                         "本次以对话问答为微弱先验（λ 权重下向 0.5 先验回归），"
                         "不回写 StudentKnowledge，数据真实性已守住。"
                     ),

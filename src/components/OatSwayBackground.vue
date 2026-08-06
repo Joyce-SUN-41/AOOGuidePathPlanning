@@ -201,7 +201,7 @@ function drawAtmosphere(c: CanvasRenderingContext2D): void {
   c.fillStyle = g1
   c.fillRect(0, height * 0.4, width, height * 0.6)
 
-  // 左上侧斜向柔光（呼应 hero 燕麦金光晕）
+  // 左上侧斜向柔光（呼应 hero 动麦金光晕）
   const g2 = c.createRadialGradient(
     width * 0.28,
     height * 0.08,

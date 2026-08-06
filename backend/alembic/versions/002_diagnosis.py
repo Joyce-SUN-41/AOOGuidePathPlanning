@@ -4,7 +4,7 @@ Revision ID: 002_diagnosis
 Revises: 001_initial_schema
 Create Date: 2026-07-27
 
-用于存储认知诊断测验的完整结果
+用于存储学情测绘测验的完整结果
 """
 
 from typing import Sequence, Union

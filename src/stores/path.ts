@@ -28,9 +28,9 @@ const MAX_POLL_COUNT = 150
  * - 提供甘特图 & 每日任务视图派生数据
  *
  * 闭环流程：
- *   diagnoseStore.submitDiagnosis() 成功
+ *   cehuiStore.submitCehui() 成功
  *   → router.push('/path')
- *   → PathView.onMounted 读取 diagnoseStore.currentDiagnosis
+ *   → PathView.onMounted 读取 cehuiStore.currentCehui
  *   → pathStore.generatePath(diagnosisId)
  *   → 轮询 AOO task status
  *   → completed → 渲染路径
@@ -177,7 +177,7 @@ export const usePathStore = defineStore(
     /**
      * 触发 AOO 异步生成学习路径
      *
-     * @param diagnosisId 诊断结果 ID
+     * @param diagnosisId 测绘结果 ID
      * @returns 是否成功触发
      */
     async function generatePath(
@@ -198,7 +198,7 @@ export const usePathStore = defineStore(
 
       try {
         // 1. 提交生成请求（异步任务）
-        // 后端根据 diagnosis 自动补全 mastery_levels, student_id 等字段
+        // 后端根据 cehui 自动补全 mastery_levels, student_id 等字段
         const response = await pathApi.generate({
           diagnosisId,
         } as any)
@@ -224,12 +224,12 @@ export const usePathStore = defineStore(
     }
 
     /**
-     * 灵活重规划（基于任意历史诊断 / 诊断 + 当前对话画像）
+     * 灵活重规划（基于任意历史测绘 / 测绘 + 当前对话画像）
      *
-     * @param diagnosisId 任意一次历史诊断 ID（基底）
-     * @param useChatProfile 是否叠加当前「智能问答对话画像」(mode='diagnosis+chat')
+     * @param diagnosisId 任意一次历史测绘 ID（基底）
+     * @param useChatProfile 是否叠加当前「导学终端对话画像」(mode='cehui+chat')
      *
-     * 复用与 generatePath 相同的轮询闭环；不同点在于基底来源可在诊断与对话之间组合。
+     * 复用与 generatePath 相同的轮询闭环；不同点在于基底来源可在测绘与对话之间组合。
      */
     async function regeneratePathFlexible(
       diagnosisId: string,
@@ -248,7 +248,10 @@ export const usePathStore = defineStore(
       trackEvent('path_regenerate_flexible', { diagnosisId, useChatProfile })
 
       try {
-        const response = await pathApi.optimizeFlexible(diagnosisId, useChatProfile) as any
+        const response = await pathApi.optimizeFlexible(
+          diagnosisId,
+          useChatProfile
+        ) as any
 
         taskId.value = response.taskId || response.task_id || null
         if (!taskId.value) {
@@ -258,8 +261,8 @@ export const usePathStore = defineStore(
         generationProgress.value = 5
         message.info(
           useChatProfile
-            ? '已基于「诊断 + 对话分析」启动重规划'
-            : '已基于所选诊断启动重规划'
+            ? '已基于「测绘 + 对话分析」启动重规划'
+            : '已基于所选测绘启动重规划'
         )
 
         startPolling()
@@ -552,6 +555,43 @@ export const usePathStore = defineStore(
       }
     }
 
+    /**
+     * 按 ID 钉死当前路径（采纳后使用）。
+     *
+     * 与 fetchCurrentPath（按 is_active 过滤 + created_at 排序）不同，本方法直接以
+     * 指定 path_id 拉取并设为当前路径，结果唯一确定，不受其它路径的 is_active /
+     * created_at 排序影响。用于「一键采纳」后确保当前路径稳定等于刚采纳的版本，
+     * 避免刷新后因 /current 排序歧义而回退到旧版本。
+     */
+    async function pinPathById(id: string): Promise<void> {
+      try {
+        const path = await pathApi.getPath(id)
+        if (!path) {
+          await fetchCurrentPath()
+          return
+        }
+        if (!Array.isArray(path.dailyTasks)) {
+          console.warn('[PathStore] 钉死路径数据格式不兼容，回退到 /current')
+          await fetchCurrentPath()
+          return
+        }
+        currentPath.value = path
+        optimizationStatus.value = 'completed'
+        taskId.value = path.taskId
+        const rawAlts = (path as any).alternativePaths as any[] | undefined
+        if (rawAlts?.length) {
+          alternativePaths.value = rawAlts.map(_transformAlternativePath)
+        }
+        const conv = (path as any).convergenceData as AOOConvergenceData | undefined
+        if (conv?.iterations?.length) {
+          convergenceData.value = conv
+        }
+      } catch (e) {
+        console.warn('[PathStore] 钉死路径失败，回退到 /current:', e)
+        await fetchCurrentPath()
+      }
+    }
+
     /** 选择备选路径方案 */
     async function selectAlternativePath(pathId: string): Promise<boolean> {
       try {
@@ -687,6 +727,7 @@ export const usePathStore = defineStore(
       regeneratePathFlexible,
       fetchCurrentPath,
       fetchPath,
+      pinPathById,
       selectAlternativePath,
       fetchAlternatives,
       fetchHistory,

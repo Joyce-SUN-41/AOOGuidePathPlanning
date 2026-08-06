@@ -223,7 +223,7 @@ def run_aoo_optimization(
     """执行 AOO 路径优化 (Celery 异步任务)
 
     Args:
-        diagnosis_id: 诊断记录 ID
+        diagnosis_id: 测绘记录 ID
         student_id: 学生用户 ID (UUID 字符串)
         mastery_levels: 知识点掌握度 {kp_id: value}
         cognitive_load: 综合认知负荷指数
@@ -237,7 +237,7 @@ def run_aoo_optimization(
     t_start = time.perf_counter()
 
     logger.info(
-        "AOO 优化任务启动: task_id=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        "AOO 优化任务启动: task_id=%s cehui=%s student=%s kps=%d load=%.2f",
         task_id, diagnosis_id, student_id,
         len(mastery_levels), cognitive_load,
     )
@@ -598,7 +598,7 @@ def run_aoo_optimization_sync(
     前端通过 GET /aoo/status/{task_id} 轮询进度，与此函数写入的 Redis key 完全兼容。
 
     Args:
-        diagnosis_id: 诊断记录 ID
+        diagnosis_id: 测绘记录 ID
         student_id: 学生用户 ID
         mastery_levels: 知识点掌握度 {kp_id: value}
         cognitive_load: 综合认知负荷指数
@@ -613,7 +613,7 @@ def run_aoo_optimization_sync(
     total_iters = (config or {}).get("max_iterations", 500)
 
     logger.info(
-        "AOO 同步执行启动: task_id=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        "AOO 同步执行启动: task_id=%s cehui=%s student=%s kps=%d load=%.2f",
         task_id, diagnosis_id, student_id,
         len(mastery_levels), cognitive_load,
     )

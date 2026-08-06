@@ -38,4 +38,4 @@ numpy>=1.26.0,<3.0.0
 # Async database driver support (required by SQLAlchemy async in Celery workers)
 greenlet>=3.0.0
 
-# RAG — NumPy 内存向量存储（智能问答必需，零额外依赖）
+# RAG — NumPy 内存向量存储（导学终端必需，零额外依赖）

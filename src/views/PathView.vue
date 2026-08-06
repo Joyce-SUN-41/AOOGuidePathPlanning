@@ -14,8 +14,8 @@ import { useIsMobile } from '@/composables/useIsMobile'
 import { useRouter, useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { usePathStore } from '@/stores/path'
-import { useDiagnosisStore } from '@/stores/diagnosis'
-import { diagnosisApi } from '@/api/modules/diagnosis'
+import { useCehuiStore } from '@/stores/cehui'
+import { cehuiApi } from '@/api/modules/cehui'
 import { pathApi } from '@/api/modules/path'
 import LearningPathView from '@/components/LearningPathView.vue'
 import SeedTrajectory from '@/components/SeedTrajectory.vue'
@@ -58,7 +58,7 @@ import { message } from 'ant-design-vue'
 const router = useRouter()
 const route = useRoute()
 const pathStore = usePathStore()
-const diagnosisStore = useDiagnosisStore()
+const cehuiStore = useCehuiStore()
 
 // 移动端断点
 const { isMobile } = useIsMobile()
@@ -97,6 +97,19 @@ const error = computed(() => pathStore.error)
 
 const currentPath = computed(() => pathStore.currentPath)
 const totalDays = computed(() => pathStore.totalDays)
+
+/** 路径标题语义标签（建议 11）: 起点规划 / 动态更新 vN; 旧路径 planType 为空按 baseline 兼容 */
+const pathTitleLabel = computed(() => {
+  const path = currentPath.value
+  if (!path) return '我的学习路径'
+  const version = path.version ?? 1
+  const planType = path.planType
+  if (planType && planType.startsWith('update_v')) {
+    return `动态更新 v${version}`
+  }
+  // baseline 或为空（向后兼容旧路径）：起点规划不带版本号
+  return '起点规划'
+})
 const totalTasks = computed(() => pathStore.taskCount)
 const totalHours = computed(() => pathStore.estimatedHours)
 const optimizationScore = computed(() => pathStore.optimizationScore)
@@ -141,26 +154,23 @@ async function loadPendingPath() {
 
 async function handleAdopt() {
   if (!pendingPath.value) return
+  const adoptId = pendingPath.value.path_id
+  const adoptVersion = pendingPath.value.version
   adopting.value = true
   try {
-    await pathApi.adoptPath(pendingPath.value.path_id)
-    message.success(`已采纳学习路径 v${pendingPath.value.version}`)
+    await pathApi.adoptPath(adoptId)
+    message.success(`已采纳学习路径 v${adoptVersion}`)
     pendingPath.value = null
-    // 刷新当前路径
-    await refreshPath()
+    // 关键修复：采纳后直接按 ID 拉取被采纳的路径并「钉死」为当前路径，
+    // 不依赖 /current（后者在多条 is_active=True 边界情况下可能排序到其它记录）。
+    // 这样无论刷新与否，当前路径都稳定等于刚采纳的版本，避免「刷新后恢复旧版本」。
+    await pathStore.pinPathById(adoptId)
+    // 重新拉取待采纳版本，确保横幅已消失
+    await loadPendingPath()
   } catch (e) {
     message.error('采纳失败，请稍后重试')
   } finally {
     adopting.value = false
-  }
-}
-
-async function refreshPath() {
-  loading.value = true
-  try {
-    await pathStore.fetchCurrentPath()
-  } finally {
-    loading.value = false
   }
 }
 
@@ -494,15 +504,15 @@ async function handleRegenerate(diagnosisId?: string | number) {
     diagId = currentPath.value?.diagnosisId || ''
   }
 
-  // 2. 如果当前路径没有 diagnosisId，尝试从诊断 Store 获取 (persisted)
+  // 2. 如果当前路径没有 diagnosisId，尝试从测绘 Store 获取 (persisted)
   if (!diagId) {
-    diagId = diagnosisStore.currentDiagnosis?.id || ''
+    diagId = cehuiStore.currentCehui?.id || ''
   }
 
-  // 3. 如果还没有，从 API 获取最新诊断结果
+  // 3. 如果还没有，从 API 获取最新测绘结果
   if (!diagId) {
     try {
-      const latest = await diagnosisApi.getLatest()
+      const latest = await cehuiApi.getLatest()
       if (latest?.id) {
         diagId = latest.id
       }
@@ -513,14 +523,19 @@ async function handleRegenerate(diagnosisId?: string | number) {
 
   // 4. 最终校验
   if (!diagId) {
-    message.warning('暂无可用的诊断结果，请先完成认知诊断测评')
+    message.warning('暂无可用的测绘结果，请先完成学情测绘测评')
     return
   }
 
   regenerating.value = true
   try {
-    await pathStore.generatePath(String(diagId))
-    message.success('学习路径已启动生成，请稍候...')
+    // 注意: 重新规划必须走 optimize-flexible, 该端点会以 auto_adopt=False 生成
+    // is_active=False 的「待采纳」重规划版本, 前端据此展示「采纳更新」横幅。
+    // 不能走 generatePath(/aoo/generate), 否则只生成全新基线, 不会出现待采纳版本。
+    const ok = await pathStore.regeneratePathFlexible(String(diagId), false)
+    if (ok) {
+      message.success('重规划已启动，完成后将出现「待采纳」版本供你一键采纳')
+    }
   } catch {
     message.error('重新生成失败，请稍后重试')
   } finally {
@@ -528,7 +543,7 @@ async function handleRegenerate(diagnosisId?: string | number) {
   }
 }
 
-// ── 重新规划：选择诊断历史 ──
+// ── 重新规划：选择测绘历史 ──
 const replanModalVisible = ref(false)
 const replanLoading = ref(false)
 const replanUseChat = ref(false)
@@ -547,12 +562,12 @@ async function openReplanModal() {
   replanLoading.value = true
   replanHistory.value = []
   try {
-    const list = await diagnosisApi.getHistory()
+    const list = await cehuiApi.getHistory()
     replanHistory.value = Array.isArray(list)
       ? (list as ReplanDiagItem[]).slice().reverse()
       : []
   } catch {
-    message.warning('获取诊断历史失败，请稍后重试')
+    message.warning('获取测绘历史失败，请稍后重试')
   } finally {
     replanLoading.value = false
   }
@@ -560,13 +575,13 @@ async function openReplanModal() {
 
 function confirmReplan(item: ReplanDiagItem) {
   replanModalVisible.value = false
-  // 若勾选「叠加对话分析」→ 诊断 + 对话画像融合重规划；否则纯诊断重规划
+  // 若勾选「叠加对话分析」→ 测绘 + 对话画像融合重规划；否则纯测绘重规划
   if (replanUseChat.value) {
     regenerating.value = true
     pathStore
       .regeneratePathFlexible(String(item.id), true)
       .then((ok) => {
-        if (ok) message.success('已基于「诊断 + 对话分析」启动重规划')
+        if (ok) message.success('已基于「测绘 + 对话分析」启动重规划')
       })
       .catch(() => message.error('重规划启动失败，请稍后重试'))
       .finally(() => (regenerating.value = false))
@@ -587,8 +602,8 @@ function handleShare() {
   )
 }
 
-function goToDiagnose() {
-  router.push('/diagnose')
+function goToCehui() {
+  router.push('/cehui')
 }
 
 // ============================================================
@@ -648,6 +663,16 @@ onMounted(async () => {
   await loadPendingPath()
 })
 
+// 任意重规划 / 生成完成后, 重新拉取「待采纳」版本, 确保「采纳更新」横幅及时出现
+watch(
+  () => isGenerating.value,
+  (now, prev) => {
+    if (prev && !now && !error.value) {
+      loadPendingPath()
+    }
+  }
+)
+
 onUnmounted(() => {
   pausePlayback()
   disposeConvergenceChart()
@@ -665,7 +690,7 @@ onUnmounted(() => {
       <div class="header-left">
         <h1 class="page-title">
           <NodeIndexOutlined class="title-icon" />
-          我的学习路径
+          {{ pathTitleLabel }}
         </h1>
       </div>
       <div class="header-right" v-if="hasPath && !isGenerating">
@@ -691,7 +716,7 @@ onUnmounted(() => {
       <div class="pending-icon"><ExperimentOutlined /></div>
       <div class="pending-body">
         <div class="pending-title">
-          检测到新版本学习路径 v{{ pendingPath.version }}
+          路径已根据近期问答更新至 v{{ pendingPath.version }}
           <a-tag color="gold" class="pending-tag">待采纳</a-tag>
         </div>
         <div class="pending-desc">
@@ -751,13 +776,13 @@ onUnmounted(() => {
     <div v-else-if="!hasPath && !loading" class="state-card empty">
       <a-result title="尚未生成学习路径">
         <template #icon><NodeIndexOutlined style="color: #9b8a7a; font-size: 64px" /></template>
-        <template #sub-title>完成认知诊断后，AOO 引擎将为你量身定制专属学习路径</template>
+        <template #sub-title>完成学情测绘后，AOO 引擎将为你量身定制专属学习路径</template>
         <template #extra>
           <a-space direction="vertical">
             <a-button type="primary" size="large" :loading="regenerating" @click="handleRegenerate">
               <ThunderboltOutlined /> 生成学习路径
             </a-button>
-            <a-button size="large" @click="goToDiagnose">前往认知诊断</a-button>
+            <a-button size="large" @click="goToCehui">前往学情测绘</a-button>
           </a-space>
         </template>
       </a-result>
@@ -1168,7 +1193,7 @@ onUnmounted(() => {
     </template>
 
     <!-- =========================================================
-         重新规划：选择依据的诊断历史
+         重新规划：选择依据的测绘历史
          ========================================================= -->
     <a-modal
       v-model:visible="replanModalVisible"
@@ -1178,23 +1203,23 @@ onUnmounted(() => {
       class="replan-modal"
     >
       <p class="replan-tip">
-        请选择本次重新规划所依据的一次认知诊断结果，系统将根据该次诊断的薄弱知识点与掌握度重新优化路径。
+        请选择本次重新规划所依据的一次学情测绘结果，系统将根据该次测绘的薄弱知识点与掌握度重新优化路径。
       </p>
       <div class="replan-chat-switch">
         <a-switch v-model:checked="replanUseChat" :disabled="replanLoading" />
         <div class="rcs-text">
-          <span class="rcs-title">叠加「智能问答对话分析」</span>
+          <span class="rcs-title">叠加「导学终端对话分析」</span>
           <span class="rcs-desc">
-            将所选诊断作为基底，并融合「对话画像」中梳理出的掌握特点（按动态权重 λ 叠加），生成更贴合近期对话情况的路径。
+            将所选测绘作为基底，并融合「对话画像」中梳理出的掌握特点（按动态权重 λ 叠加），生成更贴合近期对话情况的路径。
           </span>
         </div>
       </div>
       <div v-if="replanLoading" class="replan-loading">
-        <a-spin tip="正在加载诊断历史..." />
+        <a-spin tip="正在加载测绘历史..." />
       </div>
       <a-empty
         v-else-if="replanHistory.length === 0"
-        description="暂无认知诊断记录，请先完成一次测评"
+        description="暂无学情测绘记录，请先完成一次测评"
       />
       <a-list
         v-else
@@ -1207,7 +1232,7 @@ onUnmounted(() => {
             <a-list-item-meta>
               <template #title>
                 <span class="replan-item-title">
-                  诊断于 {{ formatDate(item.created_at) }}
+                  测绘于 {{ formatDate(item.created_at) }}
                 </span>
               </template>
               <template #description>
@@ -1311,18 +1336,18 @@ onUnmounted(() => {
 <style scoped lang="less">
 @import '@/assets/styles/variables.less';
 
-// ============================================================
-//   页面容器
-// ============================================================
+/*============================================================ */
+/*页面容器 */
+/*============================================================ */
 .path-page {
   max-width: var(--content-max-width, clamp(60rem, 80rem, 80rem));
   margin: 0 auto;
   padding: 0 0 clamp(1.5rem, 2.5rem, 3rem);
 }
 
-// ============================================================
-//   页面头部
-// ============================================================
+/*============================================================ */
+/*页面头部 */
+/*============================================================ */
 .page-header {
   display: flex;
   align-items: center;
@@ -1363,9 +1388,9 @@ onUnmounted(() => {
   gap: 4px;
 }
 
-// ============================================================
-//   状态卡片
-// ============================================================
+/*============================================================ */
+/*状态卡片 */
+/*============================================================ */
 .state-card {
   min-height: 400px;
   display: flex;
@@ -1401,13 +1426,15 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-// ============================================================
-//   概览卡片网格 — 金属精密风格
-// ============================================================
+/*============================================================ */
+/*概览卡片网格 — 金属精密风格 */
+/*============================================================ */
 .overview-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1.3fr 1.3fr;
-  grid-template-rows: auto auto;
+  /*中间行恰好 5 张卡片（总天数 / 总任务数 / 预计总时长 / 认知负荷 / 路径完成度）， */
+  /*因此列数必须为 5，且等分，才能与上下两张跨整行（1 / -1）的卡片左右对齐 */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: auto auto auto;
   gap: @spacing-md;
   margin-bottom: @spacing-lg;
 }
@@ -1431,7 +1458,7 @@ onUnmounted(() => {
   }
 }
 
-// ── 信息卡片（跨整行） ──
+/*── 信息卡片（跨整行） ── */
 .overview-card--info {
   grid-column: 1 / -1;
   display: flex;
@@ -1471,12 +1498,40 @@ onUnmounted(() => {
   font-family: @font-family-mono;
 }
 
-// ── 度量卡片 ──
-.overview-card--metric {
+/*── 度量卡片 ── */
+/*五张卡片（metric ×3 + gauge + progress）共用同一套纵向布局， */
+/*保证图标、主数值、标签三层在同一水平基线上对齐 */
+.overview-card--metric,
+.overview-card--gauge,
+.overview-card--progress {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   text-align: center;
+}
+
+/*主数值区统一高度：metric 的数字、gauge 的仪表盘、progress 的进度环 */
+/*都占据同一高度，使下方 label 行严格对齐 */
+.overview-card--metric .overview-metric-value,
+.overview-card--gauge .gauge-wrap,
+.overview-card--progress .progress-circle-wrap {
+  min-height: 72px;
+}
+
+/*纯数字型卡片需要把数值垂直居中到这 72px 区域内 */
+.overview-card--metric .overview-metric-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*仪表盘内部维持原有的纵向堆叠（SVG 在上、数值在下） */
+.overview-card--gauge .gauge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .overview-card-icon {
@@ -1513,22 +1568,16 @@ onUnmounted(() => {
   margin-top: 3px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  /*标签统一贴到卡片底部，五张卡片的标签行始终平齐 */
+  margin-top: auto;
+  padding-top: 3px;
+  white-space: nowrap;
 }
 
-// ── 仪表盘卡片 ──
-.overview-card--gauge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
+/*── 仪表盘卡片 ── */
 .gauge-wrap {
   position: relative;
   width: 90px;
-  height: 70px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   margin-bottom: 2px;
 }
 
@@ -1553,13 +1602,7 @@ onUnmounted(() => {
   font-family: @font-family-mono;
 }
 
-// ── 进度环卡片 ──
-.overview-card--progress {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
+/*── 进度环卡片 ── */
 .progress-circle-wrap {
   position: relative;
   width: 68px;
@@ -1601,7 +1644,7 @@ onUnmounted(() => {
   color: @gray-400;
 }
 
-// ── 扩展卡片（覆盖知识点 + 日均 + 得分） ──
+/*── 扩展卡片（覆盖知识点 + 日均 + 得分） ── */
 .overview-card--extras {
   grid-column: 1 / -1;
   padding: 10px 20px;
@@ -1643,9 +1686,9 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.08);
 }
 
-// ============================================================
-//   路径切换 Tabs — 金属精密
-// ============================================================
+/*============================================================ */
+/*路径切换 Tabs — 金属精密 */
+/*============================================================ */
 .variant-tabs {
   display: flex;
   gap: @spacing-sm;
@@ -1700,9 +1743,9 @@ onUnmounted(() => {
   }
 }
 
-// ============================================================
-//   每日详情面板 — 精密紧凑
-// ============================================================
+/*============================================================ */
+/*每日详情面板 — 精密紧凑 */
+/*============================================================ */
 .daily-detail {
   margin-top: @spacing-lg;
   .metal-card();
@@ -1926,9 +1969,9 @@ onUnmounted(() => {
   font-size: @font-size-xs;
 }
 
-// ============================================================
-//   AOO 收敛回放 — 精密控制面板
-// ============================================================
+/*============================================================ */
+/*AOO 收敛回放 — 精密控制面板 */
+/*============================================================ */
 .convergence-section {
   margin-top: @spacing-lg;
   border-radius: @radius-card;
@@ -2031,10 +2074,6 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
-.convergence-trajectory {
-  /* SeedTrajectory 组件的深色背景容器已内置于组件，此处仅做留白 */
-}
-
 .convergence-controls {
   display: flex;
   align-items: center;
@@ -2075,9 +2114,9 @@ onUnmounted(() => {
   }
 }
 
-// ============================================================
-//   响应式
-// ============================================================
+/*============================================================ */
+/*响应式 */
+/*============================================================ */
 @media (max-width: 1280px) {
   .path-page {
     max-width: 100%;
@@ -2085,10 +2124,20 @@ onUnmounted(() => {
   }
 }
 
+/*中屏：5 张卡片按 3 列排会剩 1 个空格，故整体降到「上 3 下 2」的均分布局 */
+/*用 6 列做底，前 3 张各占 2 列（3 等分），后 2 张各占 3 列（2 等分），行内始终填满 */
 @media (max-width: 1024px) {
   .overview-grid {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     grid-template-rows: auto;
+  }
+
+  .overview-card--metric {
+    grid-column: span 2;
+  }
+  .overview-card--gauge,
+  .overview-card--progress {
+    grid-column: span 3;
   }
 
   .overview-card--info {
@@ -2116,14 +2165,19 @@ onUnmounted(() => {
     justify-content: flex-start;
   }
 
+  /*窄屏：2 列。前 3 张 metric 中最后 1 张与 gauge 配对，progress 独占整行，避免留空格 */
   .overview-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-card--metric {
+    grid-column: span 1;
+  }
+  .overview-card--gauge {
+    grid-column: span 1;
   }
 
   .overview-card--info {
-    grid-column: 1 / -1;
-  }
-  .overview-card--gauge {
     grid-column: 1 / -1;
   }
   .overview-card--progress {
@@ -2196,11 +2250,12 @@ onUnmounted(() => {
   }
 
   .overview-card--info,
-  .overview-card--gauge,
-  .overview-card--progress,
   .overview-card--extras,
-  .overview-card--metric {
+  .overview-card--metric,
+  .overview-card--gauge,
+  .overview-card--progress {
     grid-column: 1 / -1;
+    span: initial;
   }
 
   .variant-tab {
@@ -2214,9 +2269,9 @@ onUnmounted(() => {
   }
 }
 
-// ============================================================
-//   P2 待采纳重规划版本横幅
-// ============================================================
+/*============================================================ */
+/*P2 待采纳重规划版本横幅 */
+/*============================================================ */
 .pending-banner {
   display: flex;
   align-items: center;
@@ -2288,9 +2343,9 @@ onUnmounted(() => {
   }
 }
 
-// ============================================================
-//   P2 路径变更详情（diff 高亮）
-// ============================================================
+/*============================================================ */
+/*P2 路径变更详情（diff 高亮） */
+/*============================================================ */
 .path-diff-modal {
   .diff-summary {
     margin-bottom: @spacing-md;

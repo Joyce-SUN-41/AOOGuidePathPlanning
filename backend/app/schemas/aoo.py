@@ -178,7 +178,7 @@ class AOOPreferencesModel(CamelModel):
 class AOOGenerateRequest(CamelModel):
     """POST /api/v1/path/generate — 触发 AOO 路径生成"""
 
-    diagnosis_id: str = Field(..., description="诊断结果 ID")
+    diagnosis_id: str = Field(..., description="测绘结果 ID")
     preferences: Optional[AOOPreferencesModel] = Field(
         default=None, description="可选的偏好配置"
     )

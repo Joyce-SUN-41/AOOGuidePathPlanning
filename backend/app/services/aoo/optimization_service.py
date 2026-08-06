@@ -1,7 +1,7 @@
 """AOO 路径优化服务层 — 数据加载 / 算法调用 / 结果持久化
 
 负责:
-  1. 从数据库加载知识点 & 诊断数据
+  1. 从数据库加载知识点 & 测绘数据
   2. 将持久化数据转换为 AOO 算法所需格式
   3. 调用 AOOService.optimize()
   4. 将结果保存到 learning_paths / path_tasks / aoo_optimization_logs
@@ -85,7 +85,7 @@ class OptimizationService:
         """执行完整 AOO 优化工作流
 
         Args:
-            diagnosis_id: 诊断记录 ID
+            diagnosis_id: 测绘记录 ID
             student_id: 学生用户 ID
             mastery_levels: 知识点掌握度映射 {kp_id: value ∈ [0,1]}
             cognitive_load: 综合认知负荷指数
@@ -131,6 +131,26 @@ class OptimizationService:
             preferences["max_days"] = config["max_days"]
         if config and config.get("max_daily_minutes"):
             preferences["max_daily_minutes"] = config["max_daily_minutes"]
+        # 第三维「学习准备度」（建议 3）与学习风格（建议 4）作为独立自变量透传
+        # 仅当 config 提供且非空时注入；为空则二维/单维模式，不影响优化流程
+        if config:
+            readiness = config.get("readiness")
+            if isinstance(readiness, dict) and any(
+                k in readiness for k in ("motivation", "metacognition", "self_efficacy")
+            ):
+                preferences["readiness"] = {
+                    "motivation": float(readiness.get("motivation", 0.0)),
+                    "metacognition": float(readiness.get("metacognition", 0.0)),
+                    "self_efficacy": float(readiness.get("self_efficacy", 0.0)),
+                }
+            learning_style = config.get("learning_style")
+            if isinstance(learning_style, dict) and learning_style.get("label") not in (None, "未评估"):
+                preferences["learning_style"] = {
+                    "label": str(learning_style.get("label")),
+                    "scores": learning_style.get("scores", {}) or {},
+                }
+            elif isinstance(learning_style, str) and learning_style != "未评估":
+                preferences["learning_style"] = {"label": learning_style, "scores": {}}
 
         # 6. 确定薄弱知识点
         #    P0 修复: 必须是 AOO 认识的真实 kp_id，否则 focus_areas 会被污染
@@ -196,7 +216,7 @@ class OptimizationService:
                                        optimize_result.get("best_path", {}).get("total_fitness", 0))
 
         logger.info(
-            "AOO 优化完成: diagnosis=%s total=%.2fs best_f=%.6f",
+            "AOO 优化完成: cehui=%s total=%.2fs best_f=%.6f",
             diagnosis_id, execution_time,
             optimize_result.get("best_path", {}).get("total_fitness", 0),
         )
@@ -230,7 +250,7 @@ class OptimizationService:
         """显式三源合并学生掌握度，键空间统一为 kp_id (UUID 字符串)
 
         优先级 (高 → 低):
-          1. incoming   — 本次请求携带的掌握度 (诊断结果 / 已融合的问答修正)
+          1. incoming   — 本次请求携带的掌握度 (测绘结果 / 已融合的问答修正)
           2. StudentKnowledge — 客观答题记录沉淀
           3. 缺省       — 不填充，交由 FitnessCalculator 使用其默认值
 
@@ -462,10 +482,14 @@ class OptimizationService:
                 for day_data in best_path.get("days", []):
                     total_minutes += day_data.get("total_minutes", 0)
 
+                # 规划类型语义标签（建议11）: 首轮=起点规划(baseline), 回流重规划=动态更新 vN
+                plan_type = "baseline" if parent_id is None else f"update_v{new_version}"
+
                 path = LearningPath(
                     student_id=student_id,
                     parent_path_id=parent_id,
                     version=new_version,
+                    plan_type=plan_type,
                     # 默认待采纳；auto_adopt 时直接生效
                     is_active=bool(auto_adopt),
                     path_data={
@@ -553,7 +577,7 @@ class OptimizationService:
                         f"变化为 {new_fit}（{delta_fit:+.4f}）；"
                     )
                 regen_reason = (
-                    f"为什么路径变了：本轮对话诊断信号显示你的掌握度出现变化，"
+                    f"为什么路径变了：本轮对话测绘信号显示你的掌握度出现变化，"
                     f"{weak_hint}{fit_hint}"
                     f"因此生成新版本 v{new_version}"
                     + (f"（基于 v{parent_path.version}）" if parent_path else "（首个版本）")

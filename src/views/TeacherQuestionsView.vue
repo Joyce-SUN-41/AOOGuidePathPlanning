@@ -196,7 +196,7 @@ onMounted(() => {
     <div class="page-header">
       <div>
         <h1 class="page-title">题库管理</h1>
-        <p class="page-subtitle">管理诊断测验的题目资源，支持创建、编辑、删除和批量导入</p>
+        <p class="page-subtitle">管理测绘测验的题目资源，支持创建、编辑、删除和批量导入</p>
       </div>
       <a-button type="primary" @click="openCreate">
         <template #icon><PlusOutlined /></template>

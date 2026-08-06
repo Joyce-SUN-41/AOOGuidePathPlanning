@@ -17,7 +17,7 @@
     <!-- 消息内容 -->
     <div class="msg-body">
       <div class="msg-header">
-        <span class="msg-role">{{ message.role === 'user' ? userName : '燕麦 · AI 助手' }}</span>
+        <span class="msg-role">{{ message.role === 'user' ? userName : '动麦 · AI 助手' }}</span>
         <span class="msg-time">{{ formatTime(message.timestamp) }}</span>
       </div>
 
@@ -104,9 +104,18 @@
           <SourceCard v-for="s in message.sources" :key="s.ref" :source="s" />
         </div>
 
-        <!-- 复制按钮 -->
+        <!-- 复制按钮（建议 9：可复制素材未通过反思则锁定） -->
         <div v-if="message.content && !message.isStreaming" class="msg-actions">
-          <a-button type="text" size="small" @click="copyContent">
+          <a-tooltip
+            v-if="copyLocked"
+            title="完成反思（读懂并提问通过）后即可复制"
+          >
+            <a-button type="text" size="small" disabled>
+              <template #icon><CopyOutlined /></template>
+              复制
+            </a-button>
+          </a-tooltip>
+          <a-button v-else type="text" size="small" @click="copyContent">
             <template #icon><CopyOutlined /></template>
             {{ copied ? '已复制' : '复制' }}
           </a-button>
@@ -322,6 +331,13 @@ function escapeHtml(text: string): string {
 }
 
 const copied = ref(false)
+
+// 建议 9：含可复制素材且未完成反思（未解锁）时，复制锁定
+const copyLocked = computed(
+  () =>
+    !!props.message.hasReusableMaterial &&
+    props.message.reflectState !== 'unlocked',
+)
 
 async function copyContent() {
   try {

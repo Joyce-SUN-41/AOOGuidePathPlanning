@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * DiagnosisRadar — 诊断结果雷达图组件
+ * CehuiRadar — 测绘结果雷达图组件
  *
  * 使用 ECharts 渲染掌握度雷达图，支持暗色主题。
  */
@@ -107,11 +107,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="diagnosis-radar" :style="{ height: `${height ?? 340}px` }" />
+  <div ref="containerRef" class="cehui-radar" :style="{ height: `${height ?? 340}px` }" />
 </template>
 
 <style scoped>
-.diagnosis-radar {
+.cehui-radar {
   width: 100%;
   min-height: 280px;
 }

@@ -201,7 +201,7 @@ interface Preferences {
   pageTransition: boolean
   /** 图表动画 */
   chartAnimation: boolean
-  /** 诊断答题自动进入下一题 */
+  /** 测绘答题自动进入下一题 */
   autoNextQuestion: boolean
   /** 问答流式输出 */
   chatStream: boolean
@@ -260,7 +260,7 @@ function resetPrefs() {
 function clearLocalCache() {
   Modal.confirm({
     title: '清除本机缓存',
-    content: '将清除本机保存的诊断快照、路径草稿与界面偏好，不会影响服务器上的数据。',
+    content: '将清除本机保存的测绘快照、路径草稿与界面偏好，不会影响服务器上的数据。',
     okText: '确认清除',
     okType: 'danger',
     cancelText: '取消',
@@ -479,7 +479,7 @@ onMounted(() => {
               <div class="switch-row">
                 <div class="switch-text">
                   <div class="switch-title">答题后自动进入下一题</div>
-                  <div class="switch-desc">认知诊断中选择答案后自动跳转，关闭则需手动点击</div>
+                  <div class="switch-desc">学情测绘中选择答案后自动跳转，关闭则需手动点击</div>
                 </div>
                 <a-switch v-model:checked="prefs.autoNextQuestion" @change="onPrefChange" />
               </div>
@@ -487,7 +487,7 @@ onMounted(() => {
               <div class="switch-row">
                 <div class="switch-text">
                   <div class="switch-title">问答流式输出</div>
-                  <div class="switch-desc">智能问答逐字返回答案，关闭则等待完整回复后一次展示</div>
+                  <div class="switch-desc">导学终端逐字返回答案，关闭则等待完整回复后一次展示</div>
                 </div>
                 <a-switch v-model:checked="prefs.chatStream" @change="onPrefChange" />
               </div>
@@ -522,7 +522,7 @@ onMounted(() => {
                 <div class="switch-text">
                   <div class="switch-title">清除本机缓存</div>
                   <div class="switch-desc">
-                    清空本机保存的诊断快照与界面偏好，服务器上的记录不受影响
+                    清空本机保存的测绘快照与界面偏好，服务器上的记录不受影响
                   </div>
                 </div>
                 <a-button danger ghost @click="clearLocalCache">清除</a-button>

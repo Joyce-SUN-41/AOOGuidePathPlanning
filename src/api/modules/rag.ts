@@ -24,7 +24,7 @@ export const ragApi = {
     )
   },
 
-  /** 获取智能问答对话画像（仅来自对话梳理出的掌握特点）
+  /** 获取导学终端对话画像（仅来自对话梳理出的掌握特点）
    *
    * 后端端点: GET /api/v1/rag/chat-profile
    */
@@ -99,7 +99,7 @@ export function ragQueryStream(
           retrieval_count: 0,
           model: '',
           query_id: '',
-          diagnosis: undefined,
+          cehui: undefined,
         }
         // 后端以 {"error": "..."} 帧上报错误，暂存后在 [DONE] 时统一抛出
         let streamError = ''
@@ -137,9 +137,9 @@ export function ragQueryStream(
                 full.retrieval_count = parsed.sources.length
                 continue
               }
-              // 诊断帧
-              if (parsed.diagnosis) {
-                full.diagnosis = parsed.diagnosis
+              // 测绘帧
+              if (parsed.cehui) {
+                full.cehui = parsed.cehui
                 continue
               }
               // query_id 帧
@@ -181,7 +181,7 @@ export function ragQueryStream(
     })
 }
 
-// ── 自动优化（对话诊断 → AOO 路径规划） ──
+// ── 自动优化（对话测绘 → AOO 路径规划） ──
 export interface AutoOptimizeParams {
   mastery_estimates: Array<{ kp_name: string; level: number }>
   cognitive_load: number
@@ -197,7 +197,7 @@ export interface AutoOptimizeResult {
   aoo_task_id?: string
 }
 
-/** 对话诊断 → AOO 自动路径优化 */
+/** 对话测绘 → AOO 自动路径优化 */
 export async function autoOptimize(
   params: AutoOptimizeParams
 ): Promise<AutoOptimizeResult> {
@@ -209,7 +209,7 @@ export async function autoOptimize(
   return response
 }
 
-// ── 对话画像（仅来自智能问答梳理出的掌握特点） ──
+// ── 对话画像（仅来自导学终端梳理出的掌握特点） ──
 export interface ChatProfileItem {
   kp_id: string
   kp_name: string

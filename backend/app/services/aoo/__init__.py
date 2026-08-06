@@ -28,7 +28,7 @@ class AOOService:
     """AOO 算法核心服务
 
     负责:
-      1. 从诊断数据构建适应度计算器
+      1. 从测绘数据构建适应度计算器
       2. 初始化并运行 AOO 优化引擎
       3. 提取 Pareto 前沿，生成 3 条差异化路径
       4. 将优化结果转换为 API 响应格式
@@ -50,7 +50,7 @@ class AOOService:
         """执行 AOO 优化算法
 
         Args:
-            diagnosis_id: 诊断结果 ID
+            diagnosis_id: 测绘结果 ID
             knowledge_points: 知识点列表 (dict 格式)
             student_mastery: 学生掌握度字典
             focus_areas: 重点关注的薄弱知识点
@@ -83,6 +83,14 @@ class AOOService:
 
         # ---- 构建适应度计算器 ----
         max_daily_hours = self._extract_max_daily_hours(preferences)
+        # 学习风格（建议 4）: 优先取 preferences.learning_style (已由 optimization_service
+        # 从测绘记录透传 {label, scores})；为空 / label=="未评估" 则关闭偏置 (向后兼容)。
+        style_arg = None
+        ls = (preferences or {}).get("learning_style")
+        if isinstance(ls, dict) and ls.get("label") not in (None, "未评估"):
+            style_arg = ls
+        # 条目7: 学习准备度（motivation/metacognition/self_efficacy），透传给调节器
+        readiness_arg = (preferences or {}).get("readiness")
 
         fitness_calc = build_fitness_calculator(
             knowledge_points=kp_list,
@@ -90,6 +98,8 @@ class AOOService:
             focus_areas=focus_areas or [],
             max_daily_hours=max_daily_hours,
             config=cfg,
+            learning_style=style_arg,
+            readiness=readiness_arg,
         )
 
         # ---- 运行 AOO 引擎 ----
@@ -333,6 +343,41 @@ class AOOService:
         )
         num_days = max(3, min(suggested_days, 14))
         kps_per_day = max(1, int(np.ceil(total_kps / num_days)))
+
+        # ── 学习风格对路径形态的调节（建议 4）──
+        # 顺序型: 单日任务数减少、单任务时长增加 → 拉长 num_days / 降低 kps_per_day
+        # 进取型: 允许并行 → 单日任务数上调 (缩短 num_days)
+        # 踏实型: 小步稳进 → 单日任务数下调、天数微增 (难度跃迁更小)
+        # 探索型: 维持默认 (关联权重已在 fitness 中体现)
+        ls = getattr(fitness_calc, "learning_style", None)
+        if isinstance(ls, dict):
+            lbl = ls.get("label")
+            if lbl == "顺序型":
+                num_days = max(3, min(num_days + 2, 16))
+                kps_per_day = max(1, int(np.ceil(total_kps / num_days)))
+            elif lbl == "进取型":
+                num_days = max(3, num_days - 2)
+                kps_per_day = max(1, int(np.ceil(total_kps / num_days)))
+            elif lbl == "踏实型":
+                num_days = max(3, min(num_days + 1, 15))
+                kps_per_day = max(1, int(np.ceil(total_kps / num_days)))
+
+        # ── 学习准备度调节器（条目7）──
+        # 低自我效能: 拉长周期 + 降低单日强度（小胜任务、重建信心）
+        # 低元认知: 标记 require_planning_prompt（前端/问答做"先规划再动手"引导）
+        readiness = getattr(fitness_calc, "readiness", None)
+        require_planning_prompt = False
+        if isinstance(readiness, dict):
+            eff = float(readiness.get("self_efficacy", 0.0) or 0.0)
+            meta = float(readiness.get("metacognition", 0.0) or 0.0)
+            if eff < 0.4:
+                # 温和调节：天数 +2、单日任务数下调
+                num_days = max(3, min(num_days + 2, 16))
+                kps_per_day = max(1, int(np.ceil(total_kps / num_days)))
+                logger.info("准备度调节器: 低自我效能(%.2f) → 拉长周期、降低单日强度", eff)
+            if meta < 0.4:
+                require_planning_prompt = True
+                logger.info("准备度调节器: 低元认知(%.2f) → 标记需规划引导", meta)
 
         days = []
         total_tasks = 0

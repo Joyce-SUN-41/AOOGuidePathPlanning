@@ -139,17 +139,21 @@ export const pathApi = {
       .then((resp) => resp ?? null)
   },
 
-  /** 灵活重规划（基于任意历史诊断 / 诊断 + 当前对话画像融合）
+  /** 灵活重规划（基于任意历史测绘 / 测绘 + 当前对话画像融合）
    *
    * 后端端点: POST /api/v1/aoo/optimize-flexible
-   * @param diagnosisId 任意一次历史诊断 ID（基底）
-   * @param useChatProfile 是否叠加当前「智能问答对话画像」(mode='diagnosis+chat')
+   * @param diagnosisId 任意一次历史测绘 ID（基底）
+   * @param useChatProfile 是否叠加当前「导学终端对话画像」(mode='cehui+chat')
    * @param studentId 教师端代操作时可传
    */
-  optimizeFlexible(diagnosisId: string, useChatProfile: boolean = false, studentId?: string): Promise<GeneratePathResponse> {
+  optimizeFlexible(
+    diagnosisId: string,
+    useChatProfile: boolean = false,
+    studentId?: string
+  ): Promise<GeneratePathResponse> {
     const payload: Record<string, unknown> = {
       diagnosis_id: diagnosisId,
-      mode: useChatProfile ? 'diagnosis+chat' : 'diagnosis',
+      mode: useChatProfile ? 'cehui+chat' : 'cehui',
     }
     if (studentId) payload['student_id'] = studentId
     return request.post<GeneratePathResponse>('/aoo/optimize-flexible', payload)

@@ -335,7 +335,7 @@ onBeforeUnmount(() => {
     <!-- ══ 顶部终端条 ══ -->
     <header class="term-bar" :class="{ 'is-in': stageOn(1) }">
       <span class="term-bar__mark" aria-hidden="true" />
-      <span class="term-bar__id">OAT-OPS</span>
+      <span class="term-bar__id">DAT-OPS</span>
       <span class="term-bar__sep">//</span>
       <span class="term-bar__net">AUTH TERMINAL</span>
       <span class="term-bar__spacer" />
@@ -360,27 +360,27 @@ onBeforeUnmount(() => {
         </p>
 
         <h1 class="brand-name" :class="{ 'is-in': stageOn(3) }">
-          <GlyphScramble text="燕麦智导" :play="playIntro && stageOn(3) && !reducedMotion" />
+          <GlyphScramble text="动麦智导" :play="playIntro && stageOn(3) && !reducedMotion" />
         </h1>
 
-        <p class="brand-latin" :class="{ 'is-in': stageOn(4) }">OAT&nbsp;GUIDE</p>
+        <p class="brand-latin" :class="{ 'is-in': stageOn(4) }">DAT&nbsp;GUIDE</p>
 
         <div class="brand-rule" :class="{ 'is-in': stageOn(4) }" aria-hidden="true" />
 
         <p class="brand-tagline" :class="{ 'is-in': stageOn(5) }">
-          让野燕麦的生存智慧，<br />重塑每一个学习者的认知地图
+          取法野麦生存之道<br />为每位学习者重绘认知经纬
         </p>
 
         <p class="brand-support" :class="{ 'is-in': stageOn(5) }">
-          AOO 优化算法驱动认知诊断、个性化路径与智能问答。登录后，你的学习轨迹开始收敛。
+          AOO 优化算法驱动学情测绘、个性化路径与导学终端。登录后，你的学习轨迹开始收敛。
         </p>
 
         <ul class="brand-pillars" :class="{ 'is-in': stageOn(6) }">
           <li style="--i: 0">
             <span class="pillar-idx">01</span>
             <span class="pillar-body">
-              <span class="pillar-title">AI 认知诊断</span>
-              <span class="pillar-sub">DIAGNOSIS</span>
+              <span class="pillar-title">AI 学情测绘</span>
+              <span class="pillar-sub">CEHUI</span>
             </span>
           </li>
           <li style="--i: 1">
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
           <li style="--i: 2">
             <span class="pillar-idx">03</span>
             <span class="pillar-body">
-              <span class="pillar-title">RAG 智能问答</span>
+              <span class="pillar-title">RAG 导学终端</span>
               <span class="pillar-sub">RETRIEVAL</span>
             </span>
           </li>
@@ -782,7 +782,7 @@ onBeforeUnmount(() => {
   background: rgba(148, 163, 184, 0.32);
 }
 
-/* 超大刊头 —— 与内页品牌标识同款燕麦金渐变 + 字重/字距 */
+/* 超大刊头 —— 与内页品牌标识同款动麦金渐变 + 字重/字距 */
 .brand-name {
   margin: 0;
   font-size: clamp(48px, 6.4vw, 92px);

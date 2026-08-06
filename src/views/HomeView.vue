@@ -163,7 +163,7 @@ onUnmounted(() => {
          1. Hero 区域
          ========================================================= -->
     <section class="hero">
-      <!-- 背景装饰：流沙麦浪 + 燕麦粒子收束场 + 光斑 -->
+      <!-- 背景装饰：流沙麦浪 + 动麦粒子收束场 + 光斑 -->
       <div class="hero-bg">
         <OatSwayBackground :density="96" :opacity="0.9" />
         <div class="hero-seed-layer">
@@ -177,7 +177,7 @@ onUnmounted(() => {
       <div class="hero-inner">
         <!-- Logo + 名称 -->
         <div class="hero-brand">
-          <!-- 燕麦 Logo SVG -->
+          <!-- 动麦 Logo SVG -->
           <div class="hero-logo">
             <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
               <!-- 麦粒主体 -->
@@ -277,19 +277,19 @@ onUnmounted(() => {
               </defs>
             </svg>
           </div>
-          <h1 class="hero-name">燕麦智导</h1>
+          <h1 class="hero-name">动麦智导</h1>
         </div>
 
         <!-- 标语 -->
-        <p class="hero-tagline">让野燕麦的生存智慧，重塑每一个学习者的认知地图</p>
+        <p class="hero-tagline">取法野麦生存之道为每位学习者重绘认知经纬</p>
 
         <!-- 副标题 -->
         <p class="hero-subtitle">
           基于 AOO (Animated Oat Optimization) 算法与 RAG 检索增强生成技术， 为每位学习者提供<span
             class="text-accent"
-            >认知诊断</span
+            >学情测绘</span
           >、 <span class="text-accent">个性化学习路径</span>与<span class="text-accent"
-            >智能问答</span
+            >导学终端</span
           >的全链路学习优化
         </p>
 
@@ -299,10 +299,10 @@ onUnmounted(() => {
             type="primary"
             size="large"
             class="hero-btn hero-btn--primary"
-            @click="goTo(userStore.isTeacher ? '/teacher' : '/diagnose')"
+            @click="goTo(userStore.isTeacher ? '/teacher' : '/cehui')"
           >
             <RocketOutlined />
-            {{ userStore.isTeacher ? '进入仪表盘' : '开始诊断' }}
+            {{ userStore.isTeacher ? '进入仪表盘' : '开始' }}
           </a-button>
           <a-button
             v-if="userStore.isTeacher"
@@ -315,7 +315,7 @@ onUnmounted(() => {
           </a-button>
           <a-button v-else size="large" class="hero-btn hero-btn--ghost" @click="goTo('/chat')">
             <ThunderboltOutlined />
-            智能问答
+            导学终端
           </a-button>
         </div>
       </div>
@@ -340,7 +340,7 @@ onUnmounted(() => {
       </div>
 
       <div class="features-grid">
-        <!-- 认知诊断 -->
+        <!-- 学情测绘 -->
         <div class="feature-card">
           <div
             class="feature-card-icon"
@@ -355,15 +355,15 @@ onUnmounted(() => {
           >
             <ExperimentOutlined />
           </div>
-          <h3>认知诊断</h3>
-          <p>基于知识图谱的智能诊断系统，精准评估你的知识掌握度与认知负荷， 定位学习薄弱环节</p>
+          <h3>学情测绘</h3>
+          <p>基于知识图谱的智能测绘系统，精准评估你的知识掌握度与认知负荷， 定位学习薄弱环节</p>
           <ul class="feature-card-points">
             <li><CheckCircleOutlined /> 知识点掌握度雷达图</li>
             <li><CheckCircleOutlined /> 认知负荷多维分析</li>
             <li><CheckCircleOutlined /> 智能薄弱点定位</li>
           </ul>
-          <a-button type="link" class="feature-card-link" @click="goTo('/diagnose')">
-            立即诊断 <ArrowRightOutlined />
+          <a-button type="link" class="feature-card-link" @click="goTo('/cehui')">
+            立即测绘 <ArrowRightOutlined />
           </a-button>
         </div>
 
@@ -384,18 +384,18 @@ onUnmounted(() => {
             <NodeIndexOutlined />
           </div>
           <h3>路径规划</h3>
-          <p>采用 AOO 野燕麦优化算法，结合诊断结果自动生成专属学习路径， 甘特图直观管理学习计划</p>
+          <p>采用 AOO 野动麦优化算法，结合测绘结果自动生成专属学习路径， 甘特图直观管理学习计划</p>
           <ul class="feature-card-points">
             <li><CheckCircleOutlined /> AOO 智能优化调度</li>
             <li><CheckCircleOutlined /> 多方案对比择优</li>
             <li><CheckCircleOutlined /> 甘特图可视化进度</li>
           </ul>
           <a-button type="link" class="feature-card-link" @click="goTo('/path')">
-            查看路径 <ArrowRightOutlined />
+            查看我的起点规划 <ArrowRightOutlined />
           </a-button>
         </div>
 
-        <!-- 智能问答 -->
+        <!-- 导学终端 -->
         <div class="feature-card">
           <div
             class="feature-card-icon"
@@ -406,7 +406,7 @@ onUnmounted(() => {
           >
             <RobotOutlined />
           </div>
-          <h3>智能问答</h3>
+          <h3>导学终端</h3>
           <p>基于 RAG 检索增强生成技术，结合星火大模型提供学科知识问答， 回答附带引用来源</p>
           <ul class="feature-card-points">
             <li><CheckCircleOutlined /> RAG 增强检索</li>
@@ -430,7 +430,7 @@ onUnmounted(() => {
     >
       <div class="section-header">
         <h2 class="section-title">AOO 算法原理</h2>
-        <p class="section-desc">灵感源自野燕麦种子的传播与萌发过程，模拟自然界最优生存策略</p>
+        <p class="section-desc">灵感源自野动麦种子的传播与萌发过程，模拟自然界最优生存策略</p>
       </div>
 
       <div class="algorithm-flow">
@@ -629,7 +629,7 @@ onUnmounted(() => {
             <div class="flow-desc-dot" style="background: #4a6cf7" />
             <div>
               <strong>启发式搜索</strong>
-              <span>模拟野燕麦种子通过风、水、动物三种传播方式的探索策略</span>
+              <span>模拟野动麦种子通过风、水、动物三种传播方式的探索策略</span>
             </div>
           </div>
           <div class="flow-desc-item">
@@ -650,7 +650,7 @@ onUnmounted(() => {
             <div class="flow-desc-dot" style="background: #a78bfa" />
             <div>
               <strong>弹射逃逸</strong>
-              <span>模拟燕麦种子弹射传播，帮助种群跳出局部最优陷阱</span>
+              <span>模拟动麦种子弹射传播，帮助种群跳出局部最优陷阱</span>
             </div>
           </div>
         </div>
@@ -666,7 +666,7 @@ onUnmounted(() => {
       :class="{ 'is-revealed': revealed['advantages'] }"
     >
       <div class="section-header">
-        <h2 class="section-title">为什么选择燕麦智导</h2>
+        <h2 class="section-title">为什么选择动麦智导</h2>
         <p class="section-desc">三大核心优势，定义智慧学习新范式</p>
       </div>
 
@@ -709,12 +709,12 @@ onUnmounted(() => {
           </div>
           <h3>个性化</h3>
           <p>
-            每个人的认知地图独一无二。我们通过诊断分析精准建模，为每位学习者定制专属学习路径，
+            每个人的认知地图独一无二。我们通过测绘分析精准建模，为每位学习者定制专属学习路径，
             真正做到因材施教
           </p>
           <ul class="advantage-tags">
             <li>认知建模</li>
-            <li>自适应诊断</li>
+            <li>自适应测绘</li>
             <li>专属路径</li>
           </ul>
         </div>
@@ -863,11 +863,11 @@ onUnmounted(() => {
           </div>
           <h3>可解释</h3>
           <p>
-            诊断报告附带详细分析说明，路径推荐展示优化得分与收敛曲线，
-            智能问答标注引用来源，每一步都有据可依
+            测绘报告附带详细分析说明，路径推荐展示优化得分与收敛曲线，
+            导学终端标注引用来源，每一步都有据可依
           </p>
           <ul class="advantage-tags">
-            <li>诊断报告</li>
+            <li>测绘报告</li>
             <li>收敛可视化</li>
             <li>来源追溯</li>
           </ul>
@@ -946,10 +946,10 @@ onUnmounted(() => {
                 opacity="0.4"
               />
             </svg>
-            <span class="footer-brand-name">燕麦智导</span>
+            <span class="footer-brand-name">动麦智导</span>
           </div>
           <p class="footer-desc">
-            针对应用型高校人工智能通识课"统一教学"与"个体差异"的矛盾，本课题依托认知负荷理论，以团队前期ESI高被引的AOO算法为工具，构建多目标学习路径推荐模型。通过认知诊断识别学生认知负荷与知识掌握水平，以学习效果最大化和认知负荷最小化为目标，通过AOO算法求解最优学习路径。准实验验证该路径对学习效果的提升及负荷的降低效果，为人工智能通识课从经验驱动向算法驱动的精准教学转型提供依据。
+            针对应用型高校人工智能通识课"统一教学"与"个体差异"的矛盾，本课题依托认知负荷理论，以团队前期ESI高被引的AOO算法为工具，构建多目标学习路径推荐模型。通过学情测绘识别学生认知负荷与知识掌握水平，以学习效果最大化和认知负荷最小化为目标，通过AOO算法求解最优学习路径。准实验验证该路径对学习效果的提升及负荷的降低效果，为人工智能通识课从经验驱动向算法驱动的精准教学转型提供依据。
           </p>
         </div>
 
@@ -962,9 +962,9 @@ onUnmounted(() => {
             <a @click="goTo('/teacher/questions')">题库管理</a>
           </template>
           <template v-else>
-            <a @click="goTo('/diagnose')">认知诊断</a>
+            <a @click="goTo('/cehui')">学情测绘</a>
             <a @click="goTo('/path')">我的路径</a>
-            <a @click="goTo('/chat')">智能问答</a>
+            <a @click="goTo('/chat')">导学终端</a>
             <a @click="goTo('/dashboard')">学情看板</a>
           </template>
         </div>
@@ -978,7 +978,7 @@ onUnmounted(() => {
           </div>
           <div class="footer-info-item">
             <TeamOutlined />
-            <span>燕麦智导项目团队</span>
+            <span>动麦智导项目团队</span>
           </div>
           <div class="footer-info-item">
             <EnvironmentOutlined />
@@ -995,7 +995,7 @@ onUnmounted(() => {
       <div class="footer-bottom">
         <div class="footer-bottom-left">
           <span
-            >&copy; {{ new Date().getFullYear() }} 燕麦智导 · OatGuide. All rights reserved.</span
+            >&copy; {{ new Date().getFullYear() }} 动麦智导 · DatGuide. All rights reserved.</span>
           >
         </div>
         <div class="footer-bottom-right">
@@ -1067,7 +1067,7 @@ onUnmounted(() => {
 }
 
 /* ============================================================
-   1. Hero 区域 — 深空 + 燕麦金径向光晕
+   1. Hero 区域 — 深空 + 动麦金径向光晕
    ============================================================ */
 .hero {
   position: relative;
@@ -1084,7 +1084,7 @@ onUnmounted(() => {
   background: linear-gradient(160deg, #141b2b 0%, #101726 30%, #0f1623 60%, #0a0d14 100%);
 }
 
-/* Hero 燕麦金光晕 */
+/* Hero 动麦金光晕 */
 .hero::before {
   content: '';
   position: absolute;
@@ -1144,7 +1144,7 @@ onUnmounted(() => {
   animation: orb-float-3 16s ease-in-out infinite;
 }
 
-/* 燕麦种子收束层（SeedTrajectory，首屏飘落收敛隐喻） */
+/* 动麦种子收束层（SeedTrajectory，首屏飘落收敛隐喻） */
 .hero-seed-layer {
   position: absolute;
   inset: 0;
@@ -1220,13 +1220,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 20px;
   margin-bottom: 24px;
 }
 
 .hero-logo {
-  width: 72px;
-  height: 72px;
+  width: 96px;
+  height: 96px;
   flex-shrink: 0;
 }
 
@@ -1236,7 +1236,7 @@ onUnmounted(() => {
 }
 
 .hero-name {
-  font-size: 44px;
+  font-size: 60px;
   font-weight: 800;
   margin: 0;
   background: linear-gradient(135deg, #f8fafc 0%, #d4a373 50%, #faedcd 100%);
@@ -1255,7 +1255,7 @@ onUnmounted(() => {
   margin: 0 0 12px 0;
 }
 
-/* 副标题 — 带燕麦金渐变下划线，文字投影增强可读性 */
+/* 副标题 — 带动麦金渐变下划线，文字投影增强可读性 */
 .hero-subtitle {
   font-size: 15px;
   color: #cbd5e1;
@@ -1980,12 +1980,12 @@ onUnmounted(() => {
   }
 
   .hero-logo {
-    width: 56px;
-    height: 56px;
+    width: 72px;
+    height: 72px;
   }
 
   .hero-name {
-    font-size: 38px;
+    font-size: 50px;
   }
 
   .hero-tagline {
@@ -2077,12 +2077,12 @@ onUnmounted(() => {
   }
 
   .hero-logo {
-    width: 48px;
-    height: 48px;
+    width: 64px;
+    height: 64px;
   }
 
   .hero-name {
-    font-size: 30px;
+    font-size: 40px;
   }
 
   .hero-tagline {

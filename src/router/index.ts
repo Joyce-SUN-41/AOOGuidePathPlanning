@@ -8,7 +8,7 @@ const AppLayout = () => import('@/layouts/AppLayout.vue')
 const LoginView = () => import('@/views/LoginView.vue')
 const RegisterView = () => import('@/views/RegisterView.vue')
 const HomeView = () => import('@/views/HomeView.vue')
-const DiagnoseView = () => import('@/views/DiagnoseView.vue')
+const CehuiView = () => import('@/views/CehuiView.vue')
 const PathView = () => import('@/views/PathView.vue')
 const ChatView = () => import('@/views/ChatView.vue')
 const DashboardView = () => import('@/views/DashboardView.vue')
@@ -27,9 +27,9 @@ const NotFoundView = () => import('@/views/NotFoundView.vue')
  * - /login, /register — 独立页面，无布局
  * - / — AppLayout 包裹的业务页面
  *   - /           首页（项目介绍 + 快速入口）
- *   - /diagnose   认知诊断（学生）
+ *   - /cehui   学情测绘（学生）
  *   - /path       我的路径（学生）
- *   - /chat       智能问答（学生）
+ *   - /chat       导学终端（学生）
  *   - /dashboard  学情看板（学生）
  *   - /teacher    教师仪表盘（教师）
  * - /:pathMatch(.*)* — 404
@@ -71,11 +71,11 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'diagnose',
-        name: 'Diagnose',
-        component: DiagnoseView,
+        path: 'cehui',
+        name: 'Cehui',
+        component: CehuiView,
         meta: {
-          title: '认知诊断',
+          title: '学情测绘',
           icon: 'ExperimentOutlined',
           roles: ['student']
         }
@@ -95,7 +95,7 @@ const routes: RouteRecordRaw[] = [
         name: 'Chat',
         component: ChatView,
         meta: {
-          title: '智能问答',
+          title: '导学终端',
           icon: 'RobotOutlined',
           roles: ['student']
         }
@@ -199,7 +199,7 @@ const WHITE_LIST = ['/login', '/register']
 router.beforeEach((to, _from, next) => {
   // 设置页面标题
   const title = to.meta['title'] as string
-  document.title = title ? `${title} - 燕麦智导` : '燕麦智导'
+  document.title = title ? `${title} - 动麦智导` : '动麦智导'
 
   // 白名单页面直接放行
   if (WHITE_LIST.includes(to.path)) {

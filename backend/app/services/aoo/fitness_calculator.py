@@ -170,10 +170,42 @@ class FitnessCalculator:
         knowledge_points: List[KnowledgePointMeta],
         student_profile: StudentProfile,
         config: Optional[AOOConfig] = None,
+        learning_style: Optional[dict] = None,
+        readiness: Optional[dict] = None,
     ):
         self.kps = knowledge_points
         self.student = student_profile
         self.config = config or default_config
+        # 条目7: 学习准备度（motivation/metacognition/self_efficacy），供路径形态调节器读取
+        self.readiness: Optional[dict] = readiness
+
+        # ── 学习风格偏置（建议 4 独立自变量）──
+        # learning_style: {label, scores:{ambitious,sequential,steady,exploratory}} 0-1
+        # 为空 / label == "未评估" → 所有偏置关闭（向后兼容，不影响原行为）。
+        self.learning_style: Optional[dict] = None
+        self.style_factors = {
+            "prereq_multiplier": 1.0,        # 顺序型: prerequisite 违反惩罚 ×N
+            "daily_load_multiplier": 1.0,    # 进取型: 每日认知负荷上限 ×N
+            "difficulty_jump_penalty": 0.0,  # 踏实型: 相邻任务难度差惩罚项系数
+            "cross_kp_edge_bonus": 0.0,      # 探索型: 跨知识点关联边权重 +N
+        }
+        if isinstance(learning_style, dict) and learning_style.get("label") not in (None, "未评估"):
+            self.learning_style = learning_style
+            scores = learning_style.get("scores", {}) or {}
+            lbl = learning_style.get("label")
+            # 主风格驱动；辅以分维度得分平滑，避免非主风格完全无影响
+            seq = scores.get("sequential", 0.0)
+            amb = scores.get("ambitious", 0.0)
+            ste = scores.get("steady", 0.0)
+            exp = scores.get("exploratory", 0.0)
+            self.style_factors["prereq_multiplier"] = round(1.0 + 0.5 * seq, 3)        # 顺序型: ×1.0~1.5
+            self.style_factors["daily_load_multiplier"] = round(1.0 + 0.3 * amb, 3)    # 进取型: ×1.0~1.3
+            self.style_factors["difficulty_jump_penalty"] = round(0.15 * ste, 3)       # 踏实型: 0~0.15
+            self.style_factors["cross_kp_edge_bonus"] = round(0.1 * exp, 3)            # 探索型: 0~0.1
+            logger.info(
+                "学习风格偏置生效 | label=%s scores=%s factors=%s",
+                lbl, scores, self.style_factors,
+            )
 
         # 构建快速查找索引: kp_id → 数组下标
         self.kp_index: Dict[str, int] = {
@@ -241,24 +273,51 @@ class FitnessCalculator:
 
         # ---- Step 4: 认知负荷 ----
         daily_load = self._calculate_daily_load(order)
-        cognitive_detail = self._calculate_cognitive_load_detail(daily_load, order)
+        # 进取型: 放大每日认知负荷上限 (threshold × daily_load_multiplier)，
+        # 允许更高单日负荷 / 并行知识点；其他风格保持原阈值。
+        style_threshold = self.config.daily_load_threshold_hours
+        if self.style_factors["daily_load_multiplier"] != 1.0:
+            style_threshold = self.config.daily_load_threshold_hours * self.style_factors["daily_load_multiplier"]
+        cognitive_detail = self._calculate_cognitive_load_detail(
+            daily_load, order, threshold_override=style_threshold,
+        )
         logger.debug(
             "  cognitive_load=%.4f (daily_avg=%.2f/%.1f + density=%.4f×%.2f)",
             cognitive_detail.score,
-            cognitive_detail.avg_daily_load_hours, self.config.daily_load_threshold_hours,
+            cognitive_detail.avg_daily_load_hours, style_threshold,
             cognitive_detail.difficulty_density_score, self.config.difficulty_density_weight,
         )
 
         # ---- Step 5: 前置依赖检查 ----
         violations = self._check_prerequisites(order)
         is_feasible = violations == 0
-        logger.debug("  violations=%d feasible=%s", violations, is_feasible)
+        # 顺序型: 强化 prerequisite 顺序约束 → 违反惩罚放大 prereq_multiplier 倍
+        eff_violations = int(round(violations * self.style_factors["prereq_multiplier"]))
+        logger.debug("  violations=%d (eff=%.2f×%.2f=%.2f) feasible=%s",
+                     violations, violations, self.style_factors["prereq_multiplier"], eff_violations, is_feasible)
 
         # ---- Step 6: 综合适应度 ----
         base_fitness = (
             self.config.alpha * learning_detail.score
             - self.config.beta * cognitive_detail.score
         )
+
+        # 探索型: 跨知识点关联边权重加成 → 提升学习效果在适应度中的权重。
+        # 统计路径中实际满足的前置关联边数 (跨知识点边)，按 cross_kp_edge_bonus 加成 learning_effect。
+        if self.style_factors["cross_kp_edge_bonus"] > 0.0:
+            linked_edges = self._count_satisfied_prereq_edges(order)
+            explore_bonus = linked_edges * self.style_factors["cross_kp_edge_bonus"]
+            base_fitness = base_fitness + self.config.alpha * explore_bonus
+            logger.debug("  探索型 bonus: linked_edges=%d ×%.3f → +%.4f",
+                         linked_edges, self.style_factors["cross_kp_edge_bonus"], explore_bonus)
+
+        # 踏实型: 相邻任务难度跃迁惩罚项 → 鼓励"小步稳进"，抑制大幅难度跳跃。
+        if self.style_factors["difficulty_jump_penalty"] > 0.0:
+            jump_penalty = self._calculate_difficulty_jump(order) * self.style_factors["difficulty_jump_penalty"]
+            base_fitness = base_fitness - jump_penalty
+            logger.debug("  踏实型 jump_penalty: Δ=%.3f ×%.3f → -%.4f",
+                         self._calculate_difficulty_jump(order),
+                         self.style_factors["difficulty_jump_penalty"], jump_penalty)
 
         if is_feasible:
             total_fitness = base_fitness
@@ -267,8 +326,9 @@ class FitnessCalculator:
             total_fitness = self.config.prerequisite_penalty
         else:
             # 梯度惩罚模式: 每次违反扣 100 分, 引导搜索向可行区域 (用于优化迭代)
-            violation_gradient_penalty = 100.0
-            total_fitness = base_fitness - violations * violation_gradient_penalty
+            # 顺序型放大单次违反代价。
+            violation_gradient_penalty = 100.0 * self.style_factors["prereq_multiplier"]
+            total_fitness = base_fitness - eff_violations * violation_gradient_penalty
 
         logger.debug("  total_fitness=%.6f (base=%.6f)", total_fitness, base_fitness)
 
@@ -667,7 +727,8 @@ class FitnessCalculator:
         return daily_load
 
     def _calculate_cognitive_load_detail(
-        self, daily_load: List[float], order: List[int]
+        self, daily_load: List[float], order: List[int],
+        threshold_override: Optional[float] = None,
     ) -> CognitiveLoadDetail:
         """计算认知负荷详细分解
 
@@ -676,7 +737,7 @@ class FitnessCalculator:
             difficulty_density_score, 综合得分
         """
         n_days = max(len(daily_load), 1)
-        threshold = max(self.config.daily_load_threshold_hours, 0.01)
+        threshold = max(threshold_override or self.config.daily_load_threshold_hours, 0.01)
 
         # ---- 1. 单日学习量统计 ----
         avg_load = sum(daily_load) / n_days
@@ -797,6 +858,42 @@ class FitnessCalculator:
 
         return violations
 
+    def _count_satisfied_prereq_edges(self, order: List[int]) -> int:
+        """统计路径中已被正确前置安排的知识点关联边数量（探索型偏置用）。
+
+        一条关联边 = 某知识点 kp 的某个前置 prereq 在 order 中排在 kp 之前且二者分属
+        不同父章节（跨知识点）。返回满足排序的关联边总数。
+        """
+        learned = set()
+        linked = 0
+        for kp_idx in order:
+            if kp_idx >= len(self.kps):
+                continue
+            kp = self.kps[kp_idx]
+            for prereq_id in kp.prerequisites:
+                if prereq_id in self.kp_index:
+                    prereq_idx = self.kp_index[prereq_id]
+                    if prereq_idx in learned:
+                        linked += 1
+            learned.add(kp_idx)
+        return linked
+
+    def _calculate_difficulty_jump(self, order: List[int]) -> float:
+        """计算相邻任务的难度跃迁总量（踏实型偏置用）。
+
+        返回相邻知识点 difficulty 的差的绝对值之和；值越大表示难度跳跃越剧烈。
+        """
+        total = 0.0
+        prev_diff: Optional[float] = None
+        for kp_idx in order:
+            if kp_idx >= len(self.kps):
+                continue
+            d = self.kps[kp_idx].difficulty
+            if prev_diff is not None:
+                total += abs(d - prev_diff)
+            prev_diff = d
+        return total
+
     # ============================================================
     # Pareto 前沿算法
     # ============================================================
@@ -903,7 +1000,7 @@ class FitnessCalculator:
 
 
 # ============================================================
-# 工厂函数: 从诊断数据构建 FitnessCalculator
+# 工厂函数: 从测绘数据构建 FitnessCalculator
 # ============================================================
 
 
@@ -914,8 +1011,10 @@ def build_fitness_calculator(
     max_daily_hours: float = 4.0,
     learning_speed: float = 1.0,
     config: Optional[AOOConfig] = None,
+    learning_style: Optional[dict] = None,
+    readiness: Optional[dict] = None,
 ) -> FitnessCalculator:
-    """从诊断数据构建适应度计算器
+    """从测绘数据构建适应度计算器
 
     Args:
         knowledge_points: 知识点列表, 每项格式:
@@ -925,6 +1024,7 @@ def build_fitness_calculator(
         max_daily_hours: 每日最大学习时长
         learning_speed: 学习速度系数
         config: AOO 配置 (默认使用全局实例)
+        learning_style: 学习风格画像 {label, scores}, 可选; 为空则关闭风格偏置
     """
     kps = []
     for kp_data in knowledge_points:
@@ -949,4 +1049,6 @@ def build_fitness_calculator(
         knowledge_points=kps,
         student_profile=profile,
         config=config,
+        learning_style=learning_style,
+        readiness=readiness,
     )

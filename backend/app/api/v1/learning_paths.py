@@ -189,14 +189,33 @@ async def get_current_path(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前学生最新的学习路径"""
-    result = await db.execute(
+    """获取当前学生生效（is_active=True）的学习路径。
+
+    注意：必须按 is_active 过滤，而非仅取最新 created_at。
+    否则待采纳的重规划版本（is_active=False 但 created_at 更新）会被误当作
+    「当前路径」，导致用户点击「一键采纳」后刷新界面又回退到旧版本的现象。
+    """
+    # 1) 优先返回生效版本
+    active_result = await db.execute(
         select(LearningPath)
-        .where(LearningPath.student_id == current_user.id)
+        .where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == True,  # noqa: E712
+        )
         .order_by(desc(LearningPath.created_at))
         .limit(1)
     )
-    record = result.scalar_one_or_none()
+    record = active_result.scalar_one_or_none()
+
+    # 2) 兜底：没有任何生效版本时，取最新创建的一条（避免空态）
+    if record is None:
+        fallback_result = await db.execute(
+            select(LearningPath)
+            .where(LearningPath.student_id == current_user.id)
+            .order_by(desc(LearningPath.created_at))
+            .limit(1)
+        )
+        record = fallback_result.scalar_one_or_none()
 
     if not record:
         return ResponseBase(code=200, message="暂无学习路径", data=None)

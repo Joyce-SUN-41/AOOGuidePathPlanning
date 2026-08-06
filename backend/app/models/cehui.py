@@ -1,4 +1,4 @@
-"""诊断记录模型 — 存储每次认知诊断测验的完整结果"""
+"""测绘记录模型 — 存储每次学情测绘测验的完整结果"""
 
 import uuid
 from datetime import datetime
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class DiagnosisRecord(Base):
-    """诊断记录表 — 每次诊断测验生成一条记录"""
+class CehuiRecord(Base):
+    """测绘记录表 — 每次测绘测验生成一条记录"""
 
     __tablename__ = "diagnosis_records"
 
@@ -23,7 +23,7 @@ class DiagnosisRecord(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        comment="诊断记录唯一 ID",
+        comment="测绘记录唯一 ID",
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -91,13 +91,27 @@ class DiagnosisRecord(Base):
         String(100),
         nullable=False,
         default="未评估",
-        comment="推断的学习风格标签",
+        comment="推断的学习风格标签 (进取型/顺序型/踏实型/探索型)",
+    )
+    # 学习风格画像（建议 4）：{label, scores} — scores 为四风格维度归一化得分 0-1
+    learning_style_profile: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="学习风格画像 {label, scores:{ambitious,sequential,steady,exploratory}}",
+    )
+    # 第三维「学习准备度」轻量自陈量表结果（建议 3）：动机/元认知/自我效能 0-1
+    # 留空 dict 表示该生跳过量表，规划器仅用 mastery + learning_style（二维模式）
+    readiness_profile: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        comment="学习准备度画像 {motivation, metacognition, self_efficacy} 0-1",
     )
     summary: Mapped[str] = mapped_column(
         Text,
         nullable=False,
         default="",
-        comment="AI 诊断摘要",
+        comment="AI 测绘摘要",
     )
     total_questions: Mapped[int] = mapped_column(
         Integer,
@@ -138,11 +152,11 @@ class DiagnosisRecord(Base):
 
     # ---- 关系 ----
     student: Mapped["User"] = relationship(
-        "User", back_populates="diagnosis_records"
+        "User", back_populates="cehui_records"
     )
 
     def __repr__(self) -> str:
         return (
-            f"<DiagnosisRecord(id={self.id}, student={self.student_id}, "
+            f"<CehuiRecord(id={self.id}, student={self.student_id}, "
             f"score={self.overall_score:.1f})>"
         )

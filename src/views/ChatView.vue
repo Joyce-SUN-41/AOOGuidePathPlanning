@@ -1,16 +1,18 @@
 <script setup lang="ts">
 /**
- * 智能问答页面 — AI 智能工作台
+ * 导学终端页面 — AI 智能工作台
  *
  * 设计理念：让用户感觉在与智能生命体交流，而非填表格。
- * 视觉：动态粒子连线背景 + 噪点纹理 + 燕麦金/极光蓝 深色科技风。
+ * 视觉：动态粒子连线背景 + 噪点纹理 + 动麦金/极光蓝 深色科技风。
  */
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
+import { useCehuiStore } from '@/stores/cehui'
 import { ragApi, ragQueryStream, autoOptimize } from '@/api/modules/rag'
 import type { ChatProfileData } from '@/api/modules/rag'
+import { chatApi } from '@/api/modules/chat'
 import { trackEvent } from '@/utils/tracking'
 import type { QuickQuestion, RAGQueryResponse } from '@/types/rag'
 
@@ -18,6 +20,7 @@ import type { QuickQuestion, RAGQueryResponse } from '@/types/rag'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import QuickQuestions from '@/components/chat/QuickQuestions.vue'
+import ReflectGate from '@/components/chat/ReflectGate.vue'
 
 import {
   RobotOutlined,
@@ -26,11 +29,14 @@ import {
   DownloadOutlined,
   DownOutlined,
   ProfileOutlined,
+  QuestionOutlined,
 } from '@ant-design/icons-vue'
 
 // ── Store ──
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const cehuiStore = useCehuiStore()
+const sessionId = chatStore.sessionId
 
 // ── 移动端断点 ──
 const { isMobile } = useIsMobile()
@@ -210,15 +216,15 @@ function stopThinkingAnimation() {
 // ── 重规划自动采纳开关（默认关，符合 P2 决策：默认生成待采纳版本供用户一键采纳）──
 const autoAdoptEnabled = ref(false)
 
-// ── 对话诊断 → AOO 自动优化触发 ──
+// ── 对话测绘 → AOO 自动优化触发 ──
 // autoAdopt: 是否自动采纳重规划版本（默认 false，仅生成待采纳版本供用户一键采纳）
 async function triggerAutoOptimize(
-  diagnosis: NonNullable<RAGQueryResponse['diagnosis']>,
+  cehui: NonNullable<RAGQueryResponse['cehui']>,
   autoAdopt = false
 ) {
-  if (!diagnosis || !diagnosis.needs_optimization) return
+  if (!cehui || !cehui.needs_optimization) return
 
-  const masteryEstimates = diagnosis.mastery_estimates ?? []
+  const masteryEstimates = cehui.mastery_estimates ?? []
   chatStore.addSystemMessage(
     `检测到 ${masteryEstimates.length > 0 ? masteryEstimates.filter(e => (e.level ?? 1) < 0.5).length : 0} ` +
     '个薄弱知识点，正在生成最优学习路径...'
@@ -230,8 +236,8 @@ async function triggerAutoOptimize(
         kp_name: String(e.kp_name ?? ''),
         level: Number(e.level ?? 0.5),
       })),
-      cognitive_load: diagnosis.cognitive_load ?? 0.5,
-      learning_intent: String(diagnosis.learning_intent ?? 'quick_fix'),
+      cognitive_load: cehui.cognitive_load ?? 0.5,
+      learning_intent: String(cehui.learning_intent ?? 'quick_fix'),
       needs_optimization: true,
       auto_adopt: autoAdopt,
     })
@@ -257,14 +263,16 @@ async function triggerAutoOptimize(
     })
   } catch (err: unknown) {
     chatStore.addSystemMessage(
-      '路径优化服务暂时不可用，稍后可在诊断页面手动触发。'
+      '路径优化服务暂时不可用，稍后可在测绘页面手动触发。'
     )
   }
 }
 
-// ── 发送消息 ──
-async function handleSend() {
-  const question = inputText.value.trim()
+// ── 发送消息（核心逻辑，支持带前缀的苏格拉底提示请求）──
+const HINT_PREFIX = '[学生请求进一步提示，请给更细一级的引导，仍不直接给答案]'
+
+async function sendMessage(text: string) {
+  const question = text.trim()
   if (!question || isStreaming.value) return
 
   inputText.value = ''
@@ -295,10 +303,11 @@ async function handleSend() {
         question,
         top_k: 5,
         subject: chatStore.currentSubject,
+        sessionId: chatStore.sessionId,
         student_id: userStore.userInfo?.id ? String(userStore.userInfo.id) : undefined,
         skip_retrieval: true,
         fast_mode: true,
-        diagnose_mode: true,
+        cehui_mode: true,
         stream: true,
       },
       // onChunk - 实时流式追加文本
@@ -337,9 +346,12 @@ async function handleSend() {
           queryId: _queryId,
         })
 
-        // 诊断模式：检测到薄弱知识点 → 自动触发 AOO 路径优化
-        if (full.diagnosis?.needs_optimization) {
-          triggerAutoOptimize(full.diagnosis, autoAdoptEnabled.value)
+        // 建议 9：助手消息含可复制素材（代码块/提纲）时，触发反思框锁定
+        flagReusableMaterialForLastAssistant(fullAnswer)
+
+        // 测绘模式：检测到薄弱知识点 → 自动触发 AOO 路径优化
+        if (full.cehui?.needs_optimization) {
+          triggerAutoOptimize(full.cehui, autoAdoptEnabled.value)
         }
 
         chatStore.stopLoading()
@@ -367,12 +379,145 @@ async function handleSend() {
   }
 }
 
+// ── 建议 9：反思框辅助 ──
+// 判定助手消息是否含可复制使用素材。苏格拉底式引导回答以自然语言追问为主，
+// 少有 ```代码块```，因此触发条件必须覆盖其常见「可复用素材」形态：
+// 1) Markdown 代码块 / ~~~ 提纲块；
+// 2) 显式标记 [可复用素材] / [可复制]（模型按提示词主动标注）；
+// 3) 分步提纲：连续多行「1. / 2. 」或「步骤一 / 步骤二」等编号步骤；
+// 4) 行内公式：$...$ 或 $$...$$（含 LaTeX 数学式）。
+// 早期仅靠代码块导致反思框在苏格拉底模式下几乎永不出现（用户反馈“没实现”）。
+// 分步提纲：需出现 2 个及以上连续编号项（避免单次列举就误触发反思框）
+const REUSABLE_MATERIAL_RE =
+  /```[\s\S]*?```|~~~[\s\S]*?~~~|(?:^|\n)(?:\s*(?:\d+[.、]|[一二三四五六七八九十]+[.、]|步骤[一二三四五六七八九十]+|Step\s*\d+)[)\s:：].*(?:\n|$)){2,}/
+function hasReusableMaterial(content: string): boolean {
+  if (!content) return false
+  if (REUSABLE_MATERIAL_RE.test(content)) return true
+  if (/\[可复用素材\]|\[可复制\]/.test(content)) return true
+  // 行内/块级公式
+  if (/\$[^$\n]+?\$|\$\$[\s\S]+?\$\$/.test(content)) return true
+  return false
+}
+
+// 流式完成后：对最后一条助手消息做素材判定并置为锁定态
+function flagReusableMaterialForLastAssistant(content: string) {
+  const msgs = chatStore.messages
+  if (!msgs.length) return
+  const last = msgs[msgs.length - 1]
+  if (!last || last.role !== 'assistant') return
+  if (hasReusableMaterial(content)) {
+    last.hasReusableMaterial = true
+    if (last.reflectState !== 'unlocked') last.reflectState = 'locked'
+    last.reflectResult = null
+  }
+}
+
+const reflectingId = ref<string | null>(null)
+
+// 提交反思：调用后端判定，更新锁定态
+async function submitReflect(messageId: string, question: string) {
+  const msg = chatStore.messages.find((m) => m.id === messageId)
+  if (!msg) return
+  msg.reflectState = 'reflecting'
+  reflectingId.value = messageId
+  try {
+    const res = await chatApi.reflect({
+      sessionId: sessionId,
+      question,
+      material: msg.content || '',
+    })
+    msg.reflectResult = {
+      understood: res.understood,
+      feedback: res.feedback,
+      followUp: res.followUp,
+    }
+    msg.reflectState = res.understood ? 'unlocked' : 'locked'
+  } catch {
+    msg.reflectResult = {
+      understood: false,
+      feedback: '反思判定暂时不可用，请稍后再试。',
+      followUp: '',
+    }
+    msg.reflectState = 'locked'
+  } finally {
+    reflectingId.value = null
+  }
+}
+
+// 用新思路重生成：把学生思路拼成用户消息，复用现有流式链路
+function requestRegenerate(newIdea: string) {
+  const idea = `[学生新思路：${newIdea}] 请基于上述素材与我的新思路重新生成。`
+  sendMessage(idea)
+}
+
+// ── 建议 10：计入学习画像开关 ──
+const profileAuthorized = ref(false)
+const summarizing = ref(false)
+
+async function summarizeCurrentProfile() {
+  if (!profileAuthorized.value || summarizing.value) return
+  summarizing.value = true
+  try {
+    const res = await chatApi.summarizeProfile({
+      sessionId: sessionId,
+      userId: userStore.userInfo?.id ? String(userStore.userInfo.id) : '',
+      authorized: true,
+    })
+    if (res.replanned) {
+      chatStore.addSystemMessage(
+        '已根据你的近期问答更新学习路径（待采纳）。前往「我的路径」可查看变更详情并一键采纳。',
+      )
+    } else if (res.deltas.length > 0) {
+      chatStore.addSystemMessage('已将本次对话记入学习画像。')
+    }
+  } catch {
+    // 静默失败，不影响对话
+  } finally {
+    summarizing.value = false
+  }
+}
+
+// 普通发送：接收子组件上抛的当前文本，直接消费，避免依赖父级 inputText 的时序
+function handleSend(text: string) {
+  sendMessage(text)
+}
+
+// 建议 10：清空对话前，若授权则先提炼画像并可能触发重规划
+async function handleClearChat() {
+  if (profileAuthorized.value) {
+    await summarizeCurrentProfile()
+  }
+  chatStore.clearChat()
+}
+
+// ── 苏格拉底式交互：请求更细一级提示（不改动流式协议，仅附加前缀）──
+const showSocraticHint = computed(() => {
+  if (isStreaming.value || !hasMessages.value) return false
+  const msgs = messages.value
+  const last = msgs[msgs.length - 1]
+  if (!last || last.role !== 'assistant') return false
+  const content = (last.content || '').trim()
+  if (!content) return false
+  // 助手以引导性问题结尾（中/英文问号），视为苏格拉底追问
+  const lastChar = content.slice(-1)
+  return lastChar === '?' || lastChar === '？'
+})
+
+async function requestSocraticHint() {
+  if (isStreaming.value) return
+  // 复用现有发送链路，自动附加苏格拉底提示前缀；保留用户输入（若有）作为补充
+  const userExtra = inputText.value.trim()
+  const prefixed = userExtra ? `${HINT_PREFIX}\n${userExtra}` : HINT_PREFIX
+  await sendMessage(prefixed)
+  inputText.value = ''
+}
+
 function quickFill(text: string) {
   inputText.value = text
 }
 
 // ── 对话画像抽屉 ──
-// 仅展示「智能问答」通过对话梳理出的该生知识点掌握特点（与学习诊断严格分离）
+// 仅展示「导学终端」通过对话梳理出的该生知识点掌握特点（与学情测绘严格分离）
 const chatProfileVisible = ref(false)
 const chatProfileLoading = ref(false)
 const chatProfile = ref<ChatProfileData | null>(null)
@@ -397,7 +542,7 @@ async function openChatProfile() {
   }
 }
 
-/** 掌握度 → 颜色（与诊断雷达图一致的燕麦金/极光蓝语义） */
+/** 掌握度 → 颜色（与测绘雷达图一致的动麦金/极光蓝语义） */
 function profileLevelColor(level: number): string {
   if (level >= 0.75) return '#52c41a' // 掌握良好
   if (level >= 0.5) return '#4A6CF7' // 一般
@@ -468,26 +613,26 @@ const subjectQuestionsMap: Record<string, QuickQuestion[]> = {
     { id: 'q4', text: '什么是 Transformer 架构？', icon: 'thunderbolt' },
     { id: 'q5', text: 'Batch Normalization 的作用？', icon: 'book' },
   ],
-  ds_algo: [
-    { id: 'q1', text: '什么是时间复杂度？', icon: 'question' },
-    { id: 'q2', text: '解释快速排序的原理', icon: 'experiment' },
-    { id: 'q3', text: 'BFS 和 DFS 的区别？', icon: 'bulb' },
-    { id: 'q4', text: '什么是动态规划？', icon: 'thunderbolt' },
-    { id: 'q5', text: '哈希表是如何解决冲突的？', icon: 'book' },
+  nlp: [
+    { id: 'q1', text: '什么是词嵌入？Word2Vec 的原理？', icon: 'question' },
+    { id: 'q2', text: '解释注意力机制的核心思想', icon: 'experiment' },
+    { id: 'q3', text: 'Transformer 与 RNN 处理序列有何不同？', icon: 'bulb' },
+    { id: 'q4', text: '什么是大语言模型的微调与提示工程？', icon: 'thunderbolt' },
+    { id: 'q5', text: '怎么评估机器翻译的质量？', icon: 'book' },
   ],
-  os: [
-    { id: 'q1', text: '进程和线程的区别？', icon: 'question' },
-    { id: 'q2', text: '什么是死锁？如何避免？', icon: 'experiment' },
-    { id: 'q3', text: '虚拟内存的工作原理', icon: 'bulb' },
-    { id: 'q4', text: '解释 CPU 调度的几种算法', icon: 'thunderbolt' },
-    { id: 'q5', text: '互斥锁与信号量的区别', icon: 'book' },
+  cv: [
+    { id: 'q1', text: 'CNN 的卷积层与池化层有什么作用？', icon: 'question' },
+    { id: 'q2', text: '什么是目标检测？YOLO 的思路是什么？', icon: 'experiment' },
+    { id: 'q3', text: '解释图像分割与分类的区别', icon: 'bulb' },
+    { id: 'q4', text: '什么是数据增强？为什么有用？', icon: 'thunderbolt' },
+    { id: 'q5', text: '迁移学习在计算机视觉中怎么用？', icon: 'book' },
   ],
-  network: [
-    { id: 'q1', text: 'TCP 和 UDP 的区别？', icon: 'question' },
-    { id: 'q2', text: 'OSI 七层模型是什么？', icon: 'experiment' },
-    { id: 'q3', text: 'DNS 解析的过程是怎样的？', icon: 'bulb' },
-    { id: 'q4', text: 'HTTP 和 HTTPS 的区别？', icon: 'thunderbolt' },
-    { id: 'q5', text: '什么是三次握手和四次挥手？', icon: 'book' },
+  kg_reasoning: [
+    { id: 'q1', text: '什么是知识图谱？它和关系数据库有何不同？', icon: 'question' },
+    { id: 'q2', text: '什么是 RAG？它如何缓解大模型幻觉？', icon: 'experiment' },
+    { id: 'q3', text: '解释实体、关系与属性的三元组表示', icon: 'bulb' },
+    { id: 'q4', text: '向量检索是怎么工作的？', icon: 'thunderbolt' },
+    { id: 'q5', text: '知识图谱怎么和大模型结合？', icon: 'book' },
   ],
 }
 
@@ -496,6 +641,54 @@ const currentQuickQuestions = ref<QuickQuestion[]>(quickQuestions)
 function updateQuickQuestions(subject: string) {
   currentQuickQuestions.value = subjectQuestionsMap[subject] || quickQuestions
 }
+
+// ── 条目12：测绘驱动导学终端 ──
+// 从全局测绘 store 读取薄弱知识点与低准备度维度，生成可一键提问的引导话题
+interface GuidedTopic {
+  text: string
+  reason: string
+}
+
+const diagGuidedTopics = computed<GuidedTopic[]>(() => {
+  const diag = cehuiStore.currentCehui
+  if (!diag) return []
+  const topics: GuidedTopic[] = []
+  // 薄弱知识点 → 请助手引导讲解（苏格拉底式）
+  for (const wp of diag.weakPoints || []) {
+    if (wp.knowledgePoint) {
+      topics.push({
+        text: `请引导我理解「${wp.knowledgePoint}」，不要直接给答案，先问我几个问题帮我理清思路`,
+        reason: wp.reason || '该知识点掌握度偏低',
+      })
+    }
+  }
+  // 准备度偏低维度 → 提示调整方法
+  const r = diag.readinessProfile
+  if (r) {
+    if ((r.selfEfficacy ?? 1) < 0.4) {
+      topics.push({
+        text: '我对自己学会这个知识点没什么信心，你有什么方法能帮我建立小步成功的体验？',
+        reason: '自我效能偏低，建议从易到难拆分任务',
+      })
+    }
+    if ((r.metacognition ?? 1) < 0.4) {
+      topics.push({
+        text: '我不太会规划自己的学习步骤，能教我怎么拆解一个知识点来复习吗？',
+        reason: '元认知偏低，建议强化学习计划与自我监控',
+      })
+    }
+  }
+  // 认知负荷偏高 → 提示降低难度
+  if ((diag.cognitiveLoad?.overall ?? 0) > 0.65) {
+    topics.push({
+      text: '刚才那部分内容我学起来很吃力，能换个更简单的方式再讲一遍吗？',
+      reason: '本次测绘认知负荷偏高，建议降低讲解密度',
+    })
+  }
+  return topics.slice(0, 4)
+})
+
+const showDiagGuided = computed(() => showWelcome.value && diagGuidedTopics.value.length > 0)
 
 // ── 上浮知识粒子样式生成 ──
 function sparkleStyle(n: number): Record<string, string> {
@@ -574,7 +767,7 @@ onBeforeUnmount(() => {
             <div class="brand-icon">
               <RobotOutlined />
             </div>
-            <span class="toolbar-title">智能问答</span>
+            <span class="toolbar-title">导学终端</span>
           </div>
           <a-select
             :value="chatStore.currentSubject"
@@ -597,7 +790,17 @@ onBeforeUnmount(() => {
             <template #icon><ProfileOutlined /></template>
             <span class="tb-text">对话画像</span>
           </a-button>
-          <a-button class="tb-btn" type="text" size="small" :disabled="!hasMessages" @click="chatStore.clearChat()" title="清空对话">
+          <a-tooltip title="授权后，本次对话将提炼为学习画像并可能更新你的路径">
+            <span class="profile-auth">
+              <a-switch
+                v-model:checked="profileAuthorized"
+                size="small"
+                :disabled="summarizing"
+              />
+              <span class="tb-text profile-auth-text">计入学习画像</span>
+            </span>
+          </a-tooltip>
+          <a-button class="tb-btn" type="text" size="small" :disabled="!hasMessages" @click="handleClearChat" title="清空对话">
             <template #icon><ClearOutlined /></template>
             <span class="tb-text">清空</span>
           </a-button>
@@ -611,7 +814,7 @@ onBeforeUnmount(() => {
       <!-- 对话画像抽屉 -->
       <a-drawer
         v-model:open="chatProfileVisible"
-        title="对话画像 · 智能问答梳理的掌握特点"
+        title="对话画像 · 导学终端梳理的掌握特点"
         placement="right"
         :width="isMobile ? '100%' : 420"
         :mask-closable="true"
@@ -636,7 +839,7 @@ onBeforeUnmount(() => {
             </div>
             <a-divider style="margin: 12px 0" />
             <p class="profile-hint">
-              以下内容<strong>仅来自智能问答对话</strong>，与「学习诊断」的客观答题结果相互独立，可用于「诊断 + 对话」重规划。
+              以下内容<strong>仅来自导学终端对话</strong>，与「学情测绘」的客观答题结果相互独立，可用于「测绘 + 对话」重规划。
             </p>
             <a-list :data-source="chatProfile.items" size="small" :split="true">
               <template #renderItem="{ item }">
@@ -675,7 +878,7 @@ onBeforeUnmount(() => {
           <div class="welcome-icon">
             <RobotOutlined />
           </div>
-          <h2 class="welcome-title">燕麦 · AI 智能工作台</h2>
+          <h2 class="welcome-title">动麦 · AI 智能工作台</h2>
           <p class="welcome-desc">
             基于 <strong>RAG 检索增强生成</strong> 技术，从学科教材、课件和论文中检索相关知识，
             由大模型生成专业、有据的解答。每一次对话都是一次深度探索。
@@ -692,6 +895,23 @@ onBeforeUnmount(() => {
             <div class="wf-item">
               <span class="wf-dot" />
               <span>快速切换学科知识库，精准检索</span>
+            </div>
+          </div>
+          <div v-if="showDiagGuided" class="diag-guided">
+            <div class="dg-head">
+              <ProfileOutlined class="dg-icon" />
+              <span>根据你的学情测绘，试试这些引导话题</span>
+            </div>
+            <div class="dg-list">
+              <button
+                v-for="(t, i) in diagGuidedTopics"
+                :key="i"
+                class="dg-item"
+                @click="quickFill(t.text)"
+              >
+                <span class="dg-text">{{ t.text }}</span>
+                <span class="dg-reason">{{ t.reason }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -716,6 +936,16 @@ onBeforeUnmount(() => {
             :message="msg"
             :user-name="userName"
           />
+          <!-- 建议 9：助手消息含可复制素材时，展示反思框 -->
+          <ReflectGate
+            v-if="msg.role === 'assistant' && msg.hasReusableMaterial && msg.reflectState !== 'unlocked'"
+            :reflecting="reflectingId === msg.id"
+            :understood="msg.reflectResult?.understood"
+            :feedback="msg.reflectResult?.feedback"
+            :followUp="msg.reflectResult?.followUp"
+            @submit-reflect="(q) => submitReflect(msg.id, q)"
+            @request-regenerate="(idea) => requestRegenerate(idea)"
+          />
         </template>
 
         <transition name="scroll-btn-fade">
@@ -732,6 +962,25 @@ onBeforeUnmount(() => {
           :questions="currentQuickQuestions"
           @select="quickFill"
         />
+        <!-- 苏格拉底式引导提示：助手以引导性问题结尾时，提示学生先自行回答 -->
+        <transition name="socratic-fade">
+          <div v-if="showSocraticHint" class="socratic-hint">
+            <a-alert type="info" show-icon banner class="socratic-alert">
+              <template #icon><QuestionOutlined /></template>
+              <span class="socratic-text">助手留了一个引导性问题，试着先回答它，再继续对话</span>
+            </a-alert>
+            <a-button
+              class="socratic-hint-btn"
+              type="text"
+              size="small"
+              :disabled="isStreaming"
+              @click="requestSocraticHint()"
+            >
+              <template #icon><QuestionOutlined /></template>
+              我卡住了，再给一点提示
+            </a-button>
+          </div>
+        </transition>
         <div class="chat-footer-options">
           <a-tooltip title="开启后，对话触发的路径优化将自动采纳新版本；默认关闭，仅生成待采纳版本供你一键确认">
             <span class="adopt-switch">
@@ -992,6 +1241,21 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 桌面端：开关旁说明文字提升对比度，避免与外框颜色融合看不清 */
+.profile-auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+
+  .profile-auth-text {
+    color: #CBD5E1;
+    font-size: 12px;
+    user-select: none;
+    white-space: nowrap;
+  }
+}
+
 /* ============================================================
    移动端适配（≤768px）
    ============================================================ */
@@ -1032,6 +1296,16 @@ onBeforeUnmount(() => {
     :deep(.ant-btn-text) {
       padding: 0 8px;
     }
+  }
+
+  .profile-auth {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+  }
+  .profile-auth-text {
+    display: none;
   }
 
   .welcome-area {
@@ -1166,6 +1440,69 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 8px rgba(212, 163, 115, 0.5);
 }
 
+/* 测绘驱动引导话题 */
+.diag-guided {
+  margin-top: 28px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(212, 163, 115, 0.07);
+  border: 1px solid rgba(212, 163, 115, 0.2);
+  border-left: 3px solid #D4A373;
+  text-align: left;
+}
+
+.dg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0c894;
+  margin-bottom: 12px;
+}
+
+.dg-icon {
+  font-size: 15px;
+}
+
+.dg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dg-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dg-item:hover {
+  border-color: rgba(212, 163, 115, 0.55);
+  background: rgba(212, 163, 115, 0.1);
+  transform: translateX(3px);
+}
+
+.dg-text {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dg-reason {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
 /* ============================================================
    Thinking 动画 — 智能体"思考中"
    ============================================================ */
@@ -1279,12 +1616,82 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.55);
+    color: #CBD5E1;
     cursor: default;
 
     .adopt-label {
       user-select: none;
+      white-space: nowrap;
     }
+  }
+}
+
+/* ============================================================
+   苏格拉底式引导提示区 — 助手以引导性问题结尾时出现的引导条
+   ============================================================ */
+.socratic-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px 0;
+}
+
+.socratic-alert.ant-alert {
+  flex: 1;
+  background: rgba(212, 163, 115, 0.08);
+  border: 1px solid rgba(212, 163, 115, 0.30);
+  border-radius: 6px;
+
+  :deep(.ant-alert-icon) {
+    color: #D4A373;
+  }
+  :deep(.ant-alert-message) {
+    color: #E2E8F0;
+  }
+}
+
+.socratic-text {
+  font-size: 12.5px;
+  color: #CBD5E1;
+  line-height: 1.5;
+}
+
+.socratic-hint-btn {
+  flex-shrink: 0;
+  color: #D4A373 !important;
+  border: 1px solid rgba(212, 163, 115, 0.30) !important;
+  border-radius: 6px;
+  font-size: 12px;
+
+  &:hover:not(:disabled) {
+    color: #F8FAFC !important;
+    border-color: rgba(212, 163, 115, 0.6) !important;
+    background: rgba(212, 163, 115, 0.10) !important;
+  }
+  &:disabled {
+    color: rgba(212, 163, 115, 0.4) !important;
+  }
+}
+
+.socratic-fade-enter-active,
+.socratic-fade-leave-active {
+  transition: opacity 0.25s, transform 0.25s;
+}
+.socratic-fade-enter-from,
+.socratic-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* 移动端：苏格拉底提示区纵向堆叠，按钮占满宽度 */
+@media (max-width: 768px) {
+  .socratic-hint {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .socratic-hint-btn {
+    width: 100%;
   }
 }
 

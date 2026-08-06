@@ -21,7 +21,7 @@ const { isLoading } = storeToRefs(appStore)
         <div class="loading-bar-fill" />
       </div>
       <div class="loading-meta">
-        <span class="loading-id">SYS//OAT-OPS</span>
+        <span class="loading-id">SYS//DAT-OPS</span>
         <span class="loading-sep">—</span>
         <span class="loading-text">INITIALIZING</span>
         <span class="loading-cursor">_</span>

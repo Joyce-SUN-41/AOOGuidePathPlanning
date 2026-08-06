@@ -7,7 +7,7 @@ from app.api.v1 import (
     auth,
     chat,
     dashboard,
-    diagnosis,
+    cehui,
     health,
     knowledge,
     learning_paths,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/v1")
 router.include_router(health.router, tags=["Health"])
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 router.include_router(users.router, prefix="/users", tags=["Users"])
-router.include_router(diagnosis.router, prefix="/diagnosis", tags=["Diagnosis"])
+router.include_router(cehui.router, prefix="/cehui", tags=["Cehui"])
 router.include_router(knowledge.router, prefix="/knowledge-points", tags=["Knowledge Points"])
 router.include_router(questions.router, prefix="/questions", tags=["Question Bank"])
 router.include_router(aoo.router, tags=["AOO Optimization"])

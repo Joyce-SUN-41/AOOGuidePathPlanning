@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class Question(Base):
-    """诊断题库题目"""
+    """测绘题库题目"""
 
     __tablename__ = "questions"
 

@@ -1,4 +1,4 @@
-"""诊断异步任务 — AOO 路径规划触发 & 诊断后处理"""
+"""测绘异步任务 — AOO 路径规划触发 & 测绘后处理"""
 
 import logging
 from typing import Any, Dict, Optional
@@ -18,14 +18,14 @@ def trigger_aoo_path_planning(
     cognitive_load: float,
     config: Optional[Dict[str, Any]] = None,
 ):
-    """诊断完成后, 异步触发 AOO 智能路径规划任务.
+    """测绘完成后, 异步触发 AOO 智能路径规划任务.
 
-    将诊断数据转发给 run_aoo_optimization 任务,
+    将测绘数据转发给 run_aoo_optimization 任务,
     该任务调用 OptimizationService.run() 执行 AOO 算法并创建 LearningPath.
     """
     task_id = self.request.id
     logger.info(
-        "AOO path planning triggered: task_id=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        "AOO path planning triggered: task_id=%s cehui=%s student=%s kps=%d load=%.2f",
         task_id, diagnosis_id, student_id, len(mastery_levels), cognitive_load,
     )
 

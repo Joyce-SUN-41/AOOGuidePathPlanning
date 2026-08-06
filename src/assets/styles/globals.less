@@ -1,6 +1,6 @@
 // ============================================================
-//   燕麦智导 — 全局样式 (Global Styles)
-//   风格：未来主义科技风 · 深色主题 · 燕麦金 + 极光蓝
+//   动麦智导 — 全局样式 (Global Styles)
+//   风格：未来主义科技风 · 深色主题 · 动麦金 + 极光蓝
 // ============================================================
 
 @import './variables.less';
@@ -443,7 +443,7 @@ a.ant-btn:active {
   transform: translateY(0) scale(0.98) !important;
 }
 
-// 主要按钮 - 燕麦金强调
+// 主要按钮 - 动麦金强调
 .ant-btn-primary {
   background: linear-gradient(135deg, @brand-oat-300, @brand-oat-400) !important;
   border-color: transparent !important;
@@ -491,7 +491,7 @@ a.ant-btn-link {
   .lift-on-hover();
 }
 
-// 燕麦风格按钮
+// 动麦风格按钮
 .btn-oat {
   .ripple-effect();
   .lift-on-hover();
@@ -721,13 +721,30 @@ a.ant-btn-link {
   }
 }
 
-// 弹出提示
+// 弹出提示 — 深色硬描边气泡，确保外框与文字在深色主题下清晰可辨
+.ant-tooltip {
+  // 箭头颜色与气泡底一致，避免默认浅色箭头刺眼
+  .ant-tooltip-arrow {
+    &::before {
+      background: #141B2B;
+    }
+    .ant-tooltip-arrow-content {
+      background: #141B2B;
+    }
+  }
+}
+
 .ant-tooltip-inner {
   border-radius: @radius-sm;
   backdrop-filter: blur(@glass-blur-light);
   -webkit-backdrop-filter: blur(@glass-blur-light);
-  background: rgba(20, 27, 43, 0.92);
-  color: @gray-100;
+  background: #141B2B !important;
+  border: 1px solid rgba(212, 163, 115, 0.30);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  color: @gray-50 !important;
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 6px 10px;
 }
 
 // 折叠面板
@@ -797,7 +814,7 @@ a.ant-btn-link {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  9. 粒子动画 · 深色主题（燕麦金 + 青蓝粒子）
+//  9. 粒子动画 · 深色主题（动麦金 + 青蓝粒子）
 // ═══════════════════════════════════════════════════════════
 
 @keyframes particle-float {

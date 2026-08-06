@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models.diagnosis import DiagnosisRecord
+from app.models.cehui import CehuiRecord
 from app.models.learning_path import LearningPath
 from app.models.user import User
 from app.models.cognitive_profile import CognitiveProfileEvent
@@ -32,7 +32,7 @@ from app.schemas.aoo_optimize import (
     ConvergencePoint,
     OptimizeFlexibleRequest,
 )
-from app.services.diagnosis.adapter import DiagnosisAdapter
+from app.services.cehui.adapter import CehuiAdapter
 from app.schemas.common import ResponseBase
 from app.tasks.aoo_optimization import (
     get_task_convergence,
@@ -61,8 +61,8 @@ router = APIRouter(prefix="/aoo", tags=["AOO Optimization"])
     response_model=ResponseBase[AOOOptimizeResponse],
     summary="触发 AOO 路径优化",
     description=(
-        "基于学生诊断数据和掌握度水平，运行 AOO 算法生成最优学习路径。"
-        "前端只需传入 diagnosis_id，后端从诊断数据库自动补全 student_id/mastery_levels/cognitive_load。"
+        "基于学生测绘数据和掌握度水平，运行 AOO 算法生成最优学习路径。"
+        "前端只需传入 diagnosis_id，后端从测绘数据库自动补全 student_id/mastery_levels/cognitive_load。"
         "请求返回 task_id，前端通过 GET /status/{task_id} 轮询进度。"
     ),
 )
@@ -73,11 +73,11 @@ async def optimize_path(
 ):
     """触发 AOO 优化任务
 
-    - 前端只需传入 diagnosis_id，其余字段从诊断数据库自动补全
+    - 前端只需传入 diagnosis_id，其余字段从测绘数据库自动补全
     - Celery 优先；Celery 不可用时通过后台线程同步执行兜底
     """
-    # ── 第一步: 从诊断数据库自动补全缺失字段 ──
-    diagnosis_record = None
+    # ── 第一步: 从测绘数据库自动补全缺失字段 ──
+    cehui_record = None
     need_db = (
         not request.student_id
         or not request.mastery_levels
@@ -87,37 +87,37 @@ async def optimize_path(
     if need_db:
         try:
             diag_id = uuid.UUID(request.diagnosis_id)
-            stmt = select(DiagnosisRecord).where(DiagnosisRecord.id == diag_id)
+            stmt = select(CehuiRecord).where(CehuiRecord.id == diag_id)
             result = await session.execute(stmt)
-            diagnosis_record = result.scalar_one_or_none()
+            cehui_record = result.scalar_one_or_none()
         except (ValueError, TypeError, AttributeError):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"无效的 diagnosis_id: {request.diagnosis_id}",
             )
         except Exception as exc:
-            logger.warning("诊断记录查询失败: %s", exc)
+            logger.warning("测绘记录查询失败: %s", exc)
 
-        if diagnosis_record is None:
+        if cehui_record is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到诊断记录 diagnosis_id={request.diagnosis_id}，请先完成认知诊断",
+                detail=f"未找到测绘记录 diagnosis_id={request.diagnosis_id}，请先完成学情测绘",
             )
 
     # ── 自动补全 student_id ──
     if not request.student_id:
-        request.student_id = str(diagnosis_record.student_id)
+        request.student_id = str(cehui_record.student_id)
 
     # ── 权限校验: 学生只能操作自己的数据 ──
     if str(current_user.id) != str(request.student_id) and current_user.role != "teacher":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="只能为自己的诊断数据创建优化任务",
+            detail="只能为自己的测绘数据创建优化任务",
         )
 
     # ── 自动补全 mastery_levels ──
     if not request.mastery_levels:
-        raw_mastery = diagnosis_record.mastery_levels or {}
+        raw_mastery = cehui_record.mastery_levels or {}
         extracted = {}
         for kp_id, data in raw_mastery.items():
             if isinstance(data, dict):
@@ -128,14 +128,14 @@ async def optimize_path(
         if not request.mastery_levels:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="诊断记录中无 mastery_levels 数据，请重新完成认知诊断",
+                detail="测绘记录中无 mastery_levels 数据，请重新完成学情测绘",
             )
 
     # ── 自动补全 cognitive_load ──
     if request.cognitive_load is None:
         request.cognitive_load = (
-            diagnosis_record.cognitive_load_index
-            if diagnosis_record and diagnosis_record.cognitive_load_index is not None
+            cehui_record.cognitive_load_index
+            if cehui_record and cehui_record.cognitive_load_index is not None
             else 0.5
         )
 
@@ -148,7 +148,7 @@ async def optimize_path(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 cognitive_load")
 
     logger.info(
-        "AOO 优化请求: diagnosis=%s student=%s kps=%d load=%.2f",
+        "AOO 优化请求: cehui=%s student=%s kps=%d load=%.2f",
         request.diagnosis_id, request.student_id,
         len(request.mastery_levels), request.cognitive_load,
     )
@@ -236,20 +236,20 @@ async def optimize_path(
 
 
 # ============================================================
-# POST /optimize-flexible — 灵活重规划 (诊断 / 诊断+对话)
+# POST /optimize-flexible — 灵活重规划 (测绘 / 测绘+对话)
 # ============================================================
 
 
 @router.post(
     "/optimize-flexible",
     response_model=ResponseBase[AOOOptimizeResponse],
-    summary="灵活重规划 (基于任意历史诊断 / 诊断+对话)",
+    summary="灵活重规划 (基于任意历史测绘 / 测绘+对话)",
     description=(
         "支持两种重规划模式:\n"
-        "- mode='diagnosis': 仅基于指定的一次「学习诊断」重新规划, 不混入对话信号\n"
-        "- mode='diagnosis+chat': 基于指定诊断掌握度 + 当前「智能问答对话画像」融合后重规划\n"
-        "  (融合逻辑: 诊断掌握度为基底, 对话画像按 λ 加权叠加, 复用 adapter.fuse_mastery)\n\n"
-        "前端重规划选择器可列出历史诊断任选其一, 并勾选是否叠加对话分析。"
+        "- mode='cehui': 仅基于指定的一次「学情测绘」重新规划, 不混入对话信号\n"
+        "- mode='cehui+chat': 基于指定测绘掌握度 + 当前「导学终端对话画像」融合后重规划\n"
+        "  (融合逻辑: 测绘掌握度为基底, 对话画像按 λ 加权叠加, 复用 adapter.fuse_mastery)\n\n"
+        "前端重规划选择器可列出历史测绘任选其一, 并勾选是否叠加对话分析。"
     ),
 )
 async def optimize_flexible(
@@ -259,15 +259,15 @@ async def optimize_flexible(
 ):
     """灵活重规划入口
 
-    - 与 /optimize 的区别: 允许任选历史诊断, 并支持叠加「对话画像」
+    - 与 /optimize 的区别: 允许任选历史测绘, 并支持叠加「对话画像」
     - 任务提交逻辑复用同一套 Celery/同步兜底
     """
     # 解析最终模式 (use_chat_profile 兼容覆盖)
     mode = request.mode
     if request.use_chat_profile is not None:
-        mode = "diagnosis+chat" if request.use_chat_profile else "diagnosis"
+        mode = "cehui+chat" if request.use_chat_profile else "cehui"
 
-    # ── 第一步: 读取指定诊断记录 (任意一次历史诊断) ──
+    # ── 第一步: 读取指定测绘记录 (任意一次历史测绘) ──
     try:
         diag_id = uuid.UUID(request.diagnosis_id)
     except (ValueError, TypeError, AttributeError):
@@ -276,25 +276,25 @@ async def optimize_flexible(
             detail=f"无效的 diagnosis_id: {request.diagnosis_id}",
         )
 
-    stmt = select(DiagnosisRecord).where(DiagnosisRecord.id == diag_id)
+    stmt = select(CehuiRecord).where(CehuiRecord.id == diag_id)
     result = await session.execute(stmt)
-    diagnosis_record = result.scalar_one_or_none()
-    if diagnosis_record is None:
+    cehui_record = result.scalar_one_or_none()
+    if cehui_record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到诊断记录 diagnosis_id={request.diagnosis_id}",
+            detail=f"未找到测绘记录 diagnosis_id={request.diagnosis_id}",
         )
 
     # ── 自动补全 student_id ──
-    student_id = request.student_id or str(diagnosis_record.student_id)
+    student_id = request.student_id or str(cehui_record.student_id)
     if str(current_user.id) != student_id and current_user.role != "teacher":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="只能为自己的诊断数据创建优化任务",
+            detail="只能为自己的测绘数据创建优化任务",
         )
 
-    # ── 提取诊断掌握度 (基底) ──
-    raw_mastery = diagnosis_record.mastery_levels or {}
+    # ── 提取测绘掌握度 (基底) ──
+    raw_mastery = cehui_record.mastery_levels or {}
     base_mastery: Dict[str, float] = {}
     for kp_id, data in raw_mastery.items():
         if isinstance(data, dict):
@@ -304,23 +304,23 @@ async def optimize_flexible(
     if not base_mastery:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该诊断记录中无 mastery_levels 数据，请重新完成认知诊断",
+            detail="该测绘记录中无 mastery_levels 数据，请重新完成学情测绘",
         )
 
     # ── 补全认知负荷 ──
     cognitive_load = request.cognitive_load
     if cognitive_load is None:
         cognitive_load = (
-            diagnosis_record.cognitive_load_index
-            if diagnosis_record.cognitive_load_index is not None
+            cehui_record.cognitive_load_index
+            if cehui_record.cognitive_load_index is not None
             else 0.5
         )
 
-    # ── 第二步: 诊断+对话 模式 → 融合对话画像 ──
+    # ── 第二步: 测绘+对话 模式 → 融合对话画像 ──
     final_mastery = base_mastery
-    if mode == "diagnosis+chat":
+    if mode == "cehui+chat":
         try:
-            adapter = DiagnosisAdapter(
+            adapter = CehuiAdapter(
                 db=session, user_id=uuid.UUID(student_id)
             )
             chat_profile = await adapter.get_chat_profile()
@@ -336,11 +336,11 @@ async def optimize_flexible(
                 )
             else:
                 logger.info(
-                    "[optimize-flexible] 对话画像为空, 退化为单纯诊断重规划 (diag=%s)",
+                    "[optimize-flexible] 对话画像为空, 退化为单纯测绘重规划 (diag=%s)",
                     diag_id,
                 )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[optimize-flexible] 对话画像融合失败, 回退纯诊断: %s", exc)
+            logger.warning("[optimize-flexible] 对话画像融合失败, 回退纯测绘: %s", exc)
             final_mastery = base_mastery
 
     # ── 提取超参配置 ──
@@ -355,7 +355,7 @@ async def optimize_flexible(
         }
 
     logger.info(
-        "AOO 灵活重规划: mode=%s diagnosis=%s student=%s kps=%d load=%.2f",
+        "AOO 灵活重规划: mode=%s cehui=%s student=%s kps=%d load=%.2f",
         mode, request.diagnosis_id, student_id, len(final_mastery), cognitive_load,
     )
 
@@ -1122,11 +1122,41 @@ async def get_pending_path(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    """查询待采纳版本（P2 重规划默认生成的版本，需用户一键采纳）"""
+    """查询待采纳版本（P2 重规划默认生成的版本，需用户一键采纳）
+
+    关键约束：待采纳版本必须是「当前生效路径的直接重规划子版本」
+    （parent_path_id == 当前 active 路径 id 且 is_active=False），
+    而不是「任意一条 is_active=False 的历史路径中 created_at 最新者」。
+
+    旧实现只按 is_active=False + created_at 过滤，会把历史上任何一条未激活的
+    旧版本（例如比当前 active 更早生成的 vN）误判为待采纳版本。一旦用户点采纳，
+    该旧版本被激活、当前版本降级；刷新后 /current 返回旧版本，而 pending-path
+    又返回那条比它更新的（已降级的）当前版本……如此反复，表现为
+    「一键采纳后闪一下，刷新又回到旧版本」的死循环。
+
+    修复后：先定位当前 active 路径，再只在它的子版本里找最新待采纳项，
+    无子版本则无横幅，从根本上消除误判。
+    """
+    # 1) 先定位当前生效版本
+    active_result = await session.execute(
+        select(LearningPath)
+        .where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == True,  # noqa: E712
+        )
+        .order_by(LearningPath.created_at.desc())
+        .limit(1)
+    )
+    active = active_result.scalar_one_or_none()
+    if active is None:
+        return ResponseBase(data=None, message="当前没有生效的学习路径，无法判断待采纳版本")
+
+    # 2) 只在「当前生效版本的直接重规划子版本」中查找最新待采纳项
     stmt = (
         select(LearningPath)
         .where(
             LearningPath.student_id == current_user.id,
+            LearningPath.parent_path_id == active.id,
             LearningPath.is_active == False,  # noqa: E712
         )
         .order_by(LearningPath.created_at.desc())
@@ -1202,7 +1232,31 @@ async def adopt_path(
     if target.is_active:
         return ResponseBase(data={"path_id": path_id, "adopted": True}, message="该路径已生效")
 
+    # 防御性校验：只采纳「当前生效路径的直接重规划子版本」。
+    # 若目标不是当前 active 版本的孩子（例如历史上某条孤立的 is_active=False
+    # 旧版本被误当作 pending 传入），则拒绝采纳，避免把旧版本重新激活、
+    # 再刷新又出现另一条被降级版本的死循环（即「采纳后刷新又恢复旧版本」）。
+    active_result = await session.execute(
+        select(LearningPath)
+        .where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == True,  # noqa: E712
+        )
+        .order_by(LearningPath.created_at.desc())
+        .limit(1)
+    )
+    active = active_result.scalar_one_or_none()
+    if active is not None and target.parent_path_id != active.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该版本不是当前生效路径的直接重规划子版本，无法采纳",
+        )
+
     # 下线当前生效版本，上线目标版本
+    # 注意：必须把「所有其它 is_active=True 的路径」一次性下线，
+    # 否则在并发重规划（Celery 异步生成新版本）场景下可能出现多条
+    # is_active=True，导致 GET /learning-paths/current 按 created_at 排序后
+    # 返回非本次采纳的版本，表现为「一键采纳后刷新又恢复旧版本」。
     old_active = await session.execute(
         select(LearningPath).where(
             LearningPath.student_id == current_user.id,
@@ -1217,6 +1271,22 @@ async def adopt_path(
     target.is_active = True
     session.add(target)
     await session.commit()
+    await session.refresh(target)
+
+    # 兜底一致性校验：提交后若仍存在多条 is_active=True，仅保留本次目标。
+    remaining = await session.execute(
+        select(LearningPath).where(
+            LearningPath.student_id == current_user.id,
+            LearningPath.is_active == True,  # noqa: E712
+            LearningPath.id != pid,
+        )
+    )
+    stray = remaining.scalars().all()
+    if stray:
+        for s in stray:
+            s.is_active = False
+            session.add(s)
+        await session.commit()
 
     logger.info(
         "[adopt] 学生 %s 采纳路径 v%d (path_id=%s)",

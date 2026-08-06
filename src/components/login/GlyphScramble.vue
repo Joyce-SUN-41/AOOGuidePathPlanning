@@ -35,7 +35,7 @@ const props = withDefaults(
     delay: 0,
     stagger: 70,
     duration: 420,
-    pool: '野燕麦种传播风水动物优化收敛路径认知图谱'
+    pool: '野动麦种传播风水动物优化收敛路径认知图谱'
   }
 )
 

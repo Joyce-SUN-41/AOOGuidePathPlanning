@@ -14,18 +14,18 @@ export interface PlatformStats {
   pathCount: number
   /** 覆盖知识点数 */
   knowledgePointCount: number
-  /** 累计诊断次数 */
-  diagnosisCount: number
+  /** 累计测绘次数 */
+  cehuiCount: number
 }
 
 /**
  * 学情看板 API 模块
  *
- * Dashboard 数据跨诊断结果 + 学习路径 + 学习行为聚合，
+ * Dashboard 数据跨测绘结果 + 学习路径 + 学习行为聚合，
  * 后端若尚未实现对应端点，调用方应 catch 异常后使用 fallback。
  */
 export const dashboardApi = {
-  /** 获取认知负荷历史趋势（最近 N 次诊断） */
+  /** 获取认知负荷历史趋势（最近 N 次测绘） */
   getCognitiveLoadTrend(limit = 10): Promise<CognitiveLoadTrendPoint[]> {
     return request.get<CognitiveLoadTrendPoint[]>('/dashboard/cognitive-load-trend', { limit })
   },

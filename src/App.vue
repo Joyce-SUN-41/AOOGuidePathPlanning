@@ -2,10 +2,10 @@
 import { RouterView } from 'vue-router'
 import GlobalLoading from '@/components/GlobalLoading.vue'
 
-// Ant Design Vue 主题令牌 — 燕麦智导 · 深色科技风
+// Ant Design Vue 主题令牌 — 动麦智导 · 深色科技风
 const themeConfig = {
   token: {
-    // 品牌色 — 燕麦金
+    // 品牌色 — 动麦金
     colorPrimary: '#D4A373',
     colorInfo: '#4A6CF7',
     colorSuccess: '#34D399',

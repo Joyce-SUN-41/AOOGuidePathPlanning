@@ -155,6 +155,120 @@ class AgentDeleteSessionResponse(CamelModel):
 
 
 # ============================================================
+# 反思框（建议 9）— POST /api/v1/chat/reflect
+# ============================================================
+
+
+class ReflectRequest(CamelModel):
+    """反思框提交 — 学生针对可复制素材提问，模型判定理解度"""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="会话 ID，与 /chat/agent 一致，用于维持上下文",
+    )
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="学生向老师提的问题（必填，前端已校验非空）",
+    )
+    material: str = Field(
+        ...,
+        min_length=1,
+        max_length=8000,
+        description="被拦截的可复制素材原文（代码块/提纲），供模型判定依据",
+    )
+
+
+class ReflectResponse(CamelModel):
+    """反思判定结果 — 模型判断学生是否真读懂，给对错反馈与一句追问"""
+
+    understood: bool = Field(
+        ...,
+        description="模型判定学生是否真正读懂素材",
+    )
+    feedback: str = Field(
+        default="",
+        description="对错反馈（一句话，指出理解偏差，不直接改正答案）",
+    )
+    follow_up: str = Field(
+        default="",
+        description="一句追问，引导学生自己补全理解",
+    )
+
+
+# ============================================================
+# 问答画像回流（建议 10）— POST /api/v1/chat/summarize-profile
+# ============================================================
+
+
+class ChatSummarizeRequest(CamelModel):
+    """会话结束提炼画像 — 从对话提取结构化掌握度增量"""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="会话 ID",
+    )
+    user_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="学生 / 用户 ID",
+    )
+    authorized: bool = Field(
+        default=True,
+        description="是否授权本次对话计入学习画像（仅授权才执行提炼与回流）",
+    )
+
+
+class MasteryDelta(CamelModel):
+    """单个知识点的掌握度增量"""
+
+    kp_id: str = Field(..., description="知识点 ID")
+    delta_mastery: float = Field(
+        ...,
+        ge=-0.2,
+        le=0.2,
+        description="掌握度增量（相对测绘基线，范围 -0.2~+0.2）",
+    )
+
+
+class ChatSummarizeResponse(CamelModel):
+    """会话画像提炼结果 — 仅基于对话中明确暴露的信号"""
+
+    deltas: List[MasteryDelta] = Field(
+        default_factory=list,
+        description="知识点掌握度增量列表",
+    )
+    new_weak_points: List[str] = Field(
+        default_factory=list,
+        description="新识别的薄弱知识点 ID 列表",
+    )
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="提炼置信度（0~1）",
+    )
+    significant: bool = Field(
+        default=False,
+        description="是否显著（|sum(delta)|>0.3），显著则触发重规划",
+    )
+    replanned: bool = Field(
+        default=False,
+        description="是否触发了重规划（生成待采纳新版本）",
+    )
+    new_version: Optional[int] = Field(
+        default=None,
+        description="若触发重规划，新路径版本号",
+    )
+
+
+# ============================================================
 # 健康检查
 # ============================================================
 

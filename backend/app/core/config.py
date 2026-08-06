@@ -146,10 +146,10 @@ class Settings(BaseSettings):
     RAG_TOP_K: int = 5
     RAG_MAX_CONTEXT_CHARS: int = 4000
 
-    # ---- 对话即诊断 / 认知画像 (CSP) ----
+    # ---- 对话即测绘 / 认知画像 (CSP) ----
     # CHAT_PROFILE_ENABLED: 问答信号是否参与 AOO 输入 (P3 总开关，可秒回滚)
     # CHAT_PROFILE_LAMBDA: 问答影响强度系数 λ ∈ [0,1]，初期 0.3
-    # CHAT_PROFILE_MAX_DELTA: 单知识点相对诊断基线的最大偏移 δ_max
+    # CHAT_PROFILE_MAX_DELTA: 单知识点相对测绘基线的最大偏移 δ_max
     # CHAT_PROFILE_PRIOR: 无任何基线时的先验掌握度 (向其回归，而非归零)
     # CHAT_KP_FUZZY_THRESHOLD: kp_name → kp_id 模糊匹配相似度阈值
     # CHAT_AUTO_OPTIMIZE_COOLDOWN: 自动重规划最小间隔(秒)，防连续追问并发刷 AOO

@@ -1,4 +1,4 @@
-# 燕麦智导（AOO Guide）前端技术文档
+# 动麦智导（AOO Guide）前端技术文档
 
 ## 1. 技术栈与项目结构
 
@@ -23,23 +23,23 @@ src/
 ├── api/
 │   ├── index.ts                 # Axios 实例 + getToken() + 拦截器
 │   └── modules/                 # 按业务域拆分 API 模块
-│       ├── auth.ts, diagnose.ts, knowledge.ts
+│       ├── auth.ts, cehui.ts, knowledge.ts
 │       ├── aoo.ts, chat.ts, dashboard.ts
 │       ├── teacher.ts, agent.ts, records.ts
 ├── views/                       # 8+ 页面
 │   ├── LoginView.vue, RegisterView.vue, HomeView.vue
-│   ├── DiagnoseView.vue, PathView.vue, LearningPathView.vue
+│   ├── CehuiView.vue, PathView.vue, LearningPathView.vue
 │   ├── ChatView.vue, DashboardView.vue, TeacherView.vue, RecordsView.vue
 ├── components/                  # 可复用组件
 │   ├── AOOAnimation.vue         # AOO 寻优帧播放
-│   ├── OatDispersalBackground.vue  # 冷燕麦粒子场背景
+│   ├── OatDispersalBackground.vue  # 冷动麦粒子场背景
 │   ├── charts/                  # ECharts 封装组件
 │   └── layout/                  # 侧栏 / 顶栏 / 页脚
 ├── composables/
 │   ├── useIsMobile.ts           # matchMedia 断点 768 统一移动端判定
 │   └── useAooProgress.ts        # 优化进度轮询
 ├── stores/                      # Pinia stores
-│   ├── user.ts, path.ts, agent.ts, diagnosis.ts
+│   ├── user.ts, path.ts, agent.ts, cehui.ts
 ├── router/                      # 路由定义 + 守卫
 ├── styles/                      # 设计令牌 + 主题
 │   ├── tokens.less              # 冷酷科技风变量
@@ -52,11 +52,11 @@ src/
 前端采用"冷酷科技风 / OAT-OPS 指挥终端"视觉基调，与通用 AI 模板明确区隔：
 
 - **近纯黑暗场** `#06080D` + 硬栅格线矩阵（64px 1px `rgba(148,163,184,0.05)`）+ 极淡噪点
-- **单一高光色** = 燕麦金 `#D4A373`；辅助冷色 = 青蓝 `#00D4FF`；轴/文 = `#94A3B8` / `#CBD5E1` / `#F8FAFC`
+- **单一高光色** = 动麦金 `#D4A373`；辅助冷色 = 青蓝 `#00D4FF`；轴/文 = `#94A3B8` / `#CBD5E1` / `#F8FAFC`
 - **等宽字体当主角**（JetBrains Mono）做刊头 / 状态行 / 数字
 - **直角 / 方点 / 硬描边**（radius 0~2px）
-- 路由转场 `page-wipe` = clip-path 硬切扫光（去模糊）；侧栏激活 = 左侧 2px 燕麦金硬条
-- 品牌独有符号：`OatDispersalBackground`（冷燕麦粒子场）作 Hero 背景
+- 路由转场 `page-wipe` = clip-path 硬切扫光（去模糊）；侧栏激活 = 左侧 2px 动麦金硬条
+- 品牌独有符号：`OatDispersalBackground`（冷动麦粒子场）作 Hero 背景
 - **审美红线**：禁止柔和玻璃辉光、渐变描边字、圆角胶囊、彩色模糊光斑、呼吸脉冲光等通用 AI 模板感
 
 图表遵循一致深色基线：ECharts 轴名 `#CBD5E1`、轴标签 `#94A3B8`、网格线 `rgba(255,255,255,0.08~0.12)`、tooltip 底 `rgba(20,27,43,0.95)`、数据点描边 `#141B2B`。
@@ -79,14 +79,14 @@ src/
 | 模块 | 覆盖端点 |
 |------|---------|
 | `auth.ts` | 登录 / 注册 / 刷新 / 登出 |
-| `diagnose.ts` | 题库拉取 / 提交诊断 |
+| `cehui.ts` | 题库拉取 / 提交测绘 |
 | `knowledge.ts` | 知识点 / 图谱 |
 | `aoo.ts` | 提交优化 / 轮询状态 / 获取结果 |
 | `chat.ts` | 对话 / RAG 问答 |
 | `dashboard.ts` | 学生 / 教师 / 平台统计 |
 | `teacher.ts` | 班级学情 / 薄弱点 |
 | `agent.ts` | Agent 流式对话 |
-| `records.ts` | 诊断 / 路径 / 负荷记录 |
+| `records.ts` | 测绘 / 路径 / 负荷记录 |
 
 ---
 
@@ -98,7 +98,7 @@ src/
 |------|------|------|
 | `/login`, `/register` | LoginView / RegisterView | 匿名 |
 | `/` (Home) | HomeView | 登录后 |
-| `/diagnose` | DiagnoseView | 学生 |
+| `/cehui` | CehuiView | 学生 |
 | `/path` | PathView | 学生 |
 | `/path/:id` | LearningPathView | 学生 |
 | `/chat` | ChatView | 登录后 |
@@ -130,7 +130,7 @@ src/
 
 ### 4.3 DashboardView.vue（学情看板）
 
-- 雷达图：接首次诊断真实基线，禁用随机数造假；提升百分比以 graphic 标注
+- 雷达图：接首次测绘真实基线，禁用随机数造假；提升百分比以 graphic 标注
 - 认知负荷趋势图：补 `dataZoom`（默认近 10 次）
 - 薄弱点详情：`a-table` 排序 / 筛选 + 详情抽屉
 - 首页统计：走 `/dashboard/platform-stats` 公开端点；接口失败则隐藏模块，绝不回退假数据
@@ -143,7 +143,7 @@ src/
 
 ### 4.5 OatDispersalBackground.vue（品牌背景）
 
-冷燕麦粒子场动画，作为 Hero / 登录页背景，构建区别于通用 AI 模板的视觉识别度。
+冷动麦粒子场动画，作为 Hero / 登录页背景，构建区别于通用 AI 模板的视觉识别度。
 
 ---
 
@@ -154,7 +154,7 @@ src/
 | `user.ts` | 当前用户 / 角色 / token |
 | `path.ts` | 当前路径 / Pareto 三路径 / 优化进度 |
 | `agent.ts` | 会话列表 / 流式消息缓冲 |
-| `diagnosis.ts` | 诊断题目 / 提交状态 / 结果 |
+| `cehui.ts` | 测绘题目 / 提交状态 / 结果 |
 
 ---
 

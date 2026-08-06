@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import DiagnoseView from '@/views/DiagnoseView.vue'
+import CehuiView from '@/views/CehuiView.vue'
 
-// ── Mock echarts（DiagnoseView 直接 import * as echarts 并 init 图表）──
+// ── Mock echarts（CehuiView 直接 import * as echarts 并 init 图表）──
 vi.mock('echarts', () => ({
   init: () => ({
     setOption: vi.fn(),
@@ -13,20 +13,20 @@ vi.mock('echarts', () => ({
   graphic: { LinearGradient: class {} },
 }))
 
-// ── Mock 诊断 API ──
+// ── Mock 测绘 API ──
 // vi.mock 工厂会被 hoist，工厂内引用的 mock 必须用 vi.hoisted 声明
 const { getQuestionsMock, submitMock } = vi.hoisted(() => ({
   getQuestionsMock: vi.fn(),
   submitMock: vi.fn(),
 }))
-vi.mock('@/api/modules/diagnosis', () => ({
-  diagnosisApi: {
+vi.mock('@/api/modules/cehui', () => ({
+  cehuiApi: {
     getQuestions: (...args: unknown[]) => getQuestionsMock(...args),
     submit: (...args: unknown[]) => submitMock(...args),
   },
 }))
 
-// ── Mock 路由（DiagnoseView 的 safeNavigate 使用 useRouter）──
+// ── Mock 路由（CehuiView 的 safeNavigate 使用 useRouter）──
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useRoute: () => ({ query: {} }),
@@ -77,7 +77,7 @@ const sampleResult = {
   summary: '表现良好',
 }
 
-describe('DiagnoseView 诊断流程', () => {
+describe('CehuiView 测绘流程', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     getQuestionsMock.mockReset()
@@ -92,7 +92,7 @@ describe('DiagnoseView 诊断流程', () => {
   })
 
   it('加载时调用 getQuestions 并渲染首题', async () => {
-    const wrapper = mount(DiagnoseView, {
+    const wrapper = mount(CehuiView, {
       global: { stubs: { CognitiveAuraBackground: true } },
     })
     await flushPromises()
@@ -105,7 +105,7 @@ describe('DiagnoseView 诊断流程', () => {
 
   it('API 失败时回退 Mock 题库（不抛错）', async () => {
     getQuestionsMock.mockRejectedValue(new Error('network error'))
-    const wrapper = mount(DiagnoseView, {
+    const wrapper = mount(CehuiView, {
       global: { stubs: { CognitiveAuraBackground: true } },
     })
     await flushPromises()
@@ -114,8 +114,8 @@ describe('DiagnoseView 诊断流程', () => {
     expect(vm.questions.length).toBeGreaterThanOrEqual(10)
   })
 
-  it('构造答案后提交会调用 diagnosisApi.submit 且 payload 正确', async () => {
-    const wrapper = mount(DiagnoseView, {
+  it('构造答案后提交会调用 cehuiApi.submit 且 payload 正确', async () => {
+    const wrapper = mount(CehuiView, {
       global: { stubs: { CognitiveAuraBackground: true } },
     })
     await flushPromises()
@@ -142,8 +142,8 @@ describe('DiagnoseView 诊断流程', () => {
     expect(payload.answers.length).toBe(sampleQuestions.length)
   })
 
-  it('提交成功后将结果写入 diagnosisResult', async () => {
-    const wrapper = mount(DiagnoseView, {
+  it('提交成功后将结果写入 cehuiResult', async () => {
+    const wrapper = mount(CehuiView, {
       global: { stubs: { CognitiveAuraBackground: true } },
     })
     await flushPromises()
@@ -151,7 +151,7 @@ describe('DiagnoseView 诊断流程', () => {
       questions: { id: string }[]
       answers: { questionId: string; selectedOption: string; timeSpent: number }[]
       submitAnswers: () => Promise<void>
-      diagnosisResult: typeof sampleResult | null
+      cehuiResult: typeof sampleResult | null
     }
     vm.answers = vm.questions.map((q) => ({
       questionId: q.id,
@@ -161,7 +161,7 @@ describe('DiagnoseView 诊断流程', () => {
     await vm.submitAnswers()
     await flushPromises()
 
-    expect(vm.diagnosisResult).not.toBeNull()
-    expect(vm.diagnosisResult?.overallScore).toBe(80)
+    expect(vm.cehuiResult).not.toBeNull()
+    expect(vm.cehuiResult?.overallScore).toBe(80)
   })
 })

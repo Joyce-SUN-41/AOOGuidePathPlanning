@@ -53,28 +53,28 @@ class AOOOptimizeConfig(CamelModel):
 class AOOOptimizeRequest(CamelModel):
     """POST /api/v1/aoo/optimize — 触发 AOO 路径优化
 
-    前端只需传入 diagnosis_id，其余字段由后端从诊断数据库自动补全。
+    前端只需传入 diagnosis_id，其余字段由后端从测绘数据库自动补全。
     若显式传入，则优先使用传入值。
     """
 
     diagnosis_id: str = Field(
         ...,
         min_length=1,
-        description="诊断结果 ID (必填)，后端可据此自动补全 student_id/mastery_levels/cognitive_load",
+        description="测绘结果 ID (必填)，后端可据此自动补全 student_id/mastery_levels/cognitive_load",
     )
     student_id: Optional[str] = Field(
         default=None,
-        description="学生用户 ID (UUID)，省略时从诊断记录自动补全",
+        description="学生用户 ID (UUID)，省略时从测绘记录自动补全",
     )
     mastery_levels: Optional[Dict[str, float]] = Field(
         default=None,
-        description="知识点掌握度映射 {kp_id: value ∈ [0,1]}，省略时从诊断记录提取",
+        description="知识点掌握度映射 {kp_id: value ∈ [0,1]}，省略时从测绘记录提取",
     )
     cognitive_load: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="综合认知负荷指数，省略时从诊断记录提取",
+        description="综合认知负荷指数，省略时从测绘记录提取",
     )
     config: Optional[AOOOptimizeConfig] = Field(
         default=None, description="可选的 AOO 超参数覆盖"
@@ -98,23 +98,23 @@ class OptimizeFlexibleRequest(CamelModel):
     """POST /api/v1/aoo/optimize-flexible — 灵活重规划
 
     两种重规划模式:
-      - mode="diagnosis":    仅基于指定的一次「学习诊断」重新规划 (最纯粹，不混入对话)
-      - mode="diagnosis+chat": 基于指定诊断 + 当前「智能问答对话画像」融合后重规划
-                               (融合逻辑复用 adapter.fuse_mastery: 诊断掌握度为基底,
+      - mode="cehui":    仅基于指定的一次「学情测绘」重新规划 (最纯粹，不混入对话)
+      - mode="cehui+chat": 基于指定测绘 + 当前「导学终端对话画像」融合后重规划
+                               (融合逻辑复用 adapter.fuse_mastery: 测绘掌握度为基底,
                                 对话画像按 λ 加权叠加)
 
-    前端重规划选择器: 列出历史诊断(可任选其一) + 是否勾选「叠加对话分析」。
+    前端重规划选择器: 列出历史测绘(可任选其一) + 是否勾选「叠加对话分析」。
     """
 
     diagnosis_id: str = Field(
         ...,
         min_length=1,
-        description="用于重规划的诊断结果 ID (必填)，可选任意一次历史诊断",
+        description="用于重规划的测绘结果 ID (必填)，可选任意一次历史测绘",
     )
     mode: str = Field(
-        default="diagnosis",
-        pattern=r"^(diagnosis|diagnosis\+chat)$",
-        description="重规划模式: diagnosis=仅诊断; diagnosis+chat=诊断+对话画像融合",
+        default="cehui",
+        pattern=r"^(cehui|cehui\+chat)$",
+        description="重规划模式: cehui=仅测绘; cehui+chat=测绘+对话画像融合",
     )
     use_chat_profile: Optional[bool] = Field(
         default=None,
@@ -122,13 +122,13 @@ class OptimizeFlexibleRequest(CamelModel):
     )
     student_id: Optional[str] = Field(
         default=None,
-        description="学生用户 ID (UUID)，省略时从诊断记录自动补全",
+        description="学生用户 ID (UUID)，省略时从测绘记录自动补全",
     )
     cognitive_load: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="综合认知负荷指数，省略时从诊断记录提取",
+        description="综合认知负荷指数，省略时从测绘记录提取",
     )
     config: Optional[AOOOptimizeConfig] = Field(
         default=None, description="可选的 AOO 超参数覆盖"

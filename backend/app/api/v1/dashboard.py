@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.cache import cache_get, cache_set
 from app.core.database import get_db
-from app.models.diagnosis import DiagnosisRecord
+from app.models.cehui import CehuiRecord
 from app.models.knowledge_point import KnowledgePoint
 from app.models.learning_path import LearningPath
 from app.models.user import User
@@ -38,7 +38,7 @@ async def get_platform_stats(db: AsyncSession = Depends(get_db)):
     - studentCount   注册用户数
     - pathCount      已生成学习路径数
     - knowledgePointCount 覆盖知识点数
-    - diagnosisCount 累计诊断次数
+    - cehuiCount 累计测绘次数
 
     该接口不返回任何用户隐私信息，仅为聚合计数，故不做鉴权。
     任一统计项查询失败时降级为 0，保证首页始终可渲染。
@@ -63,7 +63,7 @@ async def get_platform_stats(db: AsyncSession = Depends(get_db)):
         "studentCount": await _count(User),
         "pathCount": await _count(LearningPath),
         "knowledgePointCount": await _count(KnowledgePoint),
-        "diagnosisCount": await _count(DiagnosisRecord),
+        "cehuiCount": await _count(CehuiRecord),
     }
 
     try:
@@ -87,11 +87,11 @@ async def get_cognitive_load_trend(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取最近 N 次诊断的认知负荷数据"""
+    """获取最近 N 次测绘的认知负荷数据"""
     result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id == current_user.id)
-        .order_by(desc(DiagnosisRecord.created_at))
+        select(CehuiRecord)
+        .where(CehuiRecord.student_id == current_user.id)
+        .order_by(desc(CehuiRecord.created_at))
         .limit(limit)
     )
     records = result.scalars().all()
@@ -195,17 +195,17 @@ async def get_suggestions(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """基于最新诊断结果生成学习建议（简化版）"""
+    """基于最新测绘结果生成学习建议（简化版）"""
     result = await db.execute(
-        select(DiagnosisRecord)
-        .where(DiagnosisRecord.student_id == current_user.id)
-        .order_by(desc(DiagnosisRecord.created_at))
+        select(CehuiRecord)
+        .where(CehuiRecord.student_id == current_user.id)
+        .order_by(desc(CehuiRecord.created_at))
         .limit(1)
     )
     record = result.scalar_one_or_none()
 
     if not record:
-        return ResponseBase(code=200, message="暂无诊断数据", data=[])
+        return ResponseBase(code=200, message="暂无测绘数据", data=[])
 
     cl = record.cognitive_load or {}
     overall = cl.get("overall", 0)
@@ -283,12 +283,12 @@ async def get_overview(
     except Exception:  # noqa: BLE001
         pass
 
-    # 并发拉取多个相互独立的聚合查询（最新诊断 / 最新路径 / 诊断数 / 路径数 / 全部诊断日期）
-    async def _latest_diag() -> Optional[DiagnosisRecord]:
+    # 并发拉取多个相互独立的聚合查询（最新测绘 / 最新路径 / 测绘数 / 路径数 / 全部测绘日期）
+    async def _latest_diag() -> Optional[CehuiRecord]:
         r = await db.execute(
-            select(DiagnosisRecord)
-            .where(DiagnosisRecord.student_id == current_user.id)
-            .order_by(desc(DiagnosisRecord.created_at))
+            select(CehuiRecord)
+            .where(CehuiRecord.student_id == current_user.id)
+            .order_by(desc(CehuiRecord.created_at))
             .limit(1)
         )
         return r.scalar_one_or_none()
@@ -304,8 +304,8 @@ async def get_overview(
 
     async def _diag_count() -> int:
         r = await db.execute(
-            select(func.count(DiagnosisRecord.id)).where(
-                DiagnosisRecord.student_id == current_user.id
+            select(func.count(CehuiRecord.id)).where(
+                CehuiRecord.student_id == current_user.id
             )
         )
         return int(r.scalar() or 0)
@@ -320,9 +320,9 @@ async def get_overview(
 
     async def _all_diag_dates() -> set:
         r = await db.execute(
-            select(DiagnosisRecord.created_at)
-            .where(DiagnosisRecord.student_id == current_user.id)
-            .order_by(desc(DiagnosisRecord.created_at))
+            select(CehuiRecord.created_at)
+            .where(CehuiRecord.student_id == current_user.id)
+            .order_by(desc(CehuiRecord.created_at))
         )
         dates: set = set()
         for (created_at,) in r:
@@ -330,7 +330,7 @@ async def get_overview(
                 dates.add(created_at.date())
         return dates
 
-    diag, path, total_diagnoses, total_paths, diag_dates_set = await asyncio.gather(
+    diag, path, total_cehuis, total_paths, diag_dates_set = await asyncio.gather(
         _latest_diag(),
         _latest_path(),
         _diag_count(),
@@ -384,7 +384,7 @@ async def get_overview(
         "masteredKPs": mastered_kps,
         "totalKPs": total_kps,
         "streakDays": streak,
-        "totalDiagnoses": total_diagnoses,
+        "totalCehuis": total_cehuis,
         "totalPaths": total_paths,
         "lastStudyDate": diag.created_at.strftime("%Y-%m-%d") if diag and diag.created_at else "",
     }

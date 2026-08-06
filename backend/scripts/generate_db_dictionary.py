@@ -25,7 +25,7 @@ def generate():
     # 导入所有模型
     from app.models import (
         user, knowledge_point, knowledge_graph,
-        question, diagnosis, learning_path, path_task,
+        question, cehui, learning_path, path_task,
         student_knowledge, cognitive_load_record,
         chat_history, aoo_optimization_log,
     )
@@ -35,7 +35,7 @@ def generate():
         knowledge_point.KnowledgePoint,
         knowledge_graph.KnowledgeGraphEdge,
         question.Question,
-        diagnosis.DiagnosisRecord,
+        cehui.CehuiRecord,
         learning_path.LearningPath,
         path_task.PathTask,
         student_knowledge.StudentKnowledge,

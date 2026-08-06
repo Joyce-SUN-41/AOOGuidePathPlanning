@@ -1,4 +1,4 @@
-# 燕麦智导（AOO Guide）后端技术文档
+# 动麦智导（AOO Guide）后端技术文档
 
 ## 1. 技术栈与项目结构
 
@@ -30,11 +30,11 @@ backend/
 │   │   ├── database.py            # SQLAlchemy 引擎/会话
 │   │   └── security.py            # JWT 双 Token 认证
 │   ├── models/                    # SQLAlchemy 2.0 模型（11 张表）
-│   │   ├── user.py, knowledge.py, diagnosis.py
+│   │   ├── user.py, knowledge.py, cehui.py
 │   │   ├── learning_path.py, chat.py, agent.py, cognitive_load.py
 │   ├── schemas/                   # Pydantic 请求/响应模型
 │   ├── api/v1/                    # 13 个路由模块
-│   │   ├── auth.py, users.py, diagnose.py, knowledge.py
+│   │   ├── auth.py, users.py, cehui.py, knowledge.py
 │   │   ├── aoo.py, chat.py, dashboard.py, teacher.py
 │   │   ├── agent.py, health.py, records.py, admin.py, feedback.py
 │   ├── services/
@@ -42,7 +42,7 @@ backend/
 │   │   ├── llm/                   # SparkClient + 重试引擎
 │   │   ├── rag/                   # 知识库 RAG 管线
 │   │   ├── agent/                 # 会话管理 + Xingchen 客户端
-│   │   ├── diagnosis/             # IRT 诊断模型
+│   │   ├── cehui/             # IRT 测绘模型
 │   │   └── optimization/          # AOO 优化服务（Celery Task）
 │   ├── tasks/                     # Celery 定义
 │   └── db/                        # 迁移脚本
@@ -74,8 +74,8 @@ backend/
 | `users` | 用户（学生/教师/管理员） | id, username, email, role, learning_speed, hashed_password |
 | `knowledge_points` | 知识点（含图谱关系） | id, subject, title, difficulty, prerequisites, importance |
 | `questions` | 题库 | id, kp_id, content, difficulty, type |
-| `diagnosis_records` | 诊断会话 | id, user_id, diagnosis_type, total_questions, accuracy |
-| `student_knowledge` | 学生-知识点掌握度 | user_id, kp_id, mastery, confidence, last_diagnosed_at |
+| `cehui_records` | 测绘会话 | id, user_id, cehui_type, total_questions, accuracy |
+| `student_knowledge` | 学生-知识点掌握度 | user_id, kp_id, mastery, confidence, last_cehuid_at |
 | `cognitive_load_records` | 认知负荷记录 | id, user_id, record_id, memory_load, attention_load, processing_load, overall_load |
 | `learning_paths` | 学习路径主体 | id, user_id, optimal_path(JSON), convergence_data(JSON), pareto_front(JSON) |
 | `path_tasks` | 每日任务明细 | id, path_id, day, kp_id, task_type, est_minutes, completed |
@@ -95,7 +95,7 @@ backend/
 |------|------|---------|
 | `auth.py` | `/auth` | POST `/register`, POST `/login`, POST `/refresh`, POST `/logout` |
 | `users.py` | `/users` | GET `/me`, GET `/{id}`, PUT `/me`, GET `/students`(教师) |
-| `diagnose.py` | `/diagnose` | GET `/question-bank`, POST `/submit`, GET `/records/{id}` |
+| `cehui.py` | `/cehui` | GET `/question-bank`, POST `/submit`, GET `/records/{id}` |
 | `knowledge.py` | `/knowledge` | GET `/points`, GET `/{id}`, GET `/graph`(前置依赖图) |
 | `aoo.py` | `/aoo` | POST `/optimize`(Celery), GET `/status/{task_id}`, GET `/results/{id}` |
 | `chat.py` | `/chat` | POST `/message`, POST `/rag`(RAG 问答), GET `/history` |
@@ -103,7 +103,7 @@ backend/
 | `teacher.py` | `/teacher` | GET `/students`, GET `/weak-points`, GET `/progress/{id}` |
 | `agent.py` | `/agent` | POST `/chat`, POST `/chat/stream`(SSE), GET `/sessions` |
 | `health.py` | `/health` | GET `/`(存活), GET `/ready`(依赖就绪) |
-| `records.py` | `/records` | GET `/diagnoses`, GET `/paths`, GET `/cognitive-load` |
+| `records.py` | `/records` | GET `/cehuis`, GET `/paths`, GET `/cognitive-load` |
 | `admin.py` | `/admin` | POST `/seed`(重灌种子), GET `/metrics` |
 | `feedback.py` | `/feedback` | POST `/path`(路径反馈), GET `/analytics` |
 
@@ -134,7 +134,7 @@ backend/
                 ▼
 ┌─────────────────────────────────────────────┐
 │ services/optimization/optimization_service.py │
-│  - 准备优化上下文 (知识点/诊断/图谱)            │
+│  - 准备优化上下文 (知识点/测绘/图谱)            │
 │  - 调用 AOOEngine.optimize()                  │
 │  - 解析 Pareto 前沿 → 三类路径                 │
 │  - 持久化到 learning_paths / path_tasks        │
@@ -157,7 +157,7 @@ backend/
 
 ### 4.2 OptimizationService 关键方法
 
-- `_prepare_context()`：聚合学生诊断结果、知识点图谱、前置依赖，构造 `OptimizationContext`
+- `_prepare_context()`：聚合学生测绘结果、知识点图谱、前置依赖，构造 `OptimizationContext`
 - `_run_optimization()`：实例化 `AOOEngine`，传入 `on_iteration` 回调写入 Redis 进度
 - `_persist_results()`：将最优路径、Pareto 前沿、收敛数据写入 `learning_paths`，每日任务写入 `path_tasks`，每代日志写入 `aoo_optimization_logs`
 - `_build_path_tasks()`：将知识点排列解码为带预估时长的每日任务列表（基于 `est_minutes` 与日学习预算汇总）
@@ -214,7 +214,7 @@ ws(s)://spark-openapi.cn-huabei-1.xf-yun.com/v1/assistants/{assistant_id}
 
 ### 7.2 XingchenAgentClient
 
-接入讯飞星辰 Agent 平台 `POST /v1/flow/run`，兼容 OpenAI 兼容格式与星辰原生格式，工具调用统一标准化。与 SparkClient 形成互补：Spark 负责自由对话与 RAG 生成，星辰负责任务型对话（路径规划/诊断分析）。
+接入讯飞星辰 Agent 平台 `POST /v1/flow/run`，兼容 OpenAI 兼容格式与星辰原生格式，工具调用统一标准化。与 SparkClient 形成互补：Spark 负责自由对话与 RAG 生成，星辰负责任务型对话（路径规划/测绘分析）。
 
 ### 7.3 AgentService + SSE
 
@@ -222,9 +222,9 @@ ws(s)://spark-openapi.cn-huabei-1.xf-yun.com/v1/assistants/{assistant_id}
 
 ---
 
-## 8. 诊断服务（IRT + DINA）
+## 8. 测绘服务（IRT + DINA）
 
-`services/diagnosis/__init__.py` 使用 IRT 2-PL 模型，通过 Newton-Raphson（最多 50 次迭代，收敛阈值 1e-4）估计学生能力 θ，经 logistic 映射到 [0,1] 掌握度；DINA 模型估计粗心率与猜测率；掌握度分四级（excellent/proficient/developing/weak）。置信度基于答题数量与准确率一致性估计。
+`services/cehui/__init__.py` 使用 IRT 2-PL 模型，通过 Newton-Raphson（最多 50 次迭代，收敛阈值 1e-4）估计学生能力 θ，经 logistic 映射到 [0,1] 掌握度；DINA 模型估计粗心率与猜测率；掌握度分四级（excellent/proficient/developing/weak）。置信度基于答题数量与准确率一致性估计。
 
 ---
 

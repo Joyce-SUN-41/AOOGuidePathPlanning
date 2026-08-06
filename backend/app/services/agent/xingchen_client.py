@@ -289,6 +289,11 @@ class XingchenAgentClient:
         for key in ("temperature", "max_tokens", "top_p"):
             if key in kwargs:
                 payload[key] = kwargs[key]
+        # 系统提示词（建议 7：引导式 system prompt）透传到 inputs.system；
+        # 星辰平台若支持 system 指令即生效，不支持时作为普通字段静默忽略，不破坏调用。
+        system_prompt = kwargs.get("system")
+        if system_prompt:
+            payload["inputs"]["system"] = system_prompt
         return payload
 
     # ---- 非流式对话 ----

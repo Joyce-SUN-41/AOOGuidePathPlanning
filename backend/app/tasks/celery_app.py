@@ -10,7 +10,7 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
         "app.tasks.example",
-        "app.tasks.diagnosis",
+        "app.tasks.cehui",
         "app.tasks.aoo_optimization",
     ],
 )

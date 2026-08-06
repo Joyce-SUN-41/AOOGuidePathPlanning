@@ -11,7 +11,7 @@
     from app.services.rag import get_knowledge_base
 
     kb = await get_knowledge_base()
-    result = await kb.query("什么是认知诊断？", top_k=5)
+    result = await kb.query("什么是认知测绘？", top_k=5)
 """
 
 from app.services.rag.chunker import Chunk, ChunkConfig, DocumentChunker, MarkdownChunker

@@ -30,11 +30,12 @@ from app.schemas.rag import (
     RAGQueryResponse,
     RAGStatsResponse,
 )
-from app.services.diagnosis.adapter import DiagnosisAdapter
-from app.services.diagnosis.throttle import (
+from app.services.cehui.adapter import CehuiAdapter
+from app.services.cehui.throttle import (
     acquire_optimize_slot,
     release_optimize_slot,
 )
+from app.services.agent.session_manager import get_session_manager
 from app.services.rag import get_knowledge_base, reset_knowledge_base
 from app.services.rag.knowledge_base import KnowledgeBase
 
@@ -48,7 +49,7 @@ def _to_query_response(result) -> RAGQueryResponse:
     token_usage = None
     if getattr(result, "token_usage", None):
         token_usage = result.token_usage
-    diagnosis = getattr(result, "_diagnosis", None)
+    cehui = getattr(result, "_cehui", None)
     return RAGQueryResponse(
         answer=result.answer,
         sources=result.sources,
@@ -57,7 +58,7 @@ def _to_query_response(result) -> RAGQueryResponse:
         model=result.model,
         token_usage=token_usage,
         query_id=result.query_id,
-        diagnosis=diagnosis,
+        cehui=cehui,
     )
 
 
@@ -72,7 +73,7 @@ async def _get_kb() -> KnowledgeBase:
 
 # KnowledgeBase.query_stream 用于分隔来源信息的哨兵标记
 _SOURCES_SENTINEL = "<<SOURCES>>"
-_DIAGNOSIS_SENTINEL = "<<DIAGNOSIS>>"
+_CEHUI_SENTINEL = "<<CEHUI>>"
 
 
 def _sse(payload: dict) -> str:
@@ -89,11 +90,12 @@ async def _rag_sse_generator(
     帧格式（与前端 ragQueryStream 约定一致）:
     - {"content": "增量文本"}      增量内容
     - {"sources": [...]}            检索来源（结束前发送一次）
-    - {"diagnosis": {...}}          诊断数据（诊断模式下发送）
+    - {"cehui": {...}}          测绘数据（测绘模式下发送）
     - {"error": "错误信息"}         错误
     - [DONE]                        终止标记
     """
     query_id = str(uuid.uuid4())[:8]
+    full_answer = ""
     try:
         # 先下发 query_id，便于前端埋点/关联
         yield _sse({"query_id": query_id})
@@ -105,7 +107,7 @@ async def _rag_sse_generator(
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
                 fast=payload.fast_mode,
-                diagnose=payload.diagnose_mode,
+                cehui=payload.cehui_mode,
             )
         else:
             stream = kb.query_stream(
@@ -126,17 +128,18 @@ async def _rag_sse_generator(
                     sources = []
                 yield _sse({"sources": sources})
                 continue
-            if chunk.startswith(_DIAGNOSIS_SENTINEL):
-                raw = chunk[len(_DIAGNOSIS_SENTINEL):]
+            if chunk.startswith(_CEHUI_SENTINEL):
+                raw = chunk[len(_CEHUI_SENTINEL):]
                 try:
-                    diagnosis = json.loads(raw) if raw else {}
+                    cehui = json.loads(raw) if raw else {}
                 except (ValueError, TypeError):
-                    diagnosis = {}
-                yield _sse({"diagnosis": diagnosis})
+                    cehui = {}
+                yield _sse({"cehui": cehui})
                 continue
             yield _sse({"content": chunk})
             # 让出事件循环，确保分块及时刷出而非被缓冲成整包
             await asyncio.sleep(0)
+            full_answer += chunk
 
     except asyncio.CancelledError:
         # 客户端主动断开，静默结束，不记为错误
@@ -146,6 +149,24 @@ async def _rag_sse_generator(
         yield _sse({"error": f"AI 服务暂时不可用：{e}"})
     finally:
         yield "data: [DONE]\n\n"
+
+    # 流式结束后，把本轮问答存入会话历史（支撑画像提炼 / 建议10）
+    # 失败仅记录日志，绝不阻断响应
+    if payload.session_id and full_answer:
+        try:
+            mgr = get_session_manager()
+            await mgr.append_message(
+                payload.session_id,
+                {"role": "user", "content": payload.question},
+                user_id=str(current_user.id) if current_user else None,
+            )
+            await mgr.append_message(
+                payload.session_id,
+                {"role": "assistant", "content": full_answer},
+                user_id=str(current_user.id) if current_user else None,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[/rag/query] 会话历史保存失败(session=%s): %s", payload.session_id, e)
 
 
 @router.post("/query", response_model=ResponseBase[RAGQueryResponse])
@@ -180,7 +201,7 @@ async def rag_query(
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
                 fast=payload.fast_mode,
-                diagnose=payload.diagnose_mode,
+                cehui=payload.cehui_mode,
             )
         else:
             result = await kb.query(
@@ -189,6 +210,22 @@ async def rag_query(
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
             )
+        # 非流式分支：把问答存入会话历史（支撑画像提炼 / 建议10）
+        if payload.session_id:
+            try:
+                mgr = get_session_manager()
+                await mgr.append_message(
+                    payload.session_id,
+                    {"role": "user", "content": payload.question},
+                    user_id=str(current_user.id) if current_user else None,
+                )
+                await mgr.append_message(
+                    payload.session_id,
+                    {"role": "assistant", "content": result.answer},
+                    user_id=str(current_user.id) if current_user else None,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[/rag/query] 会话历史保存失败(session=%s): %s", payload.session_id, e)
     except Exception as e:  # noqa: BLE001
         logger.exception("[/rag/query] 问答处理失败")
         # 不返回生硬的 500，向前端返回可读的错误提示（HTTP 200）
@@ -265,24 +302,24 @@ async def rag_auto_optimize(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ResponseBase[AutoOptimizeResponse] | dict:
-    """对话诊断 → AOO 自动路径优化
+    """对话测绘 → AOO 自动路径优化
     
     当 LLM 在对话中检测到薄弱知识点时，前端调用此端点触发 AOO 优化。
-    适配器会将 LLM 推测与历史答题诊断数据置信度加权融合，生成 AOO 标准输入，
+    适配器会将 LLM 推测与历史答题测绘数据置信度加权融合，生成 AOO 标准输入，
     并复用现有 Celery 异步优化流水线。
     
     边界: 严格恪守"LLM 只做认知感知 → AOO 专注数学寻优"的松耦合原则
     """
-    adapter = DiagnosisAdapter(user_id=current_user.id, db=db)
+    adapter = CehuiAdapter(user_id=current_user.id, db=db)
 
-    chat_diagnosis = {
+    chat_cehui = {
         "mastery_estimates": payload.mastery_estimates,
         "cognitive_load": payload.cognitive_load,
         "learning_intent": payload.learning_intent,
         "needs_optimization": payload.needs_optimization,
     }
 
-    aoo_params = await adapter.build_aoo_params(chat_diagnosis)
+    aoo_params = await adapter.build_aoo_params(chat_cehui)
 
     # 可观测性: 记录被丢弃的未对齐知识点，便于后续排查 LLM 输出质量
     unresolved = aoo_params.get("unresolved_names") or []
@@ -301,23 +338,23 @@ async def rag_auto_optimize(
         else:
             msg = (
                 f"当前检测到 {aoo_params['weak_count']} 个薄弱知识点，"
-                "未达到自动优化阈值。完成诊断答题后可获得更精准的路径推荐。"
+                "未达到自动优化阈值。完成测绘答题后可获得更精准的路径推荐。"
             )
         return ResponseBase[AutoOptimizeResponse](
             data=AutoOptimizeResponse(triggered=False, message=msg)
         )
 
-    # 获取诊断记录 ID（优先用历史诊断记录）
+    # 获取测绘记录 ID（优先用历史测绘记录）
     diagnosis_id = aoo_params.get("diagnosis_id")
 
     if not diagnosis_id:
-        # 没有历史诊断记录: 无法直接调用 AOO（AOO 需要 diagnosis_id）
+        # 没有历史测绘记录: 无法直接调用 AOO（AOO 需要 diagnosis_id）
         return ResponseBase[AutoOptimizeResponse](
             data=AutoOptimizeResponse(
                 triggered=False,
                 message=(
-                    "检测到薄弱知识点，但尚未完成正式诊断答题。"
-                    "请在学情诊断页面完成答题后，系统将自动生成最优学习路径。"
+                    "检测到薄弱知识点，但尚未完成正式测绘答题。"
+                    "请在学情测绘页面完成答题后，系统将自动生成最优学习路径。"
                 ),
             )
         )
@@ -335,7 +372,7 @@ async def rag_auto_optimize(
                 triggered=False,
                 message=(
                     f"学习路径刚刚已根据对话优化过，约 {minutes} 分钟后可再次优化。"
-                    "本轮对话的诊断结果已记录。"
+                    "本轮对话的测绘结果已记录。"
                 ),
             )
         )
@@ -355,7 +392,7 @@ async def rag_auto_optimize(
                 triggered=False,
                 message=(
                     "学习路径自动优化功能已全局关闭。"
-                    "本轮对话的诊断结果已记录，但不会自动调整路径。"
+                    "本轮对话的测绘结果已记录，但不会自动调整路径。"
                 ),
             )
         )
@@ -378,7 +415,7 @@ async def rag_auto_optimize(
         )
 
         logger.info(
-            "[auto-optimize] AOO 优化已入队 | user=%s | diagnosis=%s | task=%s",
+            "[auto-optimize] AOO 优化已入队 | user=%s | cehui=%s | task=%s",
             current_user.id, diagnosis_id, task.id,
         )
 
@@ -402,26 +439,26 @@ async def rag_auto_optimize(
 
 
 # ============================================================
-# GET /chat-profile — 读取该生「仅来自智能问答」的对话画像
+# GET /chat-profile — 读取该生「仅来自导学终端」的对话画像
 # ============================================================
 
 
 @router.get(
     "/chat-profile",
     response_model=ResponseBase[dict],
-    summary="获取智能问答对话画像",
+    summary="获取导学终端对话画像",
     description=(
-        "返回该生通过智能问答对话梳理出的知识点掌握特点 (绝对掌握度视图)。\n"
-        "与「学习诊断」的客观答题掌握度严格分离，仅用于展示与「诊断+对话」重规划融合。"
+        "返回该生通过导学终端对话梳理出的知识点掌握特点 (绝对掌握度视图)。\n"
+        "与「学情测绘」的客观答题掌握度严格分离，仅用于展示与「测绘+对话」重规划融合。"
     ),
 )
 async def get_chat_profile(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    """读取对话画像 — 前端智能问答页「对话画像」抽屉的数据源"""
+    """读取对话画像 — 前端导学终端页「对话画像」抽屉的数据源"""
     try:
-        adapter = DiagnosisAdapter(db=session, user_id=current_user.id)
+        adapter = CehuiAdapter(db=session, user_id=current_user.id)
         profile = await adapter.get_chat_profile()
         return ResponseBase(message="ok", data=profile)
     except Exception as exc:  # noqa: BLE001

@@ -2,13 +2,13 @@
 
 P1 新增。核心约束（来自 2026-08-02 决策）:
   - StudentKnowledge 不可被问答信号污染，问答增量单独存于 mastery_deltas (JSONB)
-  - 融合仅在内存中进行（见 services/diagnosis/adapter.py），本表只沉淀问答增量
-  - 无诊断基线时，mastery_deltas 作为微弱先验参与融合，不回写 StudentKnowledge
+  - 融合仅在内存中进行（见 services/cehui/adapter.py），本表只沉淀问答增量
+  - 无测绘基线时，mastery_deltas 作为微弱先验参与融合，不回写 StudentKnowledge
 
 P5 新增 ChatMasteryProfile:
-  - 仅沉淀「智能问答」通过对话梳理出的该生知识点掌握特点（绝对掌握度视图）
+  - 仅沉淀「导学终端」通过对话梳理出的该生知识点掌握特点（绝对掌握度视图）
   - 与 StudentKnowledge（客观答题）和 StudentCognitiveProfile（相对增量）三者分离
-  - 仅用于「对话画像」展示与「诊断 + 对话」重规划融合，绝不回写客观数据
+  - 仅用于「对话画像」展示与「测绘 + 对话」重规划融合，绝不回写客观数据
 """
 
 import uuid
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class StudentCognitiveProfile(Base):
-    """学生认知画像：沉淀对话即诊断 (CSP) 产生的问答增量
+    """学生认知画像：沉淀对话即测绘 (CSP) 产生的问答增量
 
     与 StudentKnowledge 严格分离：StudentKnowledge 只存客观答题记录的掌握度，
     本表只存对话问答产生的 mastery_deltas (相对增量)，二者在内存里融合，
@@ -156,13 +156,13 @@ class CognitiveProfileEvent(Base):
 
 
 class ChatMasteryProfile(Base):
-    """智能问答对话画像 — 仅沉淀"通过对话梳理出的该生知识点掌握特点"
+    """导学终端对话画像 — 仅沉淀"通过对话梳理出的该生知识点掌握特点"
 
     设计原则（数据真实性底线）:
       - 与 StudentKnowledge（客观答题掌握度）严格分离，绝不互相覆盖
       - 与 StudentCognitiveProfile（相对增量）分离，本表存「绝对掌握度视图」
-      - 仅来源于智能问答中 LLM 梳理出的 mastery_estimates
-      - 用途: ① 在智能问答页「对话画像」抽屉中可查看 ② 作为「诊断 + 对话」重规划融合的会话内主观来源
+      - 仅来源于导学终端中 LLM 梳理出的 mastery_estimates
+      - 用途: ① 在导学终端页「对话画像」抽屉中可查看 ② 作为「测绘 + 对话」重规划融合的会话内主观来源
 
     结构:
       mastery: { kp_id(str): {

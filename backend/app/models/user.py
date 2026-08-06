@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from app.models.cognitive_load_record import CognitiveLoadRecord
     from app.models.chat_history import ChatHistory
     from app.models.aoo_optimization_log import AOOOptimizationLog
-    from app.models.diagnosis import DiagnosisRecord
+    from app.models.cehui import CehuiRecord
     from app.models.cognitive_profile import (
         StudentCognitiveProfile,
         CognitiveProfileEvent,
@@ -89,7 +89,7 @@ class User(Base):
     aoo_optimization_logs: Mapped[List["AOOOptimizationLog"]] = relationship(
         back_populates="student", cascade="all, delete-orphan"
     )
-    diagnosis_records: Mapped[List["DiagnosisRecord"]] = relationship(
+    cehui_records: Mapped[List["CehuiRecord"]] = relationship(
         back_populates="student", cascade="all, delete-orphan"
     )
     cognitive_profiles: Mapped[List["StudentCognitiveProfile"]] = relationship(

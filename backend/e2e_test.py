@@ -1,4 +1,4 @@
-"""端到端模拟测试脚本（学生注册/登录 → 诊断 → AOO优化 → 轮询）。"""
+"""端到端模拟测试脚本（学生注册/登录 → 测绘 → AOO优化 → 轮询）。"""
 
 from __future__ import annotations
 
@@ -81,25 +81,25 @@ def main() -> None:
             sys.exit(1)
         print_step("获取当前用户", r_me.status_code, {"id": user_id, "username": r_me.json().get("username")})
 
-        # 3) 诊断提交
-        diagnosis_payload = {
+        # 3) 测绘提交
+        cehui_payload = {
             "student_id": user_id,
             "subject": "人工智能导论",
             "grade": "本科",
             "answers": build_answers(),
         }
-        r = client.post(f"{API_PREFIX}/diagnosis/submit", json=diagnosis_payload)
+        r = client.post(f"{API_PREFIX}/cehui/submit", json=cehui_payload)
         if r.status_code != 200:
-            fail("诊断提交", r)
-        diagnosis_resp = r.json()
-        print_step("诊断提交", r.status_code, diagnosis_resp)
+            fail("测绘提交", r)
+        cehui_resp = r.json()
+        print_step("测绘提交", r.status_code, cehui_resp)
 
-        diag_data = diagnosis_resp.get("data", {})
+        diag_data = cehui_resp.get("data", {})
         diagnosis_id = diag_data.get("diagnosis_id")
         mastery_levels = diag_data.get("mastery_levels")
         cognitive_load = diag_data.get("cognitive_load")
         if not diagnosis_id or not isinstance(mastery_levels, dict):
-            print("❌ 诊断响应缺少 diagnosis_id 或 mastery_levels")
+            print("❌ 测绘响应缺少 diagnosis_id 或 mastery_levels")
             sys.exit(1)
 
         # 4) 触发优化

@@ -1,4 +1,4 @@
-// ============= RAG 知识库 / 智能问答类型 =============
+// ============= RAG 知识库 / 导学终端类型 =============
 
 /** RAG 检索来源 */
 export interface RAGSource {
@@ -29,10 +29,12 @@ export interface RAGQueryRequest {
   skip_retrieval?: boolean
   /** true = 快速模式（低温度、短回复、短超时） */
   fast_mode?: boolean
-  /** true = 诊断模式（附加学习状态评估 JSON） */
-  diagnose_mode?: boolean
+  /** true = 测绘模式（附加学习状态评估 JSON） */
+  cehui_mode?: boolean
   /** true = 走 SSE 流式返回（仅 ragQueryStream 使用） */
   stream?: boolean
+  /** 会话 ID（可选）：用于把问答存入会话历史，支撑画像提炼（建议 10） */
+  sessionId?: string
 }
 
 /** RAG 查询响应 */
@@ -44,8 +46,8 @@ export interface RAGQueryResponse {
   model: string
   token_usage?: RAGTokenUsage
   query_id: string
-  /** 诊断模式下的学习评估数据 */
-  diagnosis?: {
+  /** 测绘模式下的学习评估数据 */
+  cehui?: {
     mastery_estimates?: Array<{ kp_name: string; level: number }>
     cognitive_load?: number
     learning_intent?: string
@@ -97,6 +99,14 @@ export interface ChatMessage {
   timestamp: number
   isStreaming?: boolean // 是否正在流式输出
   queryId?: string
+  /** 建议 9：助手消息是否含可复制使用素材（代码块/提纲），触发反思框 */
+  hasReusableMaterial?: boolean
+  /** 建议 9：反思框状态机: locked -> reflecting -> unlocked */
+  reflectState?: 'locked' | 'reflecting' | 'unlocked'
+  /** 建议 9：是否已勾选"我已读懂" */
+  reflectAcknowledged?: boolean
+  /** 建议 9：最近一次反思判定结果 */
+  reflectResult?: { understood: boolean; feedback: string; followUp: string } | null
 }
 
 /** 快捷提问项 */

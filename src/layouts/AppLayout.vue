@@ -7,7 +7,6 @@ import { dashboardApi } from '@/api/modules/dashboard'
 import eventBus from '@/utils/eventBus'
 import type { UserRole } from '@/types'
 import {
-  BulbOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   DownOutlined,
@@ -70,10 +69,10 @@ const menuItems = computed(() => {
       roles: []
     },
     {
-      key: '/diagnose',
+      key: '/cehui',
       icon: () => h(ExperimentOutlined),
       iconKey: 'ExperimentOutlined',
-      label: '认知诊断',
+      label: '学情测绘',
       roles: ['student']
     },
     {
@@ -87,7 +86,7 @@ const menuItems = computed(() => {
       key: '/chat',
       icon: () => h(RobotOutlined),
       iconKey: 'RobotOutlined',
-      label: '智能问答',
+      label: '导学终端',
       roles: ['student']
     },
     {
@@ -163,7 +162,7 @@ watch(
 )
 
 // ========== 学习统计(实时) ==========
-const totalDiagnoses = ref<number>(0)
+const totalCehuis = ref<number>(0)
 const totalPaths = ref<number>(0)
 
 async function loadStats() {
@@ -171,20 +170,20 @@ async function loadStats() {
   if (userStore.isTeacher) return
   try {
     const data = await dashboardApi.getOverview()
-    totalDiagnoses.value = data.totalDiagnoses ?? 0
+    totalCehuis.value = data.totalCehuis ?? 0
     totalPaths.value = data.totalPaths ?? 0
   } catch (e) {
     // 统计加载失败不影响布局, 保留上次值
   }
 }
 
-// 进入应用即加载; 路由切换(诊断完成/路径生成或删除后)刷新统计
+// 进入应用即加载; 路由切换(测绘完成/路径生成或删除后)刷新统计
 onMounted(loadStats)
 watch(
   () => route.path,
   (path) => {
     if (
-      path.startsWith('/diagnose') ||
+      path.startsWith('/cehui') ||
       path.startsWith('/path') ||
       path.startsWith('/records')
     ) {
@@ -193,13 +192,13 @@ watch(
   }
 )
 
-// 停留在同一页面内删除诊断/路径时不会触发路由变化，
+// 停留在同一页面内删除测绘/路径时不会触发路由变化，
 // 这里额外监听全局事件，保证「学习统计」实时刷新。
 const unsubscribers: Array<() => void> = []
 onMounted(() => {
   unsubscribers.push(
     eventBus.on('stats:refresh', loadStats),
-    eventBus.on('diagnosis:changed', loadStats),
+    eventBus.on('cehui:changed', loadStats),
     eventBus.on('path:changed', loadStats)
   )
 })
@@ -208,7 +207,7 @@ onUnmounted(() => {
   unsubscribers.length = 0
 })
 
-function goToRecords(tab: 'diagnosis' | 'path') {
+function goToRecords(tab: 'cehui' | 'path') {
   router.push({ path: '/records', query: { tab } })
 }
 
@@ -309,9 +308,42 @@ function handleLogout() {
       <!-- Logo -->
       <div class="header-logo" @click="router.push('/home')">
         <div class="logo-icon">
-          <BulbOutlined />
+          <svg
+            class="logo-mark"
+            viewBox="0 0 48 48"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <!-- 硬边六边形外框（指挥终端徽标感） -->
+            <path
+              d="M24 3 L42 13.5 V34.5 L24 45 L6 34.5 V13.5 Z"
+              stroke="rgba(212,163,115,0.45)"
+              stroke-width="1.2"
+            />
+            <!-- 中心竖茎 -->
+            <path d="M24 40 L24 16" stroke="#D4A373" stroke-width="1.6" stroke-linecap="square" />
+            <!-- 左三芒（几何硬角麦穗） -->
+            <path d="M24 18 L13 13" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <path d="M24 22 L11 19" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <path d="M24 26 L12 25" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <!-- 右三芒 -->
+            <path d="M24 18 L35 13" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <path d="M24 22 L37 19" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <path d="M24 26 L36 25" stroke="#D4A373" stroke-width="1.4" stroke-linecap="square" />
+            <!-- 顶端青蓝光点（独有符号高光） -->
+            <path d="M24 16 L24 8" stroke="#00D4FF" stroke-width="1.6" stroke-linecap="square" />
+            <circle cx="24" cy="7" r="2.1" fill="#00D4FF" />
+            <!-- 谷粒（菱形收束） -->
+            <path
+              d="M24 30 L20.5 33.5 L24 37 L27.5 33.5 Z"
+              stroke="#D4A373"
+              stroke-width="1.4"
+              fill="rgba(212,163,115,0.18)"
+            />
+          </svg>
         </div>
-        <span class="logo-title">燕麦智导</span>
+        <span class="logo-title">动麦智导</span>
       </div>
 
       <!-- 水平导航菜单 -->
@@ -417,9 +449,9 @@ function handleLogout() {
             <div v-if="!userStore.isTeacher" class="sider-section">
               <div class="sider-section-title">学习统计</div>
               <div class="stat-cards">
-                <div class="stat-card" @click="goToRecords('diagnosis')" style="cursor: pointer">
-                  <div class="stat-value">{{ totalDiagnoses }}</div>
-                  <div class="stat-label">已完成诊断</div>
+                <div class="stat-card" @click="goToRecords('cehui')" style="cursor: pointer">
+                  <div class="stat-value">{{ totalCehuis }}</div>
+                  <div class="stat-label">已完成测绘</div>
                 </div>
                 <div class="stat-card" @click="goToRecords('path')" style="cursor: pointer">
                   <div class="stat-value">{{ totalPaths }}</div>
@@ -448,7 +480,7 @@ function handleLogout() {
         <!-- ========== 底部 ========== -->
         <a-layout-footer class="app-footer">
           <div class="footer-content">
-            <span>燕麦智导 &copy; {{ new Date().getFullYear() }} — 智能化学习路径规划平台</span>
+            <span>动麦智导 &copy; {{ new Date().getFullYear() }} — 智能化学习路径规划平台</span>
           </div>
         </a-layout-footer>
       </a-layout>
@@ -464,7 +496,7 @@ function handleLogout() {
   min-height: 100vh;
 }
 
-/* 路由切换顶部进度条（燕麦金硬光，仿 Linear/Vercel 加载态） */
+/* 路由切换顶部进度条（动麦金硬光，仿 Linear/Vercel 加载态） */
 .route-progress {
   position: fixed;
   top: 0;
@@ -560,36 +592,27 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, rgba(212, 163, 115, 0.25), rgba(212, 163, 115, 0.08));
-  border: 1px solid rgba(212, 163, 115, 0.2);
-  border-radius: 10px;
-  font-size: 20px;
-  color: #d4a373;
-  animation: logo-pulse 3s ease-in-out infinite;
+  width: 34px;
+  height: 34px;
+  background: rgba(212, 163, 115, 0.06);
+  border: 1px solid rgba(212, 163, 115, 0.35);
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
-@keyframes logo-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 8px rgba(212, 163, 115, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 18px rgba(212, 163, 115, 0.3);
-  }
+.logo-mark {
+  width: 26px;
+  height: 26px;
+  display: block;
 }
 
 .logo-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: #f8fafc;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   white-space: nowrap;
-  background: linear-gradient(135deg, #f8fafc, #d4a373);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
 }
 
 /* 水平菜单 */

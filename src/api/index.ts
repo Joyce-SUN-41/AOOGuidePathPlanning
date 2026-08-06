@@ -16,7 +16,7 @@ const instance: AxiosInstance = axios.create({
 
 /**
  * AI / 重计算类接口的较长超时（秒）。其余接口沿用全局默认 15s。
- * 这类接口（大模型生成、RAG 检索、AOO 路径优化、认知诊断）常见耗时 > 15s，
+ * 这类接口（大模型生成、RAG 检索、AOO 路径优化、学情测绘）常见耗时 > 15s，
  * 用全局短超时会误判超时。
  */
 const LONG_TIMEOUT_ENDPOINTS = [
@@ -25,7 +25,7 @@ const LONG_TIMEOUT_ENDPOINTS = [
   '/rag',
   '/aoo',
   '/optimize',
-  '/diagnosis',
+  '/cehui',
 ]
 const LONG_TIMEOUT_MS = 120_000
 
